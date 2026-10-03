@@ -262,7 +262,30 @@ restartChecks work = do
     check "coherent backup retains exact immutable capture bytes" (saved==content)
     withCoordinationStore installed $ \store -> mutate store (execute "INSERT INTO restoration_quarantine VALUES ('newer_claim',0,'[[\"operator\",\"b\"]]')" []) [event]
     removeFile capture
-    restoreCoordinationStore installed backup
+    before <- withInspectingStore installed storeIdentity
+    let fenceOf identity = RestoreFence (storeAuthorityEpoch identity) (storeStreamId identity)
+        current = do
+          identity <- withInspectingStore installed storeIdentity
+          pure (fenceOf identity)
+        databaseFiles = mapM (\name -> do
+          present <- doesFileExist (root </> name)
+          if present then Just <$> BS.readFile (root </> name) else pure Nothing)
+          ["coordination.sqlite3","coordination.sqlite3-wal"]
+    unfenced <- databaseFiles
+    expect "restore refuses fencing evidence of another authority epoch" StoreFenceMismatch
+      (restoreCoordinationStore installed backup (RestoreFence "authority_other" (storeStreamId before)))
+    expect "restore refuses fencing evidence of another stream" StoreFenceMismatch
+      (restoreCoordinationStore installed backup (RestoreFence (storeAuthorityEpoch before) "stream_other"))
+    doesFileExist(root </> "restore-in-progress") >>= check "a fence mismatch writes no restoration marker" . not
+    doesFileExist capture >>= check "a fence mismatch republishes no capture" . not
+    databaseFiles >>= check "a fence mismatch leaves the database files unchanged" . (== unfenced)
+    withInspectingStore installed storeIdentity >>= check "a fence mismatch keeps the authority epoch and the stream"
+      . (\identity -> fenceOf identity == fenceOf before)
+    installedIdentity <- restoreCoordinationStore installed backup (fenceOf before)
+    after <- withInspectingStore installed storeIdentity
+    check "restore answers the authority epoch and the stream that it installed"
+      (installedIdentity == StoreRestoration (storeAuthorityEpoch after) (storeStreamId after)
+        && storeAuthorityEpoch after /= storeAuthorityEpoch before && storeStreamId after /= storeStreamId before)
     restored <- BS.readFile capture
     check "restore durably republishes a missing immutable capture" (restored==content)
     let expected=[("newer_claim",0,[("operator","b")]),("older_claim",0,[("operator","a")])]
@@ -270,18 +293,24 @@ restartChecks work = do
       claims <- runRead store reservationOccupancy
       check "slot collision retains both original claims and resource pressure" (claims==expected)
       count store "restorations WHERE effects_uncertain=1" >>= check "lost-interval effects remain explicitly uncertain" . (==1)
-    restoreCoordinationStore installed backup
+    expect "the fence of the Store before the restoration refuses" StoreFenceMismatch
+      (restoreCoordinationStore installed backup (fenceOf before))
+    current >>= restoreCoordinationStore installed backup >>= check "a repeated restore installs new identities" . (/= installedIdentity)
     withCoordinationStore installed $ \store -> runRead store reservationOccupancy >>= check "repeated restore deduplicates only identical original claims" . (==expected)
     -- An actual target publication failure must retain the restoration fence.
     BS.writeFile capture "changed target bytes"
-    expect "different immutable target bytes are never overwritten" StoreIntegrity (restoreCoordinationStore installed backup)
+    fence <- current
+    expect "different immutable target bytes are never overwritten" StoreIntegrity (restoreCoordinationStore installed backup fence)
     doesFileExist(root </> "restore-in-progress") >>= check "failed restoration leaves durable startup fence"
     expect "incomplete restore refuses ordinary serving" StoreUnavailable(withCoordinationStore installed (const(pure())))
   (badPath,badRoot) <- fixture work "missing-current"
   withInstalled badPath $ \installed -> do
     void(withCoordinationStore installed storeIdentity)
     removeFile(badRoot </> "coordination.sqlite3")
-    expect "backup-only recovery without current safety facts refuses" StoreUnavailable(restoreCoordinationStore installed backup)
+    -- The Store cannot open, so the restoration refuses before it compares
+    -- any fence.
+    expect "backup-only recovery without current safety facts refuses" StoreUnavailable
+      (restoreCoordinationStore installed backup (RestoreFence "authority_unread" "stream_unread"))
     doesFileExist(badRoot </> "coordination.sqlite3") >>= check "refused restore does not create an empty replacement current state" . not
   (boundedPath,_) <- fixture work "occupancy-bounds"
   withInstalled boundedPath $ \installed -> withCoordinationStore installed $ \store -> do

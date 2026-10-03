@@ -1015,7 +1015,8 @@ eventChecks work = do
       restoredBearer = BS.replicate 32 98
   withInstalled config $ \installed -> do
     void (backupCoordinationStore installed backup)
-    restoreCoordinationStore installed backup
+    stopped <- withInspectingStore installed storeIdentity
+    void (restoreCoordinationStore installed backup (RestoreFence (storeAuthorityEpoch stopped) (storeStreamId stopped)))
     withCoordinationStore installed $ \store -> do
       rotated <- storeStreamId <$> storeIdentity store
       check "offline restoration rotates the durable event stream" (rotated /= durable)

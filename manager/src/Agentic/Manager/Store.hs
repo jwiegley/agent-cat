@@ -13,7 +13,7 @@ module Agentic.Manager.Store
     AuthorizationWatch, authorizationRevision, advanceAuthorizationRevision, markAuthorizationChange, recallProjection, retainProjection, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, withAuthorizationRequestReadObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, appendReviewRecord, noticeAfterCommit, PostCommit, noPostCommit, takePostCommit, appendPostCommit, Transaction, execute, query, refuseTransaction, refuseBusy, refuseBusyAt, refuseBusyTransaction, repeatChangedRead, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
     commandReceiptColumns, commandRowReceipt,
-    Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, readRetainedEventsWith, retainEvents, StoreBackup (..), backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
+    Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, readRetainedEventsWith, retainEvents, StoreBackup (..), backupCoordinationStore, RestoreFence (..), StoreRestoration (..), restoreCoordinationStore, reservationOccupancy
   ) where
 
 import Agentic.Manager.Store.Admission (StoreAdmission (..))
@@ -94,9 +94,11 @@ data StoreIdentity = StoreIdentity
 
 -- | Fixed storage refusals. SQLite details and bound private data are not public diagnostics.
 -- 'StoreOutputConflict' refuses a backup whose destination already exists.
+-- 'StoreFenceMismatch' refuses a restoration whose fencing evidence names
+-- another authority epoch or stream identity than the stopped Store.
 data StoreFailure = StoreBusy | StoreClosed | StorePoisoned | StoreLimit
   | StoreDeadline | StoreVersion | StoreIntegrity | StoreUnavailable | StoreCleanupUnproven
-  | StoreOutputConflict
+  | StoreOutputConflict | StoreFenceMismatch
   deriving (Eq, Show)
 instance Exception StoreFailure
 
@@ -684,10 +686,26 @@ backupCoordinationStore installed destination = withStoreMode CopyingStore insta
     publishBytes backup ["complete"] binding
     pure (StoreBackup binding digest size)
 
+-- | The identities of the stopped Store that the operator saved after the
+-- last lifetime ended: the authority epoch and the stream identity of an
+-- offline @status@ answer. A process generation is not part of the fence,
+-- because each Store open creates a new one.
+data RestoreFence = RestoreFence { fenceAuthorityEpoch :: !Text, fenceStreamId :: !Text }
+  deriving (Eq, Show)
+
+-- | The identities that a completed restoration installed.
+data StoreRestoration = StoreRestoration { restoredAuthorityEpoch :: !Text, restoredStreamId :: !Text }
+  deriving (Eq, Show)
+
 -- | Restore only with a readable current safety state under the original service lease.
 -- No Store escapes, and an interrupted publication leaves startup fenced by the marker.
-restoreCoordinationStore :: InstalledConfiguration -> FilePath -> IO ()
-restoreCoordinationStore installed source = withStoreMode CopyingStore installed $ \(CoordinationStore _ root db identity _ _ _ _ _ _ _ _ _ _ _) ->
+-- The fence is compared first, with the identities that the copying lifetime
+-- read at its open: it neither migrates nor reconciles a restart. A fence that
+-- names another authority epoch or stream refuses with 'StoreFenceMismatch'
+-- before anything is read from the backup or written to the Store.
+restoreCoordinationStore :: InstalledConfiguration -> FilePath -> RestoreFence -> IO StoreRestoration
+restoreCoordinationStore installed source fence = withStoreMode CopyingStore installed $ \(CoordinationStore _ root db identity _ _ _ _ _ _ _ _ _ _ _) -> do
+  unless (fence == RestoreFence (storeAuthorityEpoch identity) (storeStreamId identity)) (throwIO StoreFenceMismatch)
   bracket (openPrivateRoot "coordination backup" source) closePrivateRoot $ \backup -> do
     validateRootSeparation root [source]
     let expected = TE.encodeUtf8(T.pack(privateRootIdentity root))
@@ -722,6 +740,7 @@ restoreCoordinationStore installed source = withStoreMode CopyingStore installed
         either (\failure -> void(try @SomeException(rollback db)) >> throwIO failure) pure result
         void (reconcileRestart db revision)
       removePrivateFileAt root ["restore-in-progress"]
+      pure (StoreRestoration epoch stream)
 
 withSnapshotDatabase :: PrivateRoot -> Bool -> (SQL.Database -> IO a) -> IO a
 withSnapshotDatabase root readonly action = do

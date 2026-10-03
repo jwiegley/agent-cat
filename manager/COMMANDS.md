@@ -65,8 +65,7 @@ refuse before dispatch with `operation: null`. Errors do not reflect input or
 parser diagnostics. The implemented operations are `issue-credential`,
 `rotate-credential`, `revoke-credential`, `list-credentials`, `status`,
 `check-store`, `check-quarantine`, `release-quarantine`, `reload-profiles`,
-`drain`, `shutdown`, and `backup`. The other recognized operation, `restore`,
-receives `state-conflict` before the CLI reads the configuration.
+`drain`, `shutdown`, `backup`, and `restore`.
 
 `status` and `check-store` are read-only. They change no Store row and append
 nothing to the manager log. `status` returns the authority epoch and stream
@@ -456,6 +455,65 @@ binding last, and a source Store with unchanged rows and unchanged other
 files. It also checks that a second backup into the same destination refuses
 with `output-conflict` and that a backup through the live channel of the next
 lifetime refuses with `state-conflict`.
+
+### Restore
+
+`restore` takes two fields. `backupFile` is the absolute path of a backup
+directory that `backup` published for the same manager root.
+`fencingEvidenceFile` is the absolute path of a private file in a private
+directory of the operator. The file holds the JSON of an offline `status`
+answer that the operator saved after the last lifetime stopped. Only offline
+administration restores. Through the live channel, the serving manager
+refuses `restore` with `state-conflict` and reads neither file.
+
+Offline, with the offline configuration, the CLI installs the configuration
+and so acquires the configuration lease. It then calls `restoreStopped` in
+`Agentic.Manager.LocalAdmin`, which reads the fencing evidence and calls
+`restoreCoordinationStore` in `Agentic.Manager.Store`. The lease is released
+after the restoration. The restoration does not go through
+`administerLocally` and does not open an administering or serving Store
+lifetime. When a manager holds the lease, offline `restore` refuses with
+`storage-unavailable` and changes nothing, as the other offline operations
+do.
+
+The fencing evidence must be a successful `status` answer whose `state` is
+`stopped`. Its `authorityEpoch` and `streamId` must be the identities of the
+stopped Store. Its `processGeneration` is not compared, because each Store
+open creates a new one. `restoreCoordinationStore` compares the two
+identities under the configuration lease, with the identities that its
+copying lifetime reads at the open, before it reads the backup or writes the
+`restore-in-progress` marker. Evidence that is not such an answer, or that
+names another authority epoch or stream, refuses with `state-conflict` and
+changes no Store row and no Store file other than the database and its
+write-ahead companions, which the copying lifetime opens and closes. An
+unreadable evidence file, a backup of another manager root, a backup that
+fails verification and every other failure refuse with
+`storage-unavailable`, as the
+[storage contract](STORAGE.md#restart-and-offline-restoration) describes.
+
+A restoration replaces the database with the database of the backup and
+republishes the captures that the backup holds. It rotates the authority
+epoch and the stream identity, revokes every credential, carries the
+reservations of the current Store and of the backup that are not released
+forward as restoration claims, and records the uncertainty about the effects
+after the backup. The result is the frozen `authorityEpoch` and `streamId`
+that the restoration installed, `credentialsRevoked` `true` and
+`reprovisioned` `false`. `Agentic.Manager.Protocol.LocalAdmin.restored`
+builds the result. The restoration provisions no credential. The operator
+issues new credentials with `issue-credential` before the clients connect
+again.
+
+Case 5 of the `operations` mode of `manager/test/service_http.py` checks a
+restoration from the backup of case 4. A new lifetime completes a new request
+and stops through `shutdown`, and the offline `status` answer becomes the
+fencing evidence. Evidence that names another authority epoch refuses with
+`state-conflict` and changes no row, no other file and no marker. The
+restoration answers new authority and stream identities, and every restored
+credential is revoked. After an offline `issue-credential`, the next lifetime
+answers the old credential with 401, lists neither the new request nor its
+run, serves the run that case 1b completed with its verified result, refuses
+a restore through the live channel with `state-conflict`, and completes a new
+request with the new credential.
 
 ## Credential lifecycle through the serving manager
 

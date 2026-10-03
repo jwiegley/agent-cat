@@ -4,7 +4,7 @@
 -- | A same-user local channel to an existing coordinator, not a second writer.
 module Agentic.Manager.LocalAdmin
   ( withLocalAdministration, callLocalAdministration, administerLocally,
-    AdministrationHooks (..), offlineAdministration, ProfileReload, backupStopped
+    AdministrationHooks (..), offlineAdministration, ProfileReload, backupStopped, restoreStopped
   ) where
 
 import Agentic.Manager.Administration (localAdministrator, recordAdministration, recordAdministrationReceipt)
@@ -15,9 +15,11 @@ import Agentic.Manager.Profile (Diagnostic (UnreadableConfiguration), PublicProf
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Protocol.LocalAdmin
 import Agentic.Manager.Quarantine (StoreState (..), checkQuarantine, releaseQuarantine, reportStatus, reportStoreCheck)
-import Agentic.Manager.Store (CoordinationStore, StoreBackup (..), StoreFailure (StoreLimit, StoreOutputConflict),
-  advanceAuthorizationRevision, backupCoordinationStore, runTransaction, withStoreAdministration, withStoreRequest)
-import Agentic.Runtime (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateRoot, privateRootPath)
+import Agentic.Manager.Store (CoordinationStore, RestoreFence (..), StoreBackup (..),
+  StoreFailure (StoreFenceMismatch, StoreLimit, StoreOutputConflict), StoreRestoration (..),
+  advanceAuthorizationRevision, backupCoordinationStore, restoreCoordinationStore, runTransaction,
+  withStoreAdministration, withStoreRequest)
+import Agentic.Runtime (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateRoot, privateRootPath, readPrivateFileAt)
 import Control.Concurrent.Async (link, withAsync)
 import Control.Exception (IOException, bracket, finally, throwIO, try)
 import Control.Monad (forever, unless, void, when)
@@ -31,7 +33,7 @@ import Network.Socket (Family (AF_UNIX), Socket, SocketType (Stream), SockAddr (
   ShutdownCmd (ShutdownSend), accept, bind, close, connect, defaultProtocol, getPeerCredential,
   listen, shutdown, socket)
 import qualified Network.Socket.ByteString as Net
-import System.FilePath ((</>))
+import System.FilePath (takeDirectory, takeFileName, (</>))
 import System.IO.Error (isDoesNotExistError)
 import System.Posix.Files (FileStatus, deviceID, fileID, fileMode, fileOwner, getSymbolicLinkStatus,
   isSocket, linkCount, removeLink, setFileMode)
@@ -110,7 +112,9 @@ withLocalAdministration store hooks action = do
 -- 'StateConflict'. A @backup@ needs the stopped Store, which offline
 -- administration copies through 'backupStopped' before any other Store
 -- lifetime opens, so this dispatch, and with it the serving manager, refuses
--- it with 'StateConflict'.
+-- it with 'StateConflict'. A @restore@ replaces the stopped Store through
+-- 'restoreStopped' in offline administration, so this dispatch refuses it
+-- with 'StateConflict' too.
 administerLocally :: AdministrationHooks -> CoordinationStore -> LocalAdminRequest -> IO (BS.ByteString, IO ())
 administerLocally hooks store request = case request of
   Status -> answered (hookState hooks >>= \state -> reportStatus state store)
@@ -125,7 +129,7 @@ administerLocally hooks store request = case request of
   Drain -> maybe refused (answered . drainServing store) (hookDrain hooks)
   Shutdown -> maybe refused (shutdownServing store) (hookShutdown hooks)
   Backup _ -> refused
-  OtherAdmin _ -> answered (administerCredentials store request)
+  Restore _ _ -> refused
   where
     answered = fmap (\response -> (response, pure ()))
     refused = pure (adminError (Just (adminOperation request)) StateConflict, pure ())
@@ -219,6 +223,48 @@ backupStopped installed destination = do
     Right copied -> pure (adminSuccess "backup" (backedUp (backupBinding copied) (backupSha256 copied) (backupBytes copied)))
     Left StoreOutputConflict -> pure (adminError (Just "backup") OutputConflict)
     Left failure -> throwIO failure
+
+-- | Offline @restore@ from the backup directory under the configuration lease
+-- of the installed configuration. The fencing evidence file is a private
+-- file that holds the offline @status@ answer which the operator saved after
+-- the last lifetime stopped. Its @state@ must be @stopped@, and its
+-- @authorityEpoch@ and @streamId@ must name the identities of the stopped
+-- Store. Its @processGeneration@ is not compared, because each Store open
+-- creates a new one. 'restoreCoordinationStore' compares the two identities
+-- under its configuration lease, at the open of its copying lifetime and
+-- before it writes the restoration marker. Evidence that is not such an
+-- answer, or that names other identities, refuses with 'StateConflict' and
+-- changes nothing. A completed restoration answers the frozen result that
+-- 'restored' defines. Every other failure propagates to the caller.
+restoreStopped :: InstalledConfiguration -> FilePath -> FilePath -> IO BS.ByteString
+restoreStopped installed source evidenceFile = do
+  evidence <- bracket (openPrivateRoot "restore fencing evidence" (takeDirectory evidenceFile)) closePrivateRoot $ \parent ->
+    readPrivateFileAt parent [takeFileName evidenceFile] 1048576
+  case fencingEvidence evidence of
+    Nothing -> pure conflict
+    Just fence -> do
+      result <- try @StoreFailure (restoreCoordinationStore installed source fence)
+      case result of
+        Right installedIdentity -> pure (adminSuccess "restore"
+          (restored (restoredAuthorityEpoch installedIdentity) (restoredStreamId installedIdentity)))
+        Left StoreFenceMismatch -> pure conflict
+        Left failure -> throwIO failure
+  where
+    conflict = adminError (Just "restore") StateConflict
+
+-- | The authority epoch and the stream identity of an offline @status@
+-- answer that reports the state @stopped@.
+fencingEvidence :: BS.ByteString -> Maybe RestoreFence
+fencingEvidence bytes = case decodeStrictValue bytes of
+  Right (Object fields)
+    | KM.lookup "version" fields == Just (Number 1)
+    , KM.lookup "operation" fields == Just (String "status")
+    , KM.lookup "ok" fields == Just (Bool True)
+    , Just (Object result) <- KM.lookup "result" fields
+    , KM.lookup "state" result == Just (String "stopped")
+    , Just (String epoch) <- KM.lookup "authorityEpoch" result
+    , Just (String stream) <- KM.lookup "streamId" result -> Just (RestoreFence epoch stream)
+  _ -> Nothing
 
 -- | Nothing selects the existing offline path. A configured channel failure
 -- never reopens the Store or retries the request through another path.

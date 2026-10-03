@@ -490,16 +490,18 @@ remain inert across a new configuration lifetime. Explicit new requests remain
 available. Changed declarations or unavailable bytes do not become eligible.
 
 `backupCoordinationStore installed destination` and
-`restoreCoordinationStore installed source` are local offline operations exposed
-through `Agentic.Manager`. Both directories are outside manager storage. First
+`restoreCoordinationStore installed source fence` are local offline operations
+exposed through `Agentic.Manager`. Both directories are outside manager storage. First
 finish Admission using its explicit shutdown policy and close its Store through
 the original owner. A live or quarantined Store retains its slot and lease and
 refuses the offline operation. No listener or network boundary exists at this
 layer. The offline `backup` operation of local administration calls
 `backupCoordinationStore` under the configuration lease, and a serving manager
 refuses `backup`, as the
-[command contract](COMMANDS.md#backup) describes. `restore` has no local
-administration operation.
+[command contract](COMMANDS.md#backup) describes. The offline `restore`
+operation calls `restoreCoordinationStore` under the configuration lease with
+the fence that its evidence file names, and a serving manager refuses
+`restore`, as the [command contract](COMMANDS.md#restore) describes.
 
 Backup requires an initialized current-schema target. Its destination is a
 fresh private directory: the backup creates it with mode 0700 in an existing
@@ -531,6 +533,16 @@ therefore stay unverifiable for `check-quarantine`. An operator takes a
 backup with no active reservation, as offline `status` reports, to avoid
 such claims.
 
+The fence is a `RestoreFence`: the authority epoch and the stream identity of
+the stopped Store, as an offline `status` answer reports them. A restoration
+compares the fence first, with the identities that its copying lifetime read
+at the open. That lifetime neither migrates nor reconciles a restart. A fence
+that names another authority epoch or stream refuses with
+`StoreFenceMismatch` before the restoration opens the backup. No row,
+identity, capture or marker changes. The copying lifetime only opens and
+closes the database and its write-ahead companions. A process generation is not part of the fence, because each
+Store open creates a new one.
+
 Restore requires that same root and a readable current safety state. Missing,
 corrupt, incomplete or over-budget current safety facts refuse before database
 publication. Backup-only recovery of an unreadable target is not supported.
@@ -545,11 +557,14 @@ the bounded original safety claims. It verifies source captures, refuses
 replacement of different immutable target bytes, restores through SQLite backup,
 rotates authority and stream identities, revokes every restored credential and
 records uncertainty about effects newer than the backup. Completion removes the
-startup fence only after these commits. An exception or interruption leaves
+startup fence only after these commits, and the restoration then returns a
+`StoreRestoration` with the new authority epoch and stream identity. An exception or interruption leaves
 normal Store opening refused. Do not delete that marker to assert completion.
 Automated repair of an interrupted restoration is not provided by this API.
 
-Local reprovisioning must use the existing registered client identity. Fresh
+Local administration reprovisions through `issue-credential`, which registers
+a new client with a new credential. A restored credential cannot be rotated,
+because rotation requires a credential that is not revoked. Fresh
 credentials do not validate an old mutation key because Commands checks its
 epoch before ledger lookup. A completed restore does not imply that lost-interval
 effects were absent or undone. Clients must reconcile rather than inventing

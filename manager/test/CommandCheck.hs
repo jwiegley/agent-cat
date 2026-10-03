@@ -1462,7 +1462,7 @@ credentialAdministrationChecks work = withFixture work "credentials" (64*command
   adminRefused "exclusive publication collision" Admin.OutputConflict store (issue destination)
   BS.readFile destination >>= check "collision never replaces one-time bytes" . (== bearer)
   scalarInt store "SELECT count(*) FROM credentials" >>= check "collision never activates another credential" . (==4)
-  adminRefused "other admin owner not falsely implemented" Admin.StateConflict store (Admin.OtherAdmin "restore")
+  adminRefused "credential owner leaves restore to its owner" Admin.StateConflict store (Admin.Restore (work </> "backup") (work </> "evidence"))
   adminRefused "credential owner leaves backup to its owner" Admin.StateConflict store (Admin.Backup (work </> "backup"))
   adminRefused "credential owner leaves drain to its owner" Admin.StateConflict store Admin.Drain
   adminRefused "credential owner leaves shutdown to its owner" Admin.StateConflict store Admin.Shutdown
@@ -1524,6 +1524,10 @@ credentialAdministrationChecks work = withFixture work "credentials" (64*command
     (Admin.Backup (work </> "live-backup"))
   check "the dispatch of a Store lifetime, a serving one included, refuses backup"
     (adminField "ok" liveBackup == Bool False && adminField "code" (adminField "error" liveBackup) == String "state-conflict")
+  liveRestore <- answeredLocally offlineAdministration {hookState = pure StoreServing, hookShutdown = Just (pure ())} store
+    (Admin.Restore (work </> "live-backup") (work </> "live-evidence"))
+  check "the dispatch of a Store lifetime, a serving one included, refuses restore"
+    (adminField "ok" liveRestore == Bool False && adminField "code" (adminField "error" liveRestore) == String "state-conflict")
   offlineShutdown <- answeredLocally offlineAdministration store Admin.Shutdown
   check "a dispatch without a stop request refuses shutdown"
     (adminField "ok" offlineShutdown == Bool False && adminField "code" (adminField "error" offlineShutdown) == String "state-conflict")

@@ -125,6 +125,13 @@ etag view=Just("\""<>draftRevision view<>"\"")
 body :: Text -> BS.ByteString
 body operationName'=encoded(object["operation" .= operationName'])
 
+-- | The fence of an offline restoration: the authority epoch and the stream
+-- identity of the stopped Store, read through a copying lifetime.
+currentFence :: InstalledConfiguration -> IO RestoreFence
+currentFence installed = do
+  identity <- withInspectingStore installed storeIdentity
+  pure (RestoreFence (storeAuthorityEpoch identity) (storeStreamId identity))
+
 restartInterruptionChecks :: FilePath -> FilePath -> IO ()
 restartInterruptionChecks work native = do
   withFixture work native "restore-interruption" 1 [] (const(pure()))
@@ -134,7 +141,8 @@ restartInterruptionChecks work native = do
   bracket (installConfiguration config >>= right) closeConfiguration $ \installed -> do
     void(backupCoordinationStore installed backup)
     Audit.withReviewAudit "restore-marker" $ \audit -> do
-      original <- async(restoreCoordinationStore installed backup)
+      fence <- currentFence installed
+      original <- async(restoreCoordinationStore installed backup fence)
       (do
         originalThread <- Audit.waitReviewed audit
         assertion "restore marker belongs to original retained Async" (originalThread==asyncThreadId original)
@@ -188,7 +196,7 @@ restartNativeChecks work native = do
         assertion "revalidated durable queue prepares fresh native workers in FIFO order" (reviewRequest reviewA==draftId queuedA && reviewRequest reviewB==draftId queuedB)
       number owner "SELECT count(*) FROM reservations WHERE state!='released'" >>= assertion "original newly prepared owners join before offline restore" . (==0)
       mutate owner(execute "INSERT INTO restoration_quarantine VALUES ('lost_after_backup',0,'[[\"operator\",\"b\"]]')" [])
-    restoreCoordinationStore installed backup
+    void(currentFence installed >>= restoreCoordinationStore installed backup)
     withCoordinationStore installed $ \owner -> do
       restoredIdentity <- storeIdentity owner
       assertion "offline restoration rotates epoch and stream" (storeAuthorityEpoch restoredIdentity/=storeAuthorityEpoch originalIdentity && storeStreamId restoredIdentity/=storeStreamId originalIdentity)
@@ -211,7 +219,7 @@ restartNativeChecks work native = do
         review <- await(awaitReview live) >>= right
         assertion "genuinely new consented disjoint work can prepare after restoration" (reviewRequest review==draftId eligible)
         number owner "SELECT count(*) FROM start_intents" >>= assertion "restart and restoration fabricate no approval or native start" . (==0)
-    restoreCoordinationStore installed backup
+    void(currentFence installed >>= restoreCoordinationStore installed backup)
     withCoordinationStore installed $ \owner -> do
       occupancy <- runRead owner reservationOccupancy
       assertion "repeated restore retains original affected-resource and slot facts" (occupancy==[("lost_after_backup",0,[("operator","b")])])

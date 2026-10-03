@@ -5,7 +5,7 @@
 -- | The frozen local stdin request and metadata-only response vocabulary.
 module Agentic.Manager.Protocol.LocalAdmin
   ( LocalAdminRequest (..), adminOperation, validAdminRequest, decodeLocalAdminRequest,
-    AdminFailure (..), adminFailureCode, adminError, adminSuccess, reloadedProfiles, stoppedManager, backedUp,
+    AdminFailure (..), adminFailureCode, adminError, adminSuccess, reloadedProfiles, stoppedManager, backedUp, restored,
     CredentialMetadata (..), validCredentialMetadata, validLocalFile
   ) where
 
@@ -55,7 +55,11 @@ data LocalAdminRequest
     -- the captures and the completion binding last. Only offline
     -- administration takes a backup. A serving manager refuses it.
     Backup !FilePath
-  | OtherAdmin !Text
+  | -- | Replace the stopped Store with a backup: the backup directory and the
+    -- private file that holds the offline @status@ answer which the operator
+    -- saved after the last lifetime stopped. Only offline administration
+    -- restores. A serving manager refuses it.
+    Restore !FilePath !FilePath
 
 -- | Fixed refusals. Storage failure makes no assertion about publication or COMMIT.
 -- 'CleanupUnverified' refuses a quarantine release whose cleanup evidence,
@@ -93,10 +97,7 @@ adminOperation request = case request of
   Drain -> "drain"
   Shutdown -> "shutdown"
   Backup _ -> "backup"
-  OtherAdmin name -> name
-
-otherOperations :: [Text]
-otherOperations = ["restore"]
+  Restore _ _ -> "restore"
 
 validLocalFile :: FilePath -> Bool
 validLocalFile path = let value = T.pack path in T.length value >= 2 && T.length value <= 8192
@@ -129,7 +130,7 @@ validAdminRequest request = case request of
   Drain -> True
   Shutdown -> True
   Backup path -> validLocalFile path
-  OtherAdmin name -> name `elem` otherOperations
+  Restore backup evidence -> validLocalFile backup && validLocalFile evidence
 
 decodeLocalAdminRequest :: BS.ByteString -> Either AdminFailure LocalAdminRequest
 decodeLocalAdminRequest bytes
@@ -138,7 +139,7 @@ decodeLocalAdminRequest bytes
       value <- either (\failure -> Left (if failure == "duplicate-field" then DuplicateField else MalformedRequest)) Right (decodeStrictValue bytes)
       fields <- case value of Object fields -> Right fields; _ -> Left MalformedRequest
       operation <- case KM.lookup "operation" fields of Just (String name) -> Right name; _ -> Left MalformedRequest
-      unless (operation `elem` (["issue-credential","rotate-credential","revoke-credential","list-credentials","status","check-store","check-quarantine","release-quarantine","reload-profiles","drain","shutdown","backup"] <> otherOperations)) (Left UnknownOperation)
+      unless (operation `elem` ["issue-credential","rotate-credential","revoke-credential","list-credentials","status","check-store","check-quarantine","release-quarantine","reload-profiles","drain","shutdown","backup","restore"]) (Left UnknownOperation)
       case KM.lookup "version" fields of
         Just (Number 1) -> Right ()
         Just (Number _) -> Left UnsupportedVersion
@@ -176,13 +177,9 @@ parseRequest operation fields = case operation of
   "drain" -> pure Drain
   "shutdown" -> pure Shutdown
   "backup" -> Backup <$> fields .: "outputFile"
-  _ -> do
-    case operation of
-      "restore" -> localFile "backupFile" >> localFile "fencingEvidenceFile"
-      _ -> pure ()
-    pure (OtherAdmin operation)
+  "restore" -> Restore <$> fields .: "backupFile" <*> fields .: "fencingEvidenceFile"
+  _ -> fail "operation"
   where
-    localFile key = fields .: key >>= \path -> unless (validLocalFile path) (fail "path")
     parseScope name = case lookup name [(scopeName s,s) | s <- [Observe,Submit,Control,ExportScope]] of
       Just scope -> pure scope
       Nothing -> fail "scope"
@@ -224,6 +221,13 @@ adminSuccess operation result =
 -- after this reply.
 stoppedManager :: BS.ByteString
 stoppedManager = adminSuccess "shutdown" (object ["state" .= ("stopped" :: Text)])
+
+-- | The frozen result of @restore@ from the authority epoch and the stream
+-- identity that the restoration installed. The restoration revokes every
+-- credential and provisions none.
+restored :: Text -> Text -> Value
+restored epoch stream = object
+  ["authorityEpoch" .= epoch, "streamId" .= stream, "credentialsRevoked" .= True, "reprovisioned" .= False]
 
 -- | The result of @reload-profiles@ from the identifier and revision of each
 -- installed profile: the identifiers in ascending order and the profile-set

@@ -4469,10 +4469,10 @@ def operations_checks():
           "and refused a duplicate profile with state-conflict;", len(before), "Store files kept their sizes and modification times",
           flush=True)
     print("PASS operations: reload-profiles case 1 held through the TLS 1.3 manager", flush=True)
-    operations_drain(with_second)
+    operations_drain(with_second, run)
 
 
-def operations_drain(with_second):
+def operations_drain(with_second, completed):
     """Case 2 is drain through the live channel of the second lifetime: two
     owned runs wait at their person questions, a third request is in review
     and a fourth waits for capacity. After the drain, the review is stopped
@@ -4481,7 +4481,8 @@ def operations_drain(with_second):
     stream answer after both runs end. A third lifetime prepares a new review
     for the returned request. Each of the three holders is of its own
     profile with its own resource key, so that they hold the three execution
-    reservations at once."""
+    reservations at once. completed is the run that case 1b completed, which
+    case 5 reads after the restoration."""
     drain = {"version": 1, "operation": "drain"}
     status_request = {"version": 1, "operation": "status"}
     base = with_second["profiles"][0]
@@ -4686,6 +4687,7 @@ def operations_drain(with_second):
           "and the receipt", replies[0]["body"]["result"], "of each", flush=True)
     print("PASS operations: drain case 2 held through the TLS 1.3 manager", flush=True)
     operations_restart(authorized, waiting, cancelled_at_shutdown, lifetime, stop)
+    operations_restore(authorized, completed, lifetime, stop)
 
 
 def operations_shutdown(process, client, authorized, reviewed, workflow, waiting):
@@ -4908,6 +4910,146 @@ def operations_restart(authorized, waiting, shutdown, lifetime, stop):
           len(lifetimes), "lifetimes ended with their shutdown notices,", len(receipts), "commands have one receipt each,",
           "and each of", len(starts), "runs has one start relay", flush=True)
     print("PASS operations: shutdown case 3 and backup case 4 held through the TLS 1.3 manager", flush=True)
+
+
+def operations_restore(authorized, completed, lifetime, stop):
+    """Case 5 is restore from the backup of case 4. A new lifetime
+    completes a new request and stops through shutdown. The operator saves
+    the offline status answer as the fencing evidence. Evidence that names
+    another authority epoch refuses with state-conflict and changes nothing.
+    The restoration from the backup answers the frozen result with new
+    authority and stream identities. After an offline issue-credential, the
+    next lifetime refuses the old credential with 401, has no trace of the
+    new request and its run, serves the run that case 1b completed with its
+    verified result, refuses a restore through the live channel with
+    state-conflict, and completes a new request."""
+    served = json.loads(config.read_text())
+    offline_config = work / "offline-shutdown.json"
+    root = Path(served["managerRoot"])
+    backup = work / "backup-case-4"
+    database = ("coordination.sqlite3", "coordination.sqlite3-wal", "coordination.sqlite3-shm")
+
+    def other_files():
+        return {str(path): (path.stat().st_size, path.stat().st_mtime_ns, hashlib.sha256(path.read_bytes()).hexdigest())
+                for path in root.rglob("*") if path.is_file() and path.name not in database}
+
+    def complete_request(capabilities, authorized):
+        status, catalogue, raw = request("/v1/workflows?profileId=profile_1", authorized)
+        assert status == 200, ("workflows", status)
+        validate("WorkflowPage", catalogue, raw)
+        workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+        body = json.dumps({"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                           "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]},
+                          separators=(",", ":")).encode()
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        status, created, raw = request("/v1/requests", authorized | {
+            "Content-Type": "application/json", "Idempotency-Key": key}, method="POST", payload=body)
+        assert status == 201, ("request creation", status, created.get("code"))
+        validate("Request", created, raw)
+        return created, run_mixed(created, workflow, capabilities, authorized)
+
+    # 5a. After the backup, a new lifetime completes a new request and stops
+    # through shutdown. The offline status answer is the fencing evidence.
+    process, output, errors = lifetime(4)
+    try:
+        wait_ready(process)
+        status, capabilities, raw = request("/v1/capabilities", authorized)
+        assert status == 200
+        validate("Capabilities", capabilities, raw)
+        lost_request, lost_run = complete_request(capabilities, authorized)
+        assert administration({"version": 1, "operation": "shutdown"})["result"] == {"state": "stopped"}
+        process.wait(timeout=60)
+    finally:
+        stop(4, process, output, errors)
+    stopped = administration({"version": 1, "operation": "status"}, path=offline_config)
+    assert stopped["result"]["state"] == "stopped" and stopped["result"]["activeReservations"] == 0, stopped["result"]
+    assert stopped["result"]["authorityEpoch"] == capabilities["authorityEpoch"], (stopped["result"], capabilities["authorityEpoch"])
+    evidence = work / "fencing-evidence.json"
+    # The frozen parser reads numbers as Decimal. The status answer has only
+    # the integer activeReservations.
+    evidence.write_text(json.dumps(stopped, default=int) + "\n")
+    evidence.chmod(0o600)
+    print("PASS operations case 5a: after the backup, request", lost_request["id"], "completed as run", lost_run,
+          "and the shutdown stopped the lifetime; the offline status answer with authority epoch",
+          stopped["result"]["authorityEpoch"], "and stream", stopped["result"]["streamId"], "is the fencing evidence", flush=True)
+
+    # 5b. Evidence that names another authority epoch refuses and changes
+    # nothing: no row, no other file and no restoration marker.
+    restore = {"version": 1, "operation": "restore", "backupFile": str(backup), "fencingEvidenceFile": str(evidence)}
+    mismatched = work / "fencing-evidence-other.json"
+    mismatched.write_text(json.dumps(dict(stopped, result=dict(stopped["result"], authorityEpoch="authority_other")), default=int) + "\n")
+    mismatched.chmod(0o600)
+    rows_before, _ = coordination_dump(root)
+    files_before = other_files()
+    refused = administration(dict(restore, fencingEvidenceFile=str(mismatched)), refused="state-conflict", path=offline_config)
+    rows_after, _ = coordination_dump(root)
+    assert rows_after == rows_before, "a refused restore changed a row of the Store"
+    assert other_files() == files_before, "a refused restore changed a Store file other than the database"
+    assert not (root / "restore-in-progress").exists(), "a refused restore left its marker"
+    again = administration({"version": 1, "operation": "status"}, path=offline_config)["result"]
+    assert (again["authorityEpoch"], again["streamId"]) == (stopped["result"]["authorityEpoch"], stopped["result"]["streamId"]), again
+    print("PASS operations case 5b: fencing evidence of another authority epoch refused with", refused["error"]["code"],
+          "and changed none of", len(rows_before), "dump lines or", len(files_before), "other Store files", flush=True)
+
+    # 5c. The restoration answers the frozen result with new identities and
+    # revokes every restored credential.
+    restored = administration(restore, path=offline_config)["result"]
+    assert restored["credentialsRevoked"] is True and restored["reprovisioned"] is False, restored
+    assert restored["authorityEpoch"] != stopped["result"]["authorityEpoch"], restored
+    assert restored["streamId"] != stopped["result"]["streamId"], restored
+    assert not (root / "restore-in-progress").exists(), "a completed restore left its marker"
+    current = administration({"version": 1, "operation": "status"}, path=offline_config)["result"]
+    assert (current["authorityEpoch"], current["streamId"]) == (restored["authorityEpoch"], restored["streamId"]), (current, restored)
+    listed = administration({"version": 1, "operation": "list-credentials"}, path=offline_config)["result"]["credentials"]
+    assert listed and all(item["state"] == "revoked" for item in listed), [item["state"] for item in listed]
+    administration({"version": 1, "operation": "issue-credential", "label": "Operations restore",
+                    "scopes": ["observe", "submit", "control"], "profileIds": ["profile_1", "profile_2", "profile_3"],
+                    "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential-restore")}, path=offline_config)
+    reprovisioned = {"Authorization": "Bearer " + (work / "credential-restore").read_bytes().decode("ascii")}
+    print("PASS operations case 5c: restore answered", restored, "and offline status reports those identities; all",
+          len(listed), "restored credentials are revoked, and issue-credential provisioned a new one", flush=True)
+
+    # 5d. The next lifetime serves the restored history to the new credential.
+    process, output, errors = lifetime(5)
+    try:
+        wait_ready(process)
+        status, problem, _ = request("/v1/capabilities", authorized)
+        assert status == 401, ("the old credential after the restoration", status, problem.get("code"))
+        status, capabilities, raw = request("/v1/capabilities", reprovisioned)
+        assert status == 200, ("the reprovisioned credential", status)
+        validate("Capabilities", capabilities, raw)
+        assert capabilities["authorityEpoch"] == restored["authorityEpoch"], capabilities["authorityEpoch"]
+        # An unknown request answers as an unauthorized one and an unknown run
+        # as an unavailable one, so the collections show that the work after
+        # the backup is absent.
+        listed = {}
+        for collection, schema in (("/v1/requests", "RequestPage"), ("/v1/runs", "RunPage")):
+            listed[collection], path = set(), collection
+            while path is not None:
+                status, page, raw, _ = fetch(path, reprovisioned)
+                assert status == 200, (collection, status, page.get("code"))
+                validate(schema, page, raw)
+                listed[collection] |= {item["id"] for item in page["items"]}
+                path = page["page"]["next"]
+        assert lost_request["id"] not in listed["/v1/requests"] and lost_run not in listed["/v1/runs"], "the work after the backup"
+        assert completed in listed["/v1/runs"], ("the run of case 1b is not listed", completed)
+        for path, expected in (("/v1/requests/" + lost_request["id"], (403, "insufficient-scope")),
+                               ("/v1/runs/" + lost_run, (404, "unavailable-resource"))):
+            status, problem, _ = request(path, reprovisioned)
+            assert (status, problem["code"]) == expected, ("the work after the backup", path, status, problem.get("code"))
+        client = mixed_client(capabilities, reprovisioned)
+        run_view, _, _ = client[0]("/v1/runs/" + completed, "Run")
+        assert run_view["requestId"] in listed["/v1/requests"], ("the request of case 1b is not listed", run_view["requestId"])
+        artifact = verified_download(completed, client, reprovisioned)
+        live = administration(restore, refused="state-conflict")
+        fresh, fresh_run = complete_request(capabilities, reprovisioned)
+        print("PASS operations case 5d: the old credential received 401; request", lost_request["id"], "and run", lost_run,
+              "are absent from", len(listed["/v1/requests"]), "listed requests and", len(listed["/v1/runs"]), "listed runs; run", completed, "of case 1b serves its verified result", artifact["id"], "of", artifact["bytes"],
+              "bytes; a restore through the live channel refused with", live["error"]["code"] + "; and request", fresh["id"],
+              "completed as run", fresh_run, flush=True)
+    finally:
+        stop(5, process, output, errors)
+    print("PASS operations: restore case 5 held through the TLS 1.3 manager", flush=True)
 
 
 if operations_mode:

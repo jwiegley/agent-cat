@@ -120,6 +120,41 @@ assert backed["result"] == {"backupId": "backup_" + hashlib.sha256((backup_dir /
 conflict = call(BACKUP)
 assert not conflict["ok"] and conflict["error"]["code"] == "output-conflict", conflict
 assert (backup_dir / "coordination.sqlite3").read_bytes() == database, "a refused backup changed the earlier copy"
+# Offline restore compares the fencing evidence, a saved offline status
+# answer, with the identities of the stopped Store before it changes
+# anything. Evidence of another authority epoch, evidence of a serving
+# state and evidence that is not a status answer refuse with state-conflict.
+# The Store keeps its identities and every file other than the database and
+# its write-ahead companions, which the copying lifetime opens and closes.
+DATABASE = ("coordination.sqlite3", "coordination.sqlite3-wal", "coordination.sqlite3-shm")
+
+
+def other_store_files():
+    return {name: value for name, value in store_files().items() if Path(name).name not in DATABASE}
+
+
+def evidence(name, value):
+    path = work / name
+    # The frozen parser reads numbers as Decimal. The status answer has
+    # only the integer activeReservations.
+    path.write_text(json.dumps(value, default=int) + "\n")
+    path.chmod(0o600)
+    return str(path)
+
+
+RESTORE = {"version": 1, "operation": "restore", "backupFile": str(backup_dir)}
+others = other_store_files()
+for name, value in [
+    ("cli-evidence-epoch", dict(status, result=dict(status["result"], authorityEpoch="authority_other"))),
+    ("cli-evidence-serving", dict(status, result=dict(status["result"], state="serving"))),
+    ("cli-evidence-operation", dict(status, operation="check-store")),
+]:
+    fenced = call({**RESTORE, "fencingEvidenceFile": evidence(name, value)})
+    assert not fenced["ok"] and fenced["operation"] == "restore" and fenced["error"]["code"] == "state-conflict", (name, fenced)
+assert other_store_files() == others, "a refused restore changed a Store file"
+assert not (Path(configuration["managerRoot"]) / "restore-in-progress").exists(), "a refused restore wrote its marker"
+unchanged = call({"version": 1, "operation": "status"})["result"]
+assert (unchanged["authorityEpoch"], unchanged["streamId"]) == (status["result"]["authorityEpoch"], status["result"]["streamId"]), unchanged
 
 holding = subprocess.Popen([str(owner), "hold-credentials", str(original)],
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -137,6 +172,9 @@ try:
     held_backup = call({**BACKUP, "outputFile": str(work / "cli-held-backup")})
     assert not held_backup["ok"] and held_backup["error"]["code"] == "storage-unavailable", held_backup
     assert not (work / "cli-held-backup").exists(), "a refused backup created its destination"
+    # Offline restore takes the lease too, so a Store owner refuses it.
+    held_restore = call({**RESTORE, "fencingEvidenceFile": evidence("cli-evidence-held", status)})
+    assert not held_restore["ok"] and held_restore["error"]["code"] == "storage-unavailable", held_restore
 finally:
     holding.terminate()
     holding.communicate(timeout=10)
@@ -159,7 +197,7 @@ assert rotated["ok"] and rotated["result"]["credential"]["clientId"] == issued["
 revoked = call({"version": 1, "operation": "revoke-credential",
                 "credentialId": rotated["result"]["credential"]["credentialId"]})
 assert revoked["ok"]
-print("PASS frozen stdin CLI, offline status, check-store, check-quarantine and release-quarantine, offline reload-profiles validation without the lease or the Store, offline shutdown without the Store, offline backup into a new directory with the output-conflict refusal, exclusive offline ownership, private issuance and revocation")
+print("PASS frozen stdin CLI, offline status, check-store, check-quarantine and release-quarantine, offline reload-profiles validation without the lease or the Store, offline shutdown without the Store, offline backup into a new directory with the output-conflict refusal, offline restore refusals of evidence that does not fence the Store, exclusive offline ownership, private issuance and revocation")
 
 # A separate, short private namespace avoids Unix socket path limits on the data root.
 admin_root = Path(tempfile.mkdtemp(prefix="admin.", dir=os.environ["TMPDIR"]))
@@ -223,6 +261,9 @@ try:
     live_backup = call({**BACKUP, "outputFile": str(work / "cli-live-backup")})
     assert not live_backup["ok"] and live_backup["error"]["code"] == "state-conflict", live_backup
     assert not (work / "cli-live-backup").exists(), "a refused live backup created its destination"
+    # The live channel refuses restore before it reads the evidence.
+    live_restore = call({**RESTORE, "fencingEvidenceFile": str(work / "cli-live-evidence")})
+    assert not live_restore["ok"] and live_restore["error"]["code"] == "state-conflict", live_restore
     for payload, code, eof in [
         (b'{', "malformed-request", True),
         (b'{', "malformed-request", False),
@@ -357,4 +398,4 @@ for symbolic in [False, True]:
     assert sentinel.read_bytes() == b"keep"
     assert address.is_symlink() if symbolic else address.read_bytes() == b"keep"
     address.unlink()
-print("PASS live original-Store administration, live status, check-store and reload-profiles, the live backup refusal, retained-response revocation, endpoint ownership and no offline fallback")
+print("PASS live original-Store administration, live status, check-store and reload-profiles, the live backup and restore refusals, retained-response revocation, endpoint ownership and no offline fallback")

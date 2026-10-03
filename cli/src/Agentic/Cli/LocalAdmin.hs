@@ -5,7 +5,7 @@
 module Agentic.Cli.LocalAdmin (runLocalAdmin) where
 
 import Agentic.Manager.Configuration
-import Agentic.Manager.LocalAdmin (administerLocally, backupStopped, callLocalAdministration, offlineAdministration)
+import Agentic.Manager.LocalAdmin (administerLocally, backupStopped, callLocalAdministration, offlineAdministration, restoreStopped)
 import Agentic.Manager.Profile (Diagnostic (UnreadableConfiguration), publicId, publicRevision)
 import Agentic.Manager.Protocol.LocalAdmin
 import Agentic.Manager.Quarantine (unavailableStoreCheck)
@@ -20,8 +20,7 @@ import System.IO (stdin, stdout)
 
 -- A configured channel is authoritative even when unavailable. Only omission
 -- selects offline ownership, including the normal restart reconciliation.
--- Operations without an implementation refuse before either path. Offline
--- reload-profiles validates the given file through the loader and answers
+-- Offline reload-profiles validates the given file through the loader and answers
 -- before the configuration lease and the Store are acquired. Offline drain
 -- has no serving lifetime to drain and refuses at the same point. Offline
 -- shutdown acquires the configuration lease, which proves that no manager
@@ -29,7 +28,10 @@ import System.IO (stdin, stdout)
 -- opening the Store, so it changes nothing. A live manager refuses backup.
 -- Offline backup holds the configuration lease and copies the Store through
 -- its copying lifetime, so it neither reconciles a restart nor goes through
--- the dispatch of the other operations.
+-- the dispatch of the other operations. Offline restore does the same: it
+-- holds the configuration lease, compares the fencing evidence with the
+-- identities of the stopped Store and replaces the Store from the backup. A
+-- live manager refuses restore.
 runLocalAdmin :: (FilePath -> IO (Either Diagnostic Configuration)) -> FilePath -> IO ()
 runLocalAdmin load path = do
   input <- try @IOException (BS.hGet stdin 2097153)
@@ -41,29 +43,29 @@ runLocalAdmin load path = do
         result <- try @IOException $ try @StoreFailure $ try @Diagnostic $ do
           if not (validLocalFile path)
             then pure (adminError (Just (adminOperation request)) MalformedRequest)
-            else case request of
-              OtherAdmin _ -> pure (adminError (Just (adminOperation request)) StateConflict)
-              _ -> do
-                configuration <- load path
-                case (request, configuration) of
-                  (ReloadProfiles, Left UnreadableConfiguration) -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
-                  (ReloadProfiles, Left _) -> pure (adminError (Just (adminOperation request)) StateConflict)
-                  (_, Left _) -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
-                  (_, Right value) -> do
-                    live <- callLocalAdministration value bytes
-                    case (live, request) of
-                      (Just response, _) -> pure response
-                      (Nothing, ReloadProfiles) -> validateOffline value
-                      (Nothing, Drain) -> pure (adminError (Just (adminOperation request)) StateConflict)
-                      (Nothing, _) -> do
-                        installed <- installConfiguration value
-                        case (installed, request) of
-                          (Left _, _) -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
-                          (Right owner, Shutdown) -> closeConfiguration owner >> pure stoppedManager
-                          (Right owner, Backup destination) -> bracket (pure owner) closeConfiguration $ \active ->
-                            backupStopped active destination
-                          (Right owner, _) -> bracket (pure owner) closeConfiguration $ \active ->
-                            offline request (withCoordinationStore active)
+            else do
+              configuration <- load path
+              case (request, configuration) of
+                (ReloadProfiles, Left UnreadableConfiguration) -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
+                (ReloadProfiles, Left _) -> pure (adminError (Just (adminOperation request)) StateConflict)
+                (_, Left _) -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
+                (_, Right value) -> do
+                  live <- callLocalAdministration value bytes
+                  case (live, request) of
+                    (Just response, _) -> pure response
+                    (Nothing, ReloadProfiles) -> validateOffline value
+                    (Nothing, Drain) -> pure (adminError (Just (adminOperation request)) StateConflict)
+                    (Nothing, _) -> do
+                      installed <- installConfiguration value
+                      case (installed, request) of
+                        (Left _, _) -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
+                        (Right owner, Shutdown) -> closeConfiguration owner >> pure stoppedManager
+                        (Right owner, Backup destination) -> bracket (pure owner) closeConfiguration $ \active ->
+                          backupStopped active destination
+                        (Right owner, Restore source evidence) -> bracket (pure owner) closeConfiguration $ \active ->
+                          restoreStopped active source evidence
+                        (Right owner, _) -> bracket (pure owner) closeConfiguration $ \active ->
+                          offline request (withCoordinationStore active)
         pure $ case result of
           Right (Right (Right response)) -> response
           _ -> adminError (Just (adminOperation request)) StorageUnavailable

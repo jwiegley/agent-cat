@@ -8,7 +8,7 @@ module Agentic.Manager
     loadConfiguration, installConfiguration, reloadConfiguration, closeConfiguration, validateConfigurationProfiles,
     configurationSnapshot, selectConfiguredProfile, probeConfiguredProfile,
     CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
-    withCoordinationStore, withServingStore, storeIdentity, checkpointStore, backupCoordinationStore, restoreCoordinationStore,
+    withCoordinationStore, withServingStore, storeIdentity, checkpointStore, backupCoordinationStore, RestoreFence (..), StoreRestoration (..), restoreCoordinationStore,
     LocalAdminRequest, decodeLocalAdminRequest, administerCredentials, withLocalAdministration,
     AdministrationHooks (..), offlineAdministration, StoreState (..), ServeHooks (..), serveManager,
   ) where

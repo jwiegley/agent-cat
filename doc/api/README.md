@@ -921,8 +921,21 @@ hexadecimal SHA-256 digest of the completion binding bytes, which name the
 source manager root, so two backups of one manager root have the same
 `backupId`. An existing destination receives `output-conflict` and nothing is
 written. The source Store keeps its rows. Through the live channel, `backup`
-receives `state-conflict`. The operation `restore` receives
-`state-conflict`. Existing `RUNNER --tui` and native frontend commands
+receives `state-conflict`. `restore` takes `backupFile`, the absolute path of
+a backup of the same manager root, and `fencingEvidenceFile`, the absolute
+path of a private file that holds the offline `status` answer which the
+operator saved after the last lifetime stopped. Offline, under the
+configuration lease, it compares the `authorityEpoch` and `streamId` of that
+answer, whose `state` must be `stopped`, with the identities of the stopped
+Store before it changes anything. The `processGeneration` is not compared.
+Evidence that names other identities receives `state-conflict` and nothing
+changes. A restoration replaces the Store with the backup, rotates the
+authority epoch and the stream identity, and revokes every credential. It
+returns the new `authorityEpoch` and `streamId`, `credentialsRevoked` `true`
+and `reprovisioned` `false`. The operator then issues new credentials with
+`issue-credential`. The work after the backup is absent from the restored
+Store, and the old credentials receive 401. Through the live channel,
+`restore` receives `state-conflict`. Existing `RUNNER --tui` and native frontend commands
 remain unchanged.
 
 ```text
@@ -954,8 +967,8 @@ error with `operation: null` rather than guessing a recognized operation.
 
 Credential issuance writes generated secret material exclusively to a selected
 private output file, never stdout, argv, or diagnostics. Backup restoration
-is offline and requires worker fencing, fresh authority, and explicit local
-credential reprovisioning. Quarantine release requires verified cleanup
+is offline and requires fencing evidence of the stopped Store, fresh authority,
+and explicit local credential reprovisioning. Quarantine release requires verified cleanup
 evidence, not an acknowledgement used as a substitute for that evidence.
 
 A service client profile is selected from trusted local configuration. It

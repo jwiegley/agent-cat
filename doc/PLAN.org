@@ -7616,7 +7616,7 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 08:49]
+:MODIFIED: [2026-10-03 Sat 09:24]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G5
 :SOURCE_REPO: agent-cat
@@ -7771,6 +7771,13 @@ Full failure/capacity evidence, operational procedures, reproducible packages, r
     "author": "johnw",
     "text": "PG8: offline backup through local administration. Typed Backup constructor, backupStopped dispatched after installConfiguration under the configuration lease, frozen {backupId, sha256, bytes}, output-conflict for an existing destination, state-conflict through the live channel. Evidence (PG/PG8): build-final, manager-store-check main suite N8, manager-command-check N8 with command_contract.py and credential_cli.py (audit rerun on final source, audit-r1), operations N8 cases 1-4 (audit rerun, audit-r1), Phase A journey N8, make -C doc check. Not of record under the PG1 rule: stale PF17 manager PID 61004 was running. Restore stays unimplemented. Follow-up: acat-pg8-fess-followup-8x8u.",
     "created_at": "2026-10-03T15:49:37Z"
+  },
+  {
+    "id": 722,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "PG9: offline restore through local administration with fencing evidence. Typed Restore constructor (OtherAdmin removed), restoreStopped dispatched after installConfiguration under the configuration lease, fence of authorityEpoch and streamId from a saved offline status answer compared before the restore-in-progress marker, frozen {authorityEpoch, streamId, credentialsRevoked: true, reprovisioned: false}; mismatch and the live channel refuse state-conflict. Evidence (PG/PG9/impl-r1): build, manager-store-check main suite N8, manager-artifact-check main suite N8, manager-command-check N8 with command_contract.py and credential_cli.py, service_http.py operations N8 cases 1-5 (fess rerun passed, 28 PASS), Phase A journey N8, make -C doc check (Integrator rerun PG/PG9-integrator-doc-check). Not of record under the PG1 rule. Follow-up: acat-pg9-fess-followup-ambi.",
+    "created_at": "2026-10-03T16:24:30Z"
   }
 ]
 #+end_src
@@ -13456,6 +13463,44 @@ Open:
 3. (low) manager/test/service_http.py operations case 2b: an existing flake. The cancel POST during
    the drain got 412 stale-revision (impl-r1/operations-attempt3-case2b-cancel-race.log). Fix: reread
    the control revision on a 412 before the case fails.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG9
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg9-fess-followup-ambi
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 09:24]
+:MODIFIED: [2026-10-03 Sat 09:24]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG9-r1 (report fess/pg-PG9-r1.md in the private evidence
+directory).
+
+Resolved in the PG9 commit:
+
+- (medium) doc/workflow-manager-handoff.md: the WM-042 row said that backup and restore answer
+  state-conflict. The row and the current-state list now record backup (PG8) and restore (PG9).
+- (low) manager/STORAGE.md said that a fence mismatch refuses before the restoration writes
+  anything, although the copying lifetime opens SQLite read-write and sets its pragmas. The text
+  now says that no row, identity, capture or marker changes and that the copying lifetime only
+  opens and closes the database and its write-ahead companions.
+- (low) An untracked manager/test/__pycache__ directory was removed.
+
+Open:
+
+1. (low) manager/COMMANDS.md (Restore section) and cli/src/Agentic/Cli/LocalAdmin.hs: a missing
+   or unreadable evidence file and a backup of another manager root refuse with
+   storage-unavailable through the CLI, but no test exercises these paths. Add two
+   credential_cli.py cases that assert storage-unavailable and no change to the Store.
+2. (low) manager/test/AdmissionCheck.hs (about lines 144-145): the changed restartInterruptionChecks
+   call site, which reads the fence before the cancelled restore, is compiled but not run, because
+   restart-interruption needs the admission_audit.py copy that the operator directions exclude.
+   Record it as an unexercised call site.
 
 * TODO [#C] Phase B part 1 review follow-ups: download quota, id row bound, legacy history, precision gaps
 :PROPERTIES:
@@ -24719,7 +24764,7 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 08:49]
+:MODIFIED: [2026-10-03 Sat 09:24]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-042
 :SOURCE_REPO: agent-cat
@@ -24923,6 +24968,13 @@ recipe that ignores WAL or unresolved effects.
     "author": "johnw",
     "text": "PG8: offline backup through local administration. Typed Backup constructor, backupStopped dispatched after installConfiguration under the configuration lease, frozen {backupId, sha256, bytes}, output-conflict for an existing destination, state-conflict through the live channel. Evidence (PG/PG8): build-final, manager-store-check main suite N8, manager-command-check N8 with command_contract.py and credential_cli.py (audit rerun on final source, audit-r1), operations N8 cases 1-4 (audit rerun, audit-r1), Phase A journey N8, make -C doc check. Not of record under the PG1 rule: stale PF17 manager PID 61004 was running. Restore stays unimplemented. Follow-up: acat-pg8-fess-followup-8x8u.",
     "created_at": "2026-10-03T15:49:37Z"
+  },
+  {
+    "id": 721,
+    "issue_id": "acat-wm-042-sdg9",
+    "author": "johnw",
+    "text": "PG9: offline restore through local administration with fencing evidence. Typed Restore constructor (OtherAdmin removed), restoreStopped dispatched after installConfiguration under the configuration lease, fence of authorityEpoch and streamId from a saved offline status answer compared before the restore-in-progress marker, frozen {authorityEpoch, streamId, credentialsRevoked: true, reprovisioned: false}; mismatch and the live channel refuse state-conflict. Evidence (PG/PG9/impl-r1): build, manager-store-check main suite N8, manager-artifact-check main suite N8, manager-command-check N8 with command_contract.py and credential_cli.py, service_http.py operations N8 cases 1-5 (fess rerun passed, 28 PASS), Phase A journey N8, make -C doc check (Integrator rerun PG/PG9-integrator-doc-check). Not of record under the PG1 rule. Follow-up: acat-pg9-fess-followup-ambi.",
+    "created_at": "2026-10-03T16:24:30Z"
   }
 ]
 #+end_src
