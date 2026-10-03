@@ -454,7 +454,10 @@ the source Store, the capture that a draft request holds and the completion
 binding last, and a source Store with unchanged rows and unchanged other
 files. It also checks that a second backup into the same destination refuses
 with `output-conflict` and that a backup through the live channel of the next
-lifetime refuses with `state-conflict`.
+lifetime refuses with `state-conflict`. The `failures-backup` mode checks a
+backup that a file-size limit or SIGKILL interrupts and a restoration that
+SIGKILL interrupts after its `restore-in-progress` marker, as the
+[capacity record](CAPACITY.md#failure-modes) describes.
 
 ### Restore
 

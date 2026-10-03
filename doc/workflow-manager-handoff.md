@@ -150,11 +150,13 @@ The closeout ran `make -C doc check` after its edit
   credential changes under load, a true ENOSPC disk-full (replaced by a
   file-size limit), Linux containment, repeated measurements and new
   capacity cases for the `storage` and `routes` modes.
-- The interrupted-backup case of `manager-admission-check` did not pass.
-  It waits at the `restore-marker` boundary, which exists only in the
-  private copy that `admission_audit.py` builds, and the operator direction
-  of 2026-09-29 excludes those audits. `failures.backup.passed` therefore
-  reads `false`.
+- `failures.backup.passed` takes its evidence from the `failures-backup`
+  mode of `manager/test/service_http.py`. That mode drives
+  `agentic-run --manager admin` with the offline configuration through a
+  backup under a file-size limit, a backup stopped by SIGKILL and a
+  restore stopped by SIGKILL after its marker. It passed at N8 in PG10.
+  The restart-interruption case of `manager-admission-check` keeps its
+  private `restore-marker` boundary and does not run.
 - No measurement ran on an idle host. Each workload ran once.
 - The Emacs 29.1 minimum-version check stays open, because no Emacs 29.1
   is available locally.
@@ -224,7 +226,7 @@ findings" below and in `acat-phase-f-review-findings-4e23`.
 | WM-030, WM-031, WM-032 | Met for function. The Emacs 29.1 check stays open. | `acat-wm-030-t2l4`, `acat-wm-031-5yxo`, `acat-wm-032-eh4r` |
 | WM-039 | Met for function as local single-machine evidence, with the gate run of PF23. | `acat-wm-039-0vfi` open for the Integrator |
 | WM-040 | Met for function, with the gate run of PF22. | `acat-wm-040-3olb` open for the Integrator |
-| WM-041 | Partial. Every mode passes, and the summary has 0 MISSING keys. `events.catch-up-p50-ms`, `events.catch-up-p95-ms`, `pages.first-page-p50-ms` and `failures.backup.passed` fail, and `reservations.r16.release-to-review-p50-ms` failed only at high host load. | `acat-wm-041-17ax`, `acat-wm-041-core-3vvz` |
+| WM-041 | Partial. Every mode passes, and the summary has 0 MISSING keys. `events.catch-up-p50-ms`, `events.catch-up-p95-ms` and `pages.first-page-p50-ms` fail in the gate run of record. `failures.backup.passed` passes through the `failures-backup` mode of PG10. `reservations.r16.release-to-review-p50-ms` failed only at high host load. | `acat-wm-041-17ax`, `acat-wm-041-core-3vvz` |
 | G3, G4 | Open. G4 has its gate evidence for the three clients and the witness. G3 needs the rest of WM-041 and the deferred security stage. | `acat-g4-pech`, `acat-g3-v1iz` |
 | WM-042 to WM-044, G5 | Not started, apart from the quarantine release of WM-042. | `acat-wm-042-sdg9`, `acat-wm-043-zm3d`, `acat-wm-044-6utw`, `acat-g5-u0w2` |
 
@@ -248,13 +250,6 @@ sections below list stay open.
   and PF24. The two rounds without the burst pass. The owner decides
   whether to give stream checks and ingestion their own reader budget or
   to revise the ceilings with a stated reason.
-- **Interrupted backup (medium, packages lens).**
-  `failures.backup.passed` is `false`, because the case needs the
-  `restore-marker` boundary of the `admission_audit.py` copy, and that
-  case covers an interrupted restore, not an interrupted backup. Make an
-  interrupted-backup boundary reachable from `manager-admission-check` or
-  a mode of `service_http.py`, or obtain operator permission to run only
-  that subcommand of `admission_audit.py` once.
 - **Measurements depend on host load (medium, working lens).** The
   `capacity-streams` pass of record came from a rerun at a load average of
   13 after a failure at 47 with no further fix.

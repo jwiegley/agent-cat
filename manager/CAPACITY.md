@@ -166,7 +166,7 @@ and the file `capacity-streams-run-logs.json` with the run-log bytes of each
 run store. The `storage` and `routes` modes write the files
 `storage-measure.json` and `routes-measure.json` in their fixture
 directories, as the sections "Storage endings" and "Seal and prune cursors"
-state. The `faults-io` mode writes the file `faults-io.json`, and the four
+state. The `faults-io` mode writes the file `faults-io.json`, and the five
 failure modes write their files `<mode>-measure.json`, as the sections "Disk
 and I/O failure" and "Failure modes" state.
 
@@ -717,12 +717,12 @@ unchanged (`disk.no-run-started`).
 
 ## Failure modes
 
-The failure keys come from existing modes, run once each at N8 with
-measurement prints. Each mode samples the resident memory of each of its
-lifetimes, prints one `MEASURE` line for each value, and writes the values
-to the file `<mode>-measure.json` in its fixture directory. The `passed` key
-of a mode is written after its last PASS line. The prints change no
-assertion of a mode.
+The failure keys come from five modes, run once each at N8 with
+measurement prints. Each mode prints one `MEASURE` line for each value and
+writes the values to the file `<mode>-measure.json` in its fixture
+directory. The four modes other than `failures-backup` also sample the
+resident memory of each of their lifetimes. The `passed` key of a mode is
+written after its last PASS line. The prints change no assertion of a mode.
 
 - `failures-worker` of `manager/test/service_http.py`. The lost time runs
   from the SIGKILL of the worker process groups to the first read that shows
@@ -744,17 +744,54 @@ assertion of a mode.
   forwarder to the switch to the direct profile
   (`failures.tui.delayed-switch-ms`), and from that switch to the Manager
   overview of the direct endpoint (`failures.tui.direct-overview-ms`).
-- The `restart-interruption` case of `manager-admission-check`. It takes an
-  offline backup, cancels the restoration from that backup after its durable
-  `restore-in-progress` marker, and requires that ordinary Store startup then
-  refuses. It runs no manager process, so it has no resident key. The case
-  waits at the boundary `restore-marker`, which only the private copy of the
-  tree that `python3 manager/test/admission_audit.py ROOT restore-interruption`
-  builds contains. A direct run of `manager-admission-check
-  restart-interruption WORK NATIVE` stops with the message "actual
-  currentReview boundary was not reached". The suite of
-  `manager-admission-check WORK NATIVE SOURCE PYTHON`, which the gate runs,
-  does not contain the case.
+- `failures-backup` of `manager/test/service_http.py`. It runs local
+  administration through `agentic-run --manager admin` with the offline
+  configuration on a disposable manager root. A first lifetime creates one
+  captured-input draft with a capture of 67108864 bytes and stops. Offline
+  `status` then reports the state `stopped`, and its answer is the fencing
+  evidence. The mode sets a file-size limit (`RLIMIT_FSIZE`, with `SIGXFSZ`
+  ignored) above the largest of the database and its WAL and below the
+  capture size. Case 1, the case of record, runs a backup under that limit:
+  the database copy completes, and the copy of the capture fails with EFBIG.
+  Case 2 stops a backup with SIGKILL while the temporary file of its capture
+  copy exists. After each case, the backup refused with `storage-unavailable`
+  or was killed, the destination holds no completion binding, a restore that
+  names it refuses with `storage-unavailable` and leaves no
+  `restore-in-progress` marker, the rows and the other files of the Store are
+  unchanged, `check-store` reports `valid`, offline `status` reports the same
+  authority epoch and stream identity, the next serve lifetime serves the
+  draft, and a backup without the limit into a new destination completes.
+  Case 3 stops a restoration from a complete backup with SIGKILL as soon as
+  its `restore-in-progress` marker exists. The restoration verifies the
+  capture of the root and that of the backup after the marker, so the
+  capture of 67108864 bytes keeps the window open. Ordinary `serve` then
+  exits with status 2, writes "manager service is unavailable" to
+  standard error and serves no port. Offline `status` refuses with
+  `storage-unavailable`, `check-store` reports `unavailable`, and the marker
+  remains. When the kill
+  of case 2 or case 3 lands outside its window, the case prints "not
+  reached" and does not count. The mode writes the file
+  `failures-backup-measure.json` with `failures.backup.passed` `true` after
+  the PASS line of case 1 and a PASS or "not reached" line for cases 2 and
+  3. It also writes values that name no ceiling: the capture size
+  (`failures.backup.capture-bytes`), the largest database file
+  (`failures.backup.largest-file-bytes`), the limit
+  (`failures.backup.limit-bytes`), the code and latency of the refusal of
+  case 1 (`failures.backup.limited-code` and `failures.backup.limited-ms`),
+  and whether cases 2 and 3 were reached
+  (`failures.backup.killed-backup-reached` and
+  `failures.backup.killed-restore-reached`).
+- The `restart-interruption` case of `manager-admission-check` keeps its
+  private boundary. It takes an offline backup, cancels the restoration from
+  that backup after its durable `restore-in-progress` marker, and requires
+  that ordinary Store startup then refuses. It waits at the boundary
+  `restore-marker`, which only the private copy of the tree that
+  `python3 manager/test/admission_audit.py ROOT restore-interruption` builds
+  contains. A direct run of `manager-admission-check restart-interruption
+  WORK NATIVE` stops with the message "actual currentReview boundary was not
+  reached". The suite of `manager-admission-check WORK NATIVE SOURCE
+  PYTHON`, which the gate runs, does not contain the case. The
+  `failures-backup` mode, not this case, gives `failures.backup.passed`.
 
 The `failures-worker` mode also covers the loss of the private worker pipes,
 because the SIGKILL of the worker process groups closes them.
@@ -774,7 +811,7 @@ because the SIGKILL of the worker process groups closes them.
 | `failures.tui.unreachable-ms` | at most 50000 | ms | The 45-second reconnect idle limit and five seconds of headroom. |
 | `failures.tui.reconnect-ms` | at most 35000 | ms | The 30-second backoff cap and five seconds of headroom. |
 | `failures.tui.manager-rss-peak-bytes` | at most 272629760 | bytes | B + 2 H, where H is one supervised worker of 2097152 bytes. |
-| `failures.backup.passed` | equals `true` | flag | The restart-interruption case of manager-admission-check passes. |
+| `failures.backup.passed` | equals `true` | flag | Case 1 of failures-backup passes, and no case of the mode fails. |
 
 ## Read path decision of 2026-10-03
 

@@ -598,6 +598,53 @@ FAULTS_SETTLED = 2
 FAULTS_MARGIN = 1048576
 FAULTS_LITERAL_BYTES = 65536
 FAULTS_COMMANDS = 100
+# The failures-backup mode checks an interrupted offline backup and an
+# interrupted offline restoration through agentic-run --manager admin with
+# the offline configuration, which names no administration root, on the
+# manager root of the module.
+# 0. Lifetime bk-setup creates one captured-input draft and uploads a capture of
+#    BACKUP_CAPTURE_BYTES bytes for it through POST /v1/captures, and stops.
+#    Offline status then reports the state stopped, so the close of the last
+#    lifetime checkpointed the source database. The harness saves that answer
+#    as the fencing evidence, and it measures the sizes of the database, its
+#    WAL and the capture. The limit L lies between the largest of the
+#    database and the WAL and the capture size: it is that largest size plus
+#    FAULTS_MARGIN bytes, and it must be less than the capture size.
+# 1. A backup runs with RLIMIT_FSIZE L and SIGXFSZ ignored, both in the
+#    child before it executes the administration command. RLIMIT_FSIZE
+#    limits the offset of each written file, so the database copy completes
+#    and the copy of the capture fails with EFBIG. The backup refuses with
+#    storage-unavailable. The case of record is this case.
+# 2. A backup without the limit is stopped by SIGKILL while its capture
+#    copy, the temporary file in the captures directory of the destination,
+#    exists. When the capture of the destination is published before the
+#    kill, the case prints "not reached" and does not count.
+# After each of cases 1 and 2, the destination holds no completion binding,
+# and a restoration that names it with valid fencing evidence refuses with
+# storage-unavailable and changes no row and no other Store file and leaves
+# no restore-in-progress marker. The rows and the other Store files are
+# those before the backup. check-store reports integrity valid, and offline
+# status reports the authority epoch and the stream identity of the
+# evidence. The next serve lifetime serves the draft and its capture
+# command as before, and after it a backup without the limit into a new
+# destination answers the frozen result.
+# 3. A restoration from the complete backup of case 2, or of case 1 when
+#    case 2 was not reached, is stopped by SIGKILL as soon as the
+#    restore-in-progress marker exists. The capture of BACKUP_CAPTURE_BYTES
+#    bytes widens the window between the marker and the completion, because
+#    the restoration verifies the capture of the root and that of the backup
+#    after the marker. Ordinary serve then exits with a failure status and
+#    serves no port, offline status refuses with storage-unavailable,
+#    check-store reports integrity unavailable, and the marker remains. When
+#    the restoration completes before the kill, the case prints "not
+#    reached".
+# The mode writes FAILURES_BACKUP_RECORD with failures.backup.passed true
+# after the PASS line of case 1 and the PASS or "not reached" lines of cases
+# 2 and 3, and with values that name no ceiling.
+FAILURES_BACKUP = "failures-backup"
+failures_backup_mode = len(sys.argv) == 6 and sys.argv[5] == FAILURES_BACKUP
+FAILURES_BACKUP_RECORD = "failures-backup-measure.json"
+BACKUP_CAPTURE_BYTES = 67108864
 # The modes that configure the control fixture profiles in place of the
 # scripted profile: profile_1 runs the recovery-offering retry adapter and
 # profile_steer runs the steerable adapter. The controls-routing mode also
@@ -2406,7 +2453,7 @@ def lifecycle_elapsed():
 # and emacs-service-controls modes configure the control fixture profiles.
 control_profiles = (control_profiles or tui_mode in (TUI_CONTROLS, TUI_REDIRECT) or client_controls_mode or emacs_lifecycle_mode
                     or emacs_controls_mode)
-assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode or cross_client_mode or capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode or faults_io_mode
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode or cross_client_mode or capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode or faults_io_mode or failures_backup_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert not (endpoints_mode or tui_mode or cross_client_mode) or os.environ.get("TUI_CHECK")
 assert not capacity_inputs_mode or os.environ.get("ARTIFACT_CHECK")
@@ -2560,7 +2607,7 @@ if cross_client_mode:
 # cap_key_NN, so that only the execution reservations limit how many of
 # their runs are active at once. The profiles of CAPACITY_COHORTS run the
 # same fixture with their stated keys.
-if capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode or faults_io_mode:
+if capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode or faults_io_mode or failures_backup_mode:
     capacity_base = configuration["profiles"][0]
     configuration["profiles"] = [dict(capacity_base, id=name, workspaceLabel="HTTPS capacity fixture " + name[4:],
                                       resourceKeys=["cap_key_" + name[4:]]) for name in CAPACITY_PROFILES] + [
@@ -2698,13 +2745,19 @@ config.write_text(json.dumps(configuration))
 config.chmod(0o600)
 
 
-def administration(payload, refused=None, path=None):
+def administration_command(path=None):
+    """The command line of one local administration exchange through the
+    given configuration file, or else the configuration of the manager."""
+    return [str(runner), "--manager", "admin", "--config", str(path or config)]
+
+
+def administration(payload, refused=None, path=None, preexec_fn=None):
     """One local administration exchange through the given configuration
     file, or else the configuration of the manager. It must succeed, or, when
-    refused names an error code, it must refuse with exactly that code."""
-    completed = subprocess.run([str(runner), "--manager", "admin", "--config", str(path or config)],
-                               input=json.dumps(payload).encode(), stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE, timeout=20)
+    refused names an error code, it must refuse with exactly that code. The
+    child runs preexec_fn before it executes the command."""
+    completed = subprocess.run(administration_command(path), input=json.dumps(payload).encode(), stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, timeout=20, preexec_fn=preexec_fn)
     value = frozen.parse_json(completed.stdout)
     validate("LocalAdminResponse", value)
     if refused is not None:
@@ -2956,7 +3009,7 @@ class CapacityFixture(TuiModeFixture):
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
                          "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode or control_profiles or person_mode else ["control", "export"] if exports_mode else []),
                          "profileIds": CONTROL_PROFILES or (["profile_1", "profile_plain"] if person_mode else
-                                                            CAPACITY_PROFILES if capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode or faults_io_mode else ["profile_1"]),
+                                                            CAPACITY_PROFILES if capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode or faults_io_mode or failures_backup_mode else ["profile_1"]),
                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential")})
 bearer = (work / "credential").read_bytes().decode("ascii")
 if collections:
@@ -2991,6 +3044,7 @@ tui_fixture = (TuiModeFixture(*TUI_MODES[tui_mode]) if tui_mode else
                CapacityFixture("inputs-module") if capacity_inputs_mode else
                CapacityFixture("streams-module") if capacity_streams_mode else
                CapacityFixture("io-1") if faults_io_mode else
+               CapacityFixture("bk-1") if failures_backup_mode else
                client_controls_fixture(CLIENT_CONTROLS_MODES[sys.argv[5]]) if client_controls_mode else
                TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="pi") if pi_client_mode or pi_host_smoke_mode or pi_host_mode or pi_host_model_mode else
                TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="emacs") if emacs_service_mode else
@@ -4793,6 +4847,15 @@ def coordination_dump(directory):
         shutil.rmtree(copy)
 
 
+def files_beside_database(root):
+    """The size, the modification time and the SHA-256 digest of each regular
+    file under the manager root other than the coordination database and its
+    write-ahead companions, which a copying lifetime opens and closes."""
+    database = ("coordination.sqlite3", "coordination.sqlite3-wal", "coordination.sqlite3-shm")
+    return {str(path): (path.stat().st_size, path.stat().st_mtime_ns, hashlib.sha256(path.read_bytes()).hexdigest())
+            for path in root.rglob("*") if path.is_file() and path.name not in database}
+
+
 def operations_backup(offline_config, root):
     """Case 4 is backup after the shutdown of case 3, with no active
     reservation. An offline backup through the offline configuration answers
@@ -4803,11 +4866,9 @@ def operations_backup(offline_config, root):
     companions, which the checkpoint of the copy may change. A second backup
     into the same directory refuses with output-conflict and changes
     nothing."""
-    database = ("coordination.sqlite3", "coordination.sqlite3-wal", "coordination.sqlite3-shm")
 
     def other_files():
-        return {str(path): (path.stat().st_size, path.stat().st_mtime_ns, hashlib.sha256(path.read_bytes()).hexdigest())
-                for path in root.rglob("*") if path.is_file() and path.name not in database}
+        return files_beside_database(root)
 
     def destination_files():
         return {str(path.relative_to(destination)): (path.stat().st_mtime_ns, path.read_bytes())
@@ -4927,11 +4988,9 @@ def operations_restore(authorized, completed, lifetime, stop):
     offline_config = work / "offline-shutdown.json"
     root = Path(served["managerRoot"])
     backup = work / "backup-case-4"
-    database = ("coordination.sqlite3", "coordination.sqlite3-wal", "coordination.sqlite3-shm")
 
     def other_files():
-        return {str(path): (path.stat().st_size, path.stat().st_mtime_ns, hashlib.sha256(path.read_bytes()).hexdigest())
-                for path in root.rglob("*") if path.is_file() and path.name not in database}
+        return files_beside_database(root)
 
     def complete_request(capabilities, authorized):
         status, catalogue, raw = request("/v1/workflows?profileId=profile_1", authorized)
@@ -10661,6 +10720,18 @@ class CapacityHarness:
             for process in cls.started:
                 cls.reap(process)
 
+    @staticmethod
+    def file_size_limit(limit):
+        """The function that a child runs before it executes its command:
+        it ignores SIGXFSZ and sets RLIMIT_FSIZE to limit bytes, so that a
+        write past the limit fails with EFBIG."""
+        import resource
+
+        def limited():
+            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+            resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
+        return limited
+
     def begin(self, name, root, profiles, limits, names, retention=(), arguments=(), file_limit=None):
         """Start one lifetime with its configuration and issue its
         credentials. retention names the local retention roots of the
@@ -10669,15 +10740,9 @@ class CapacityHarness:
         bytes and ignores SIGXFSZ, both in the child before it executes the
         manager, so that a write past the limit fails with EFBIG. Returns
         the process, its resident sampler and the credentials by name."""
-        import resource
-
-        def limited():
-            signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
-            resource.setrlimit(resource.RLIMIT_FSIZE, (file_limit, file_limit))
-
         self.fixture.begin(root, profiles, limits, retention)
         self.host_load(name, "start")
-        process = self.serve(name, arguments, limited if file_limit is not None else None)
+        process = self.serve(name, arguments, self.file_size_limit(file_limit) if file_limit is not None else None)
         resident = CapacityResident(process.pid)
         wait_ready(process)
         if os.environ.get(CAPACITY_HARNESS_FAULT) == "after-start":
@@ -10817,6 +10882,46 @@ class CapacityHarness:
         assert status == 202, ("answer", decision_id, status, receipt.get("code"))
         self.effected(credential, receipt, "answer")
         return elapsed
+
+    def upload(self, credential, request_id, size):
+        """One POST /v1/captures of size bytes of the ASCII text capacity
+        repeated, on a new TLS connection. The latency runs from before
+        the request to the end of the response body and leaves out the
+        opening of the connection. Before each chunk of the body, a
+        readable connection is read without waiting. A TLS 1.3
+        post-handshake message makes the connection readable without
+        application data, and the body then continues. When the manager
+        has answered before the whole body is sent, the rest of the body
+        is not sent. Returns the status, the decoded body and the
+        latency."""
+        body = memoryview((CAPACITY_LITERAL.encode() * (size // len(CAPACITY_LITERAL) + 1))[:size])
+        key = self.state["epoch"] + "." + secrets.token_urlsafe(16)
+        credential.count()
+        raw_socket = socket.create_connection(("127.0.0.1", port), timeout=70)
+        with context.wrap_socket(raw_socket, server_hostname="127.0.0.1") as connection:
+            started = time.monotonic()
+            connection.sendall((f"POST /v1/captures?requestId={request_id} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+                                f"Authorization: {credential.headers['Authorization']}\r\n"
+                                f"Content-Type: application/octet-stream\r\nIdempotency-Key: {key}\r\n"
+                                f"Content-Length: {size}\r\n\r\n").encode())
+            answered = None
+            for offset in range(0, size, 65536):
+                if select.select([connection], [], [], 0)[0]:
+                    connection.setblocking(False)
+                    try:
+                        answered = connection.recv(65536)
+                    except ssl.SSLWantReadError:
+                        answered = None
+                    finally:
+                        connection.settimeout(70)
+                    if answered is not None:
+                        break
+                connection.sendall(body[offset:offset + 65536])
+            status, _, raw = capacity_response(connection, answered or b"")
+            elapsed = (time.monotonic() - started) * 1000
+        value = frozen.parse_json(raw)
+        validate("CaptureReceipt" if status == 202 else "Problem", value, raw)
+        return status, value, elapsed
 
     def one_page(self, credential, path, schema, window=5):
         value, _, _ = self.read(credential, path, schema, window=window)
@@ -18390,45 +18495,7 @@ def capacity_inputs_checks():
     root = work / "capacity-captures"
     process, resident, credentials = meter.begin("captures", root, ["cap_01"], {"globalCaptureBytes": 134217728}, ["captures-a"])
     try:
-        def upload(credential, request_id, size):
-            """One POST /v1/captures of size bytes of the ASCII text capacity
-            repeated, on a new TLS connection. The latency runs from before
-            the request to the end of the response body and leaves out the
-            opening of the connection. Before each chunk of the body, a
-            readable connection is read without waiting. A TLS 1.3
-            post-handshake message makes the connection readable without
-            application data, and the body then continues. When the manager
-            has answered before the whole body is sent, the rest of the body
-            is not sent. Returns the status, the decoded body and the
-            latency."""
-            body = memoryview((CAPACITY_LITERAL.encode() * (size // len(CAPACITY_LITERAL) + 1))[:size])
-            key = meter.state["epoch"] + "." + secrets.token_urlsafe(16)
-            credential.count()
-            raw_socket = socket.create_connection(("127.0.0.1", port), timeout=70)
-            with context.wrap_socket(raw_socket, server_hostname="127.0.0.1") as connection:
-                started = time.monotonic()
-                connection.sendall((f"POST /v1/captures?requestId={request_id} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
-                                    f"Authorization: {credential.headers['Authorization']}\r\n"
-                                    f"Content-Type: application/octet-stream\r\nIdempotency-Key: {key}\r\n"
-                                    f"Content-Length: {size}\r\n\r\n").encode())
-                answered = None
-                for offset in range(0, size, 65536):
-                    if select.select([connection], [], [], 0)[0]:
-                        connection.setblocking(False)
-                        try:
-                            answered = connection.recv(65536)
-                        except ssl.SSLWantReadError:
-                            answered = None
-                        finally:
-                            connection.settimeout(70)
-                        if answered is not None:
-                            break
-                    connection.sendall(body[offset:offset + 65536])
-                status, _, raw = capacity_response(connection, answered or b"")
-                elapsed = (time.monotonic() - started) * 1000
-            value = frozen.parse_json(raw)
-            validate("CaptureReceipt" if status == 202 else "Problem", value, raw)
-            return status, value, elapsed
+        upload = meter.upload
 
         def root_bytes():
             """The bytes of the regular files under the manager root."""
@@ -19473,6 +19540,194 @@ def faults_io_checks():
     meter.finish(FAULTS_IO, 5, "the disk and I/O failure workload")
 
 
+def failures_backup_checks():
+    """The interrupted backup and the interrupted restoration of the
+    failures-backup mode through local administration with the offline
+    configuration on the manager root of the module. See FAILURES_BACKUP for
+    the cases. Each case prints one PASS line or one "not reached" line, and
+    the mode writes FAILURES_BACKUP_RECORD after each case."""
+    meter = CapacityHarness(FAILURES_BACKUP_RECORD, ())
+    root = work / "manager"
+    names = ["harness", "bk-1"]
+    offline = work / "offline-backup.json"
+    marker = root / "restore-in-progress"
+    evidence = work / "fencing-evidence.json"
+    status_request = {"version": 1, "operation": "status"}
+    check_request = {"version": 1, "operation": "check-store"}
+
+    def backup(destination):
+        return {"version": 1, "operation": "backup", "outputFile": str(destination)}
+
+    def restore(source):
+        return {"version": 1, "operation": "restore", "backupFile": str(source), "fencingEvidenceFile": str(evidence)}
+
+    def stopped_status():
+        """Offline status, which must report the state stopped with no
+        active reservation, saved as the fencing evidence."""
+        answer = administration(status_request, path=offline)
+        assert answer["result"]["state"] == "stopped" and answer["result"]["activeReservations"] == 0, answer["result"]
+        # The frozen parser reads numbers as Decimal. The status answer has
+        # only the integer activeReservations.
+        evidence.write_text(json.dumps(answer, default=int) + "\n")
+        evidence.chmod(0o600)
+        return answer["result"]["authorityEpoch"], answer["result"]["streamId"]
+
+    def started(arguments):
+        """Start one administration command with the offline configuration
+        and send its request. Returns the child process."""
+        child = subprocess.Popen(administration_command(offline), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                 stderr=subprocess.PIPE)
+        child.stdin.write(json.dumps(arguments).encode())
+        child.stdin.close()
+        return child
+
+    # Case 0. One draft with one capture, then the stopped Store and the
+    # limit.
+    process, resident, credentials = meter.begin("bk-setup", root, ["cap_01"], {}, names)
+    try:
+        harness, writer = credentials["harness"], credentials["bk-1"]
+        status, draft, _ = meter.create(writer, "cap_01", "captured-input")
+        assert status == 201, ("captured-input draft", status, draft.get("code"))
+        status, capture, upload_ms = meter.upload(writer, draft["id"], BACKUP_CAPTURE_BYTES)
+        assert status == 202 and capture["bytes"] == str(BACKUP_CAPTURE_BYTES), ("capture upload", status, capture.get("code"))
+        served, _, _ = meter.read(harness, draft["links"]["self"], "Request")
+    finally:
+        meter.end("bk-setup", process, resident, credentials)
+    offline.write_text(json.dumps({name: value for name, value in configuration.items() if name != "administrationRoot"}))
+    offline.chmod(0o600)
+    identity = stopped_status()
+    copied = root / "captures" / capture["id"]
+    assert copied.stat().st_size == BACKUP_CAPTURE_BYTES, ("the published capture", copied.stat().st_size)
+    sizes = {name: (root / name).stat().st_size for name in ("coordination.sqlite3", "coordination.sqlite3-wal") if (root / name).exists()}
+    largest = max(sizes.values())
+    limit = largest + FAULTS_MARGIN
+    assert limit < BACKUP_CAPTURE_BYTES, ("the limit is not below the capture size", sizes, limit)
+    meter.measure({"failures.backup.largest-file-bytes": largest, "failures.backup.limit-bytes": limit,
+                   "failures.backup.capture-bytes": BACKUP_CAPTURE_BYTES})
+    print("PASS failures-backup case 0: draft", draft["id"], "holds capture", capture["id"], "of", BACKUP_CAPTURE_BYTES, "bytes,",
+          "uploaded in", f"{upload_ms:.0f} ms;", "offline status reports stopped with authority epoch", identity[0], "and stream",
+          identity[1] + "; the files", sizes, "set the limit", limit, flush=True)
+
+    def interrupted(case, destination, rows, files):
+        """The checks after an interrupted backup into destination, where
+        rows and files are the dump lines and the other Store files before
+        it. Returns a complete backup that a later backup without the limit
+        published into a new destination."""
+        assert destination.is_dir() and not (destination / "complete").exists(), (
+            "the interrupted backup published its completion binding", case)
+        assert coordination_dump(root)[0] == rows, ("the interrupted backup changed a row of the source Store", case)
+        assert files_beside_database(root) == files, ("the interrupted backup changed a source Store file", case)
+        refused = administration(restore(destination), refused="storage-unavailable", path=offline)
+        assert coordination_dump(root)[0] == rows, ("the refused restore changed a row of the Store", case)
+        assert files_beside_database(root) == files, ("the refused restore changed a Store file", case)
+        assert not marker.exists(), ("the refused restore left its marker", case)
+        checked = administration(check_request, path=offline)["result"]
+        assert checked["integrity"] == "valid", ("check-store after the interrupted backup", case, checked)
+        current = administration(status_request, path=offline)["result"]
+        assert current["state"] == "stopped" and (current["authorityEpoch"], current["streamId"]) == identity, (case, current, identity)
+        process, resident, credentials = meter.begin("bk-case-" + case, root, ["cap_01"], {}, names)
+        try:
+            assert meter.state["epoch"] == identity[0], ("the authority epoch of the next lifetime", case, meter.state["epoch"])
+            # A restart rebinds a draft to the profile and descriptor
+            # revisions of the new configuration lifetime, so the comparison
+            # leaves out the revisions.
+            value, _, _ = meter.read(credentials["harness"], draft["links"]["self"], "Request")
+            kept = ("id", "phase", "workflowId", "profileId", "admission", "readiness", "runId", "preparationId")
+            assert {key: value[key] for key in kept} == {key: served[key] for key in kept}, (
+                "the draft after the interrupted backup", case, value, served)
+        finally:
+            meter.end("bk-case-" + case, process, resident, credentials)
+        assert hashlib.sha256(copied.read_bytes()).hexdigest() == capture["sha256"], ("the capture of the root", case)
+        complete = work / ("backup-" + case + "-complete")
+        backed = administration(backup(complete), path=offline)["result"]
+        database_copy = (complete / "coordination.sqlite3").read_bytes()
+        assert backed["sha256"] == hashlib.sha256(database_copy).hexdigest() and (complete / "complete").exists(), (case, backed)
+        assert hashlib.sha256((complete / "captures" / capture["id"]).read_bytes()).hexdigest() == capture["sha256"], (
+            "the capture of the complete backup", case)
+        return complete, refused["error"]["code"], checked["integrity"], len(rows)
+
+    # Case 1. The backup under the file-size limit.
+    destination = work / "backup-1-limited"
+    rows, files = coordination_dump(root)[0], files_beside_database(root)
+    started_at = time.monotonic()
+    limited = administration(backup(destination), refused="storage-unavailable", path=offline,
+                             preexec_fn=CapacityHarness.file_size_limit(limit))
+    refusal_ms = (time.monotonic() - started_at) * 1000
+    left = sorted(str(path.relative_to(destination)) for path in destination.rglob("*"))
+    assert left == ["captures", "coordination.sqlite3"], ("the limited backup left", left)
+    complete, restore_code, integrity, lines = interrupted("1", destination, rows, files)
+    meter.measure({"failures.backup.limited-code": limited["error"]["code"], "failures.backup.limited-ms": round(refusal_ms, 1)})
+    print("PASS failures-backup case 1: with RLIMIT_FSIZE", limit, "bytes the backup refused with", limited["error"]["code"], "in",
+          f"{refusal_ms:.0f} ms", "and left", left, "with no completion binding; a restore that names it refused with", restore_code,
+          "and left the", lines, "dump lines, the other Store files and no marker; check-store reports", integrity, "and status the",
+          "same identities; the next lifetime served draft", draft["id"], "unchanged, and a backup without the limit into",
+          complete.name, "completed", flush=True)
+
+    # Case 2. The backup stopped by SIGKILL inside the capture copy.
+    destination = work / "backup-2-killed"
+    copies = destination / "captures"
+    rows, files = coordination_dump(root)[0], files_beside_database(root)
+    child = started(backup(destination))
+    temporary = None
+    deadline = time.monotonic() + 60
+    while child.poll() is None and time.monotonic() < deadline:
+        with contextlib.suppress(FileNotFoundError):
+            temporary = next((entry.name for entry in os.scandir(copies) if entry.name != capture["id"]), None)
+        if temporary is not None:
+            child.kill()
+            break
+        time.sleep(0.0005)
+    child.wait(timeout=20)
+    reached = temporary is not None and child.returncode == -signal.SIGKILL and not (copies / capture["id"]).exists() \
+        and not (destination / "complete").exists()
+    meter.measure({"failures.backup.killed-backup-reached": reached})
+    if reached:
+        complete, restore_code, integrity, lines = interrupted("2", destination, rows, files)
+        print("PASS failures-backup case 2: SIGKILL stopped the backup while its capture copy", temporary, "existed; the destination",
+              "holds no completion binding, a restore that names it refused with", restore_code, "and left the", lines,
+              "dump lines, the other Store files and no marker; check-store reports", integrity, "and status the same identities;",
+              "the next lifetime served draft", draft["id"], "unchanged, and a backup without the limit into", complete.name,
+              "completed", flush=True)
+    else:
+        print("failures-backup case 2: not reached; the backup ended with status", child.returncode, "and the temporary copy",
+              temporary, "before the kill", flush=True)
+
+    # Case 3. The restoration stopped by SIGKILL after its marker.
+    identity = stopped_status()
+    child = started(restore(complete))
+    killed = False
+    deadline = time.monotonic() + 60
+    while child.poll() is None and time.monotonic() < deadline:
+        if marker.exists():
+            child.kill()
+            killed = True
+            break
+        time.sleep(0.0005)
+    child.wait(timeout=20)
+    reached = killed and child.returncode == -signal.SIGKILL and marker.exists()
+    meter.measure({"failures.backup.killed-restore-reached": reached})
+    if reached:
+        fenced = CapacityHarness.serve("bk-fenced")
+        fenced.wait(timeout=60)
+        diagnostic = (work / "server-bk-fenced.stderr").read_text()
+        assert fenced.returncode == 2 and diagnostic.endswith(": manager service is unavailable\n"), (
+            "ordinary serve on the fenced root", fenced.returncode, diagnostic)
+        with contextlib.suppress(ConnectionRefusedError), socket.create_connection(("127.0.0.1", port), timeout=5):
+            raise AssertionError("the manager port answers after the fenced start")
+        refused = administration(status_request, refused="storage-unavailable", path=offline)
+        checked = administration(check_request, path=offline)["result"]
+        assert checked["integrity"] == "unavailable", ("check-store of the fenced root", checked)
+        assert marker.exists(), "the restore-in-progress marker did not remain"
+        print("PASS failures-backup case 3: SIGKILL stopped the restoration from", complete.name, "after its restore-in-progress",
+              "marker; ordinary serve exited with status", fenced.returncode, "and served no port, offline status refused with",
+              refused["error"]["code"], "check-store reports", checked["integrity"], "and the marker remains", flush=True)
+    else:
+        print("failures-backup case 3: not reached; the restoration ended with status", child.returncode, "and the marker",
+              "exists" if marker.exists() else "is absent", flush=True)
+    meter.measure({"failures.backup.passed": True})
+    print("PASS failures-backup: the interrupted backup and restoration cases held through local administration", flush=True)
+
+
 if storage_mode:
     with CapacityHarness.reaping():
         storage_checks()
@@ -19482,6 +19737,12 @@ if storage_mode:
 if faults_io_mode:
     with CapacityHarness.reaping():
         faults_io_checks()
+    raise SystemExit(0)
+
+
+if failures_backup_mode:
+    with CapacityHarness.reaping():
+        failures_backup_checks()
     raise SystemExit(0)
 
 

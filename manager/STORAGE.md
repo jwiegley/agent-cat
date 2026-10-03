@@ -510,7 +510,16 @@ manager storage. An existing destination refuses with `StoreOutputConflict`
 before anything is written, and a refusal before creation creates no
 destination. A failure after creation leaves a destination without `complete`.
 Such a destination is not a backup, and the operator removes it before a retry
-into the same path. The
+into the same path. A write failure during the copy of a capture, such as
+EFBIG under a file-size limit, refuses the backup with `storage-unavailable`
+and removes the temporary copy, so the destination holds the database copy
+and an empty `captures` directory. A backup that is killed during the copy of
+a capture leaves its temporary file in `captures`. In both cases the source
+Store keeps its rows and its other files, `check-store` reports `valid`, and
+offline `status` reports the same authority epoch and stream identity. A
+restoration that names such a destination reads the absent completion
+binding and refuses with `storage-unavailable` before it writes the
+`restore-in-progress` marker. The
 backup uses SQLite backup into `coordination.sqlite3` of the destination,
 copies all referenced immutable captures into its `captures` directory with
 bounded streaming and verification, and publishes its durable completion
@@ -559,7 +568,11 @@ rotates authority and stream identities, revokes every restored credential and
 records uncertainty about effects newer than the backup. Completion removes the
 startup fence only after these commits, and the restoration then returns a
 `StoreRestoration` with the new authority epoch and stream identity. An exception or interruption leaves
-normal Store opening refused. Do not delete that marker to assert completion.
+normal Store opening refused. After a restoration is killed with the marker
+present, ordinary `serve` exits with status 2, writes "manager service is
+unavailable" to standard error and serves no port. Offline `status` refuses
+with `storage-unavailable`, and `check-store` reports integrity
+`unavailable`. Do not delete that marker to assert completion.
 Automated repair of an interrupted restoration is not provided by this API.
 
 Local administration reprovisions through `issue-credential`, which registers
@@ -579,7 +592,10 @@ runs the existing captured-source audit once for restoration interruption. Its
 single phase barrier follows durable marker publication, and its N1 and N8
 checks cancel and join the original Async before asserting startup refusal.
 These are not HTTP, client transport, hardware durability or full failure-matrix
-evidence.
+evidence. The `failures-backup` mode of `manager/test/service_http.py` checks
+an interrupted backup and an interrupted restoration through local
+administration with the offline configuration, as the
+[capacity record](CAPACITY.md#failure-modes) describes.
 OS containment is excluded from this project and is not a pending capability.
 
 ## Manager log

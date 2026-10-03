@@ -7616,7 +7616,7 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 09:24]
+:MODIFIED: [2026-10-03 Sat 09:40]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G5
 :SOURCE_REPO: agent-cat
@@ -7778,6 +7778,13 @@ Full failure/capacity evidence, operational procedures, reproducible packages, r
     "author": "johnw",
     "text": "PG9: offline restore through local administration with fencing evidence. Typed Restore constructor (OtherAdmin removed), restoreStopped dispatched after installConfiguration under the configuration lease, fence of authorityEpoch and streamId from a saved offline status answer compared before the restore-in-progress marker, frozen {authorityEpoch, streamId, credentialsRevoked: true, reprovisioned: false}; mismatch and the live channel refuse state-conflict. Evidence (PG/PG9/impl-r1): build, manager-store-check main suite N8, manager-artifact-check main suite N8, manager-command-check N8 with command_contract.py and credential_cli.py, service_http.py operations N8 cases 1-5 (fess rerun passed, 28 PASS), Phase A journey N8, make -C doc check (Integrator rerun PG/PG9-integrator-doc-check). Not of record under the PG1 rule. Follow-up: acat-pg9-fess-followup-ambi.",
     "created_at": "2026-10-03T16:24:30Z"
+  },
+  {
+    "id": 724,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "PG10: failures.backup.passed now has passing evidence through the failures-backup mode of service_http.py at N8 (see acat-wm-041-17ax). Not a run of record under the PG1 rule.",
+    "created_at": "2026-10-03T16:40:15Z"
   }
 ]
 #+end_src
@@ -13423,6 +13430,51 @@ Non-blocking findings of fess pg-PG1-r1 (fess/pg-PG1-r1.md) on subtask PG1 (capa
 3. (low) manager/test/service_http.py per-lifetime finally blocks in route_checks, worker_failure_checks, manager_failure_checks, tui_failure_checks and storage_checks: they still send terminate and wait 25 s with no kill, and only the dispatch-level reaping() completes the cleanup, so two stop paths exist. Fix: route these blocks through CapacityHarness.reap.
 
 Open items from the PG1 limitations: no run of record exists until the orphan processes (PIDs 61004, 111 and 9444) are ended and the one-minute load is at most 16. Frontend processes that the TUI modes start are not in the reaping list.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG10
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg10-fess-followup-aurz
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 09:40]
+:MODIFIED: [2026-10-03 Sat 09:40]
+:OWNER:    johnw
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG10-r1 (report fess/pg-PG10-r1.md in the private evidence
+directory).
+
+Resolved in the PG10 commit:
+
+- (low) doc/workflow-manager-handoff.md still described failures.backup.passed as a diagnosed
+  FAIL. The current-state list, the WM-041 row and the open-findings list now record the
+  failures-backup mode of PG10. doc/PLAN.org holds the earlier tracker comments as records.
+
+Open:
+
+1. (medium) manager/test/service_http.py (failures-backup, cases 2 and 3, about lines
+   19681-19693 and 19707-19727): the "not reached" branches accept any ending that is not a
+   SIGKILL, including a backup or restore that fails before its window, and the mode still writes
+   failures.backup.passed true. Require child.returncode == 0 and a schema-valid success answer
+   (a backup result for case 2, a StoreRestoration result for case 3) in each not-reached branch,
+   and fail the mode otherwise.
+2. (low) manager/test/service_http.py (about lines 19672-19680 and 19699-19706): when the 60 s
+   polling deadline expires with the administration child still running, child.wait(timeout=20)
+   can raise TimeoutExpired without a kill. These children are not in CapacityHarness.started,
+   so an orphan can keep the configuration lease. Kill the child before the bounded wait, or
+   register it with CapacityHarness.started.
+3. (low) manager/test/service_http.py: CapacityHarness.upload, file_size_limit and
+   files_beside_database moved for reuse, but capacity-inputs, faults-io and the operations
+   backup and restore modes were not rerun. Rerun capacity-inputs and faults-io once in the next
+   gate pass.
+4. (low) manager/CAPACITY.md and service_http.py: failures-backup starts a CapacityResident
+   sampler in each meter.begin but records no RSS value. Skip the sampler for this mode or note
+   it. Case 3 widens its window with the 64 MiB capture, not 64 MiB of rows (disclosed).
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PG8
 :PROPERTIES:
@@ -24366,7 +24418,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 06:15]
+:MODIFIED: [2026-10-03 Sat 09:40]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -24592,6 +24644,13 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "PG4 (2026-10-03): WM-041 low finding 'page-set first-page median' and report section 4 low 'Page-set paragraphs'. Dominant cost before the fix: the serial decode of the 256 legacy entries of the first window in History.observeLegacy (observeEntry, readRunRecordWithEnvelopesAt), 175 to 205 ms of a first-page build of 259 to 324 ms (median 265 ms, instrumented, load 9.7 to 17.4). Per entry: events.ndjson 214.5 us, supervisor-manifest 94.4 us, owner.json 80.7 us, program.json 63.0 us, manifest.json 59.6 us. +RTS -s: productivity 93.9 percent, GC 0.88 s of 14.35 s CPU. The four listed candidate causes were rejected (no repeated manifest reads, one window materialized, encoding 1 to 4 ms, view checks 0 to 11 us). Fix: observeLegacy decodes in at most eight contiguous groups with mapConcurrently and keeps address order; per-window decode median 135 to 30 ms. capacity-inputs at N8 (uninstrumented): first-page p50 131.2 ms, p95 968 ms, 0 of 43 keys outside their ceilings, start loads 5.66 to 12.44, but not a run of record (PID 61004 present), gated in acat-jkas. pages mode at N8 (10 cases), manager-history-check at N8 (133 PASS), JOURNEY-ONCE(pg4, 8) and make -C doc check passed. doc/api/README.md 'Pages and live delivery' now limits the one-revision statement to single-window sets. Evidence: PG/PG4/impl-r1 and PG/PG4/integrator in the private evidence directory, fess pg-PG4-r1, follow-ups acat-uvwy.\n",
     "created_at": "2026-10-03T13:15:16Z"
+  },
+  {
+    "id": 723,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PG10 (2026-10-03, WM-041 interrupted backup and restore): new mode failures-backup in manager/test/service_http.py drives agentic-run --manager admin with the offline configuration against a disposable fixture holding a 64 MiB capture. Case 1 (of record): a backup under RLIMIT_FSIZE between the database size and the capture size refused storage-unavailable, left no complete file, a restore naming it refused with no change and no marker, check-store reported valid with the same epoch and stream id, the next serve lifetime served the committed state, and an unlimited backup into a new destination completed. Case 2 (SIGKILL during the capture copy) and case 3 (SIGKILL of a restore after restore-in-progress appeared: serve exits 2, offline status refuses storage-unavailable, the marker remains) were both reached and passed. failures-backup-measure.json reports failures.backup.passed true, and capacity_summary.py summary reports PASS for that key. capacity_summary.py ceilings, the Phase A journey at N8 and make -C doc check passed. manager/CAPACITY.md now names failures-backup as the basis, and the restart-interruption case of manager-admission-check keeps its private boundary. Not a run of record under the PG1 rule (PID 61004 was running). Fess pg-PG10-r1 not blocking; findings in acat-pg10-fess-followup-aurz.",
+    "created_at": "2026-10-03T16:40:14Z"
   }
 ]
 #+end_src
