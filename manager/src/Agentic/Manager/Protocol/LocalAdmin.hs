@@ -5,7 +5,7 @@
 -- | The frozen local stdin request and metadata-only response vocabulary.
 module Agentic.Manager.Protocol.LocalAdmin
   ( LocalAdminRequest (..), adminOperation, validAdminRequest, decodeLocalAdminRequest,
-    AdminFailure (..), adminFailureCode, adminError, adminSuccess, reloadedProfiles, stoppedManager,
+    AdminFailure (..), adminFailureCode, adminError, adminSuccess, reloadedProfiles, stoppedManager, backedUp,
     CredentialMetadata (..), validCredentialMetadata, validLocalFile
   ) where
 
@@ -51,6 +51,10 @@ data LocalAdminRequest
     -- cancelled with their cleanup and the process ends. Offline
     -- administration changes nothing and answers that the manager is stopped.
     Shutdown
+  | -- | Copy the stopped Store into a new private directory: the database,
+    -- the captures and the completion binding last. Only offline
+    -- administration takes a backup. A serving manager refuses it.
+    Backup !FilePath
   | OtherAdmin !Text
 
 -- | Fixed refusals. Storage failure makes no assertion about publication or COMMIT.
@@ -88,10 +92,11 @@ adminOperation request = case request of
   ReloadProfiles -> "reload-profiles"
   Drain -> "drain"
   Shutdown -> "shutdown"
+  Backup _ -> "backup"
   OtherAdmin name -> name
 
 otherOperations :: [Text]
-otherOperations = ["backup", "restore"]
+otherOperations = ["restore"]
 
 validLocalFile :: FilePath -> Bool
 validLocalFile path = let value = T.pack path in T.length value >= 2 && T.length value <= 8192
@@ -123,6 +128,7 @@ validAdminRequest request = case request of
   ReloadProfiles -> True
   Drain -> True
   Shutdown -> True
+  Backup path -> validLocalFile path
   OtherAdmin name -> name `elem` otherOperations
 
 decodeLocalAdminRequest :: BS.ByteString -> Either AdminFailure LocalAdminRequest
@@ -132,7 +138,7 @@ decodeLocalAdminRequest bytes
       value <- either (\failure -> Left (if failure == "duplicate-field" then DuplicateField else MalformedRequest)) Right (decodeStrictValue bytes)
       fields <- case value of Object fields -> Right fields; _ -> Left MalformedRequest
       operation <- case KM.lookup "operation" fields of Just (String name) -> Right name; _ -> Left MalformedRequest
-      unless (operation `elem` (["issue-credential","rotate-credential","revoke-credential","list-credentials","status","check-store","check-quarantine","release-quarantine","reload-profiles","drain","shutdown"] <> otherOperations)) (Left UnknownOperation)
+      unless (operation `elem` (["issue-credential","rotate-credential","revoke-credential","list-credentials","status","check-store","check-quarantine","release-quarantine","reload-profiles","drain","shutdown","backup"] <> otherOperations)) (Left UnknownOperation)
       case KM.lookup "version" fields of
         Just (Number 1) -> Right ()
         Just (Number _) -> Left UnsupportedVersion
@@ -169,9 +175,9 @@ parseRequest operation fields = case operation of
   "reload-profiles" -> pure ReloadProfiles
   "drain" -> pure Drain
   "shutdown" -> pure Shutdown
+  "backup" -> Backup <$> fields .: "outputFile"
   _ -> do
     case operation of
-      "backup" -> localFile "outputFile"
       "restore" -> localFile "backupFile" >> localFile "fencingEvidenceFile"
       _ -> pure ()
     pure (OtherAdmin operation)
@@ -230,3 +236,16 @@ reloadedProfiles profiles = object ["profileIds" .= map fst pairs, "revision" .=
   where
     pairs = sort profiles
     digest = TE.decodeUtf8 (convertToBase Base16 (hash (encoded (map (\(ident, revision) -> [ident, revision]) pairs)) :: Digest SHA256))
+
+-- | The result of @backup@ from the completion binding of the backup and the
+-- lowercase hexadecimal SHA-256 digest and the size in bytes of its
+-- published database copy. The completion binding records the identity of
+-- the source manager root and no backup identity, so @backupId@ is
+-- @backup_@ followed by the lowercase hexadecimal SHA-256 digest of the
+-- completion binding bytes. Two backups of one manager root therefore have
+-- the same @backupId@, and @sha256@ tells their database copies apart.
+-- @bytes@ is a canonical unsigned decimal string.
+backedUp :: BS.ByteString -> Text -> Integer -> Value
+backedUp binding digest size = object
+  ["backupId" .= ("backup_" <> TE.decodeUtf8 (convertToBase Base16 (hash binding :: Digest SHA256))),
+   "sha256" .= digest, "bytes" .= T.pack (show size)]

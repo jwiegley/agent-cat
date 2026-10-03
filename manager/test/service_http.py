@@ -21,6 +21,7 @@ import ssl
 import stat
 import subprocess
 import sys
+import tempfile
 import termios
 import threading
 import time
@@ -105,7 +106,13 @@ lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
 # status then reports stopped, offline shutdown changes no Store file, a
 # fourth lifetime prepares the waiting request with no client command, and
 # the manager log holds the shutdown records with no command that executed
-# twice.
+# twice. Case 4 is backup. After the shutdown of case 3, with no active
+# reservation, an offline backup through the offline configuration answers
+# the frozen result, its new directory holds the database copy, the captures
+# and the completion binding last, and the source Store is unchanged except
+# for the checkpoint of the copy. A second backup into the same directory
+# refuses with output-conflict, and a backup through the live channel of the
+# fourth lifetime refuses with state-conflict.
 OPERATIONS = "operations"
 operations_mode = len(sys.argv) == 6 and sys.argv[5] == OPERATIONS
 mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, OPERATIONS, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-client-controls", "emacs-client", "emacs-client-controls", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline", "emacs-service", "emacs-service-broken-answer") + JOURNEYS
@@ -4654,6 +4661,10 @@ def operations_drain(with_second):
         assert preparation["state"] == "live", preparation["state"]
         print("PASS operations case 2d: the next lifetime prepared review", prepared["preparationId"], "for request",
               reviewed["id"], "that the drain returned to the queue", flush=True)
+        # A draft request holds one capture, so that the backup of case 4
+        # copies a capture. The draft holds no reservation.
+        operations_capture(capabilities, authorized,
+                           create_request(capabilities, authorized, catalogue_workflow(authorized, "profile_1")))
         cancelled_at_shutdown = operations_shutdown(process, client, authorized, reviewed, workflows["profile_3"], waiting)
     finally:
         stop(2, process, output, errors)
@@ -4741,7 +4752,100 @@ def operations_shutdown(process, client, authorized, reviewed, workflow, waiting
     print("PASS operations case 3b: offline status through the offline configuration reported stopped with",
           reported["activeReservations"], "active reservations, so the cleanup of run", run, "released its reservation,",
           "and offline shutdown answered stopped and changed none of", len(before), "Store files", flush=True)
+    operations_backup(offline_config, root)
     return run, reviewing["preparationId"]
+
+
+def operations_capture(capabilities, authorized, created):
+    """Upload one capture for a draft request through POST /v1/captures."""
+    content = "Operations backup capture caf\u00e9\r\n".encode() * 64
+    connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=15)
+    try:
+        connection.request("POST", "/v1/captures?requestId=" + created["id"], body=content,
+                           headers=authorized | {"Content-Type": "application/octet-stream",
+                                                 "Idempotency-Key": capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)})
+        response = connection.getresponse()
+        raw = response.read(1048577)
+    finally:
+        connection.close()
+    assert response.status == 202, ("capture upload", response.status, raw[:200])
+    receipt = frozen.parse_json(raw)
+    validate("CaptureReceipt", receipt, raw)
+    assert receipt["sha256"] == hashlib.sha256(content).hexdigest(), receipt
+
+
+def coordination_dump(directory):
+    """The SQL dump of the coordination database of a directory, read from a
+    private copy of the database and its write-ahead log, so that the read
+    changes no file of the directory."""
+    import sqlite3
+    copy = Path(tempfile.mkdtemp(prefix="dump.", dir=work))
+    for name in ("coordination.sqlite3", "coordination.sqlite3-wal"):
+        if (directory / name).exists():
+            shutil.copyfile(directory / name, copy / name)
+    connection = sqlite3.connect(str(copy / "coordination.sqlite3"))
+    try:
+        return list(connection.iterdump()), [ident for (ident,) in connection.execute("SELECT id FROM captures ORDER BY id")]
+    finally:
+        connection.close()
+        shutil.rmtree(copy)
+
+
+def operations_backup(offline_config, root):
+    """Case 4 is backup after the shutdown of case 3, with no active
+    reservation. An offline backup through the offline configuration answers
+    the frozen result. Its new private directory holds the database copy,
+    every capture that the database names, and the completion binding, which
+    is published last and names the manager root. The source Store keeps its
+    rows and every file other than the database and its write-ahead
+    companions, which the checkpoint of the copy may change. A second backup
+    into the same directory refuses with output-conflict and changes
+    nothing."""
+    database = ("coordination.sqlite3", "coordination.sqlite3-wal", "coordination.sqlite3-shm")
+
+    def other_files():
+        return {str(path): (path.stat().st_size, path.stat().st_mtime_ns, hashlib.sha256(path.read_bytes()).hexdigest())
+                for path in root.rglob("*") if path.is_file() and path.name not in database}
+
+    def destination_files():
+        return {str(path.relative_to(destination)): (path.stat().st_mtime_ns, path.read_bytes())
+                for path in destination.rglob("*") if path.is_file()}
+
+    destination = work / "backup-case-4"
+    request = {"version": 1, "operation": "backup", "outputFile": str(destination)}
+    rows_before, _ = coordination_dump(root)
+    files_before = other_files()
+    backed = administration(request, path=offline_config)
+    rows_after, _ = coordination_dump(root)
+    assert rows_after == rows_before, "the backup changed a row of the source Store"
+    assert other_files() == files_before, "the backup changed a source Store file other than the database"
+    assert destination.stat().st_mode & 0o777 == 0o700, oct(destination.stat().st_mode)
+    assert sorted(path.name for path in destination.iterdir()) == ["captures", "complete", "coordination.sqlite3"], \
+        sorted(path.name for path in destination.iterdir())
+    copied = (destination / "coordination.sqlite3").read_bytes()
+    binding = (destination / "complete").read_bytes()
+    assert backed["result"] == {"backupId": "backup_" + hashlib.sha256(binding).hexdigest(),
+                                "sha256": hashlib.sha256(copied).hexdigest(), "bytes": str(len(copied))}, backed["result"]
+    path, device, inode = json.loads(binding)
+    status = os.stat(root)
+    assert (path, device, inode) == (os.path.normpath(str(root)), status.st_dev, status.st_ino), ("the completion binding", binding)
+    rows_copy, captures = coordination_dump(destination)
+    assert rows_copy == rows_before, "the database copy differs from the source Store"
+    names = sorted(path.name for path in (destination / "captures").iterdir())
+    assert captures and names == captures, ("the captures of the copy", names, captures)
+    assert all((destination / "captures" / name).read_bytes() == (root / "captures" / name).read_bytes() for name in names), \
+        "a capture of the copy differs from its source"
+    published = destination_files()
+    assert all(stamp <= published["complete"][0] for stamp, _ in published.values()), "the completion binding is not last"
+    print("PASS operations case 4a: an offline backup with no active reservation answered", backed["result"], "and its new",
+          "directory holds the database copy, whose SQL dump of", len(rows_copy), "lines equals that of the source Store,",
+          len(names), "capture files",
+          "and the completion binding last; the source Store kept its rows and", len(files_before), "other files", flush=True)
+    conflict = administration(request, refused="output-conflict", path=offline_config)
+    assert destination_files() == published, "a refused backup changed the earlier copy"
+    assert other_files() == files_before, "a refused backup changed a source Store file"
+    print("PASS operations case 4b: a second backup into the same directory refused with", conflict["error"]["code"],
+          "and changed neither the copy nor the source Store", flush=True)
 
 
 def operations_restart(authorized, waiting, shutdown, lifetime, stop):
@@ -4756,6 +4860,11 @@ def operations_restart(authorized, waiting, shutdown, lifetime, stop):
     process, output, errors = lifetime(3)
     try:
         wait_ready(process)
+        live_destination = work / "backup-case-4-live"
+        refused = administration({"version": 1, "operation": "backup", "outputFile": str(live_destination)}, refused="state-conflict")
+        assert not live_destination.exists(), "a refused live backup created its destination"
+        print("PASS operations case 4c: a backup through the live channel of a serving lifetime refused with",
+              refused["error"]["code"], "and created no destination", flush=True)
         status, capabilities, raw = request("/v1/capabilities", authorized)
         assert status == 200
         observed, wait_for, _, _ = mixed_client(capabilities, authorized)
@@ -4798,7 +4907,7 @@ def operations_restart(authorized, waiting, shutdown, lifetime, stop):
           replies[0]["body"]["result"], "before the shutdown notice at", str(stopped_lifetime[0]["shutdown"]) + "; all",
           len(lifetimes), "lifetimes ended with their shutdown notices,", len(receipts), "commands have one receipt each,",
           "and each of", len(starts), "runs has one start relay", flush=True)
-    print("PASS operations: shutdown case 3 held through the TLS 1.3 manager", flush=True)
+    print("PASS operations: shutdown case 3 and backup case 4 held through the TLS 1.3 manager", flush=True)
 
 
 if operations_mode:

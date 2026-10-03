@@ -4,19 +4,19 @@
 -- | A same-user local channel to an existing coordinator, not a second writer.
 module Agentic.Manager.LocalAdmin
   ( withLocalAdministration, callLocalAdministration, administerLocally,
-    AdministrationHooks (..), offlineAdministration, ProfileReload
+    AdministrationHooks (..), offlineAdministration, ProfileReload, backupStopped
   ) where
 
 import Agentic.Manager.Administration (localAdministrator, recordAdministration, recordAdministrationReceipt)
-import Agentic.Manager.Configuration (Configuration, configurationAdministrationRoot)
+import Agentic.Manager.Configuration (Configuration, InstalledConfiguration, configurationAdministrationRoot)
 import Agentic.Manager.Credentials (administerCredentials)
 import Agentic.Manager.Flow (AdministrationBody (DrainAdministration, ReloadAdministration, ShutdownAdministration))
 import Agentic.Manager.Profile (Diagnostic (UnreadableConfiguration), PublicProfile, publicId, publicRevision)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Protocol.LocalAdmin
 import Agentic.Manager.Quarantine (StoreState (..), checkQuarantine, releaseQuarantine, reportStatus, reportStoreCheck)
-import Agentic.Manager.Store (CoordinationStore, StoreFailure (StoreLimit), advanceAuthorizationRevision, runTransaction,
-  withStoreAdministration, withStoreRequest)
+import Agentic.Manager.Store (CoordinationStore, StoreBackup (..), StoreFailure (StoreLimit, StoreOutputConflict),
+  advanceAuthorizationRevision, backupCoordinationStore, runTransaction, withStoreAdministration, withStoreRequest)
 import Agentic.Runtime (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateRoot, privateRootPath)
 import Control.Concurrent.Async (link, withAsync)
 import Control.Exception (IOException, bracket, finally, throwIO, try)
@@ -107,7 +107,10 @@ withLocalAdministration store hooks action = do
 -- Offline @reload-profiles@ only validates a file and offline @shutdown@
 -- changes nothing, both before any Store opens, and offline @drain@ has no
 -- lifetime to drain, so without their hooks this dispatch refuses them with
--- 'StateConflict'.
+-- 'StateConflict'. A @backup@ needs the stopped Store, which offline
+-- administration copies through 'backupStopped' before any other Store
+-- lifetime opens, so this dispatch, and with it the serving manager, refuses
+-- it with 'StateConflict'.
 administerLocally :: AdministrationHooks -> CoordinationStore -> LocalAdminRequest -> IO (BS.ByteString, IO ())
 administerLocally hooks store request = case request of
   Status -> answered (hookState hooks >>= \state -> reportStatus state store)
@@ -121,6 +124,7 @@ administerLocally hooks store request = case request of
   ReloadProfiles -> maybe refused (answered . reloadServing store (hookWake hooks)) (hookReload hooks)
   Drain -> maybe refused (answered . drainServing store) (hookDrain hooks)
   Shutdown -> maybe refused (shutdownServing store) (hookShutdown hooks)
+  Backup _ -> refused
   OtherAdmin _ -> answered (administerCredentials store request)
   where
     answered = fmap (\response -> (response, pure ()))
@@ -201,6 +205,20 @@ recordedServing store operation body perform = do
     _ -> pure (failure StorageUnavailable)
   where
     failure = adminError (Just operation)
+
+-- | Offline @backup@ into the given destination under the configuration
+-- lease of the installed configuration. It copies the Store through
+-- 'backupCoordinationStore', with no restart reconciliation and no manager
+-- log, and answers the frozen result that 'backedUp' defines. An existing
+-- destination refuses with 'OutputConflict'. Every other failure propagates
+-- to the caller.
+backupStopped :: InstalledConfiguration -> FilePath -> IO BS.ByteString
+backupStopped installed destination = do
+  result <- try @StoreFailure (backupCoordinationStore installed destination)
+  case result of
+    Right copied -> pure (adminSuccess "backup" (backedUp (backupBinding copied) (backupSha256 copied) (backupBytes copied)))
+    Left StoreOutputConflict -> pure (adminError (Just "backup") OutputConflict)
+    Left failure -> throwIO failure
 
 -- | Nothing selects the existing offline path. A configured channel failure
 -- never reopens the Store or retries the request through another path.

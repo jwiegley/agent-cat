@@ -36,7 +36,7 @@ import qualified Data.Text as T
 import qualified Database.SQLite3 as SQL
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Conc (BlockReason (BlockedOnSTM))
-import System.Directory (createDirectory, createDirectoryIfMissing, doesFileExist, removeFile)
+import System.Directory (createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, removeFile)
 import System.Posix.Types (CUid (..))
 import System.Posix.User (getEffectiveUserID)
 import qualified Data.Map.Strict as Map
@@ -234,8 +234,6 @@ restartChecks work = do
   let backup=work </> "snapshot"
       content="immutable input\r\nUTF8 snow: \233\155\170"
       capture=root </> "captures" </> "capture_one"
-  createDirectory backup
-  setFileMode backup 0o700
   -- Establish the role before adding the fixture capture.
   withInstalled path $ \installed -> do
     void(withCoordinationStore installed storeIdentity)
@@ -251,7 +249,15 @@ restartChecks work = do
         execute "INSERT INTO restoration_quarantine VALUES ('older_claim',0,'[[\"operator\",\"a\"]]')" []) [event]
       refused <- try @Diagnostic(backupCoordinationStore installed backup)
       check "offline backup refuses a live Store lifetime" (isLeft refused)
-    backupCoordinationStore installed backup
+    doesDirectoryExist backup >>= check "a refused backup creates no destination" . not
+    copied <- backupCoordinationStore installed backup
+    getSymbolicLinkStatus backup >>= check "backup creates a private destination directory" . (== 0o700) . (.&. 0o777) . fileMode
+    database <- BS.readFile(backup </> "coordination.sqlite3")
+    check "backup reports the digest and the size of its database copy"
+      (backupSha256 copied == T.pack(show(hash database :: Digest SHA256)) && backupBytes copied == fromIntegral(BS.length database))
+    BS.readFile(backup </> "complete") >>= check "backup reports the completion binding that it published" . (== backupBinding copied)
+    expect "a backup into an existing destination refuses as an output conflict" StoreOutputConflict (backupCoordinationStore installed backup)
+    BS.readFile(backup </> "coordination.sqlite3") >>= check "a refused backup leaves the earlier copy" . (== database)
     saved <- BS.readFile(backup </> "captures" </> "capture_one")
     check "coherent backup retains exact immutable capture bytes" (saved==content)
     withCoordinationStore installed $ \store -> mutate store (execute "INSERT INTO restoration_quarantine VALUES ('newer_claim',0,'[[\"operator\",\"b\"]]')" []) [event]

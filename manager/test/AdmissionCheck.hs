@@ -130,11 +130,9 @@ restartInterruptionChecks work native = do
   withFixture work native "restore-interruption" 1 [] (const(pure()))
   let root=work </> "restore-interruption"
       backup=work </> "interrupted-backup"
-  createDirectory backup
-  setFileMode backup 0o700
   config <- loadConfiguration (const(Right())) exactPreparedTarget (const False) (work </> "restore-interruption.json") >>= right
   bracket (installConfiguration config >>= right) closeConfiguration $ \installed -> do
-    backupCoordinationStore installed backup
+    void(backupCoordinationStore installed backup)
     Audit.withReviewAudit "restore-marker" $ \audit -> do
       original <- async(restoreCoordinationStore installed backup)
       (do
@@ -159,8 +157,6 @@ restartNativeChecks work native = do
     pure(identity,draftA,draftB,nonce,receipt)
   let root=work </> "restart"
       backup=work </> "backup"
-  createDirectory backup
-  setFileMode backup 0o700
   config <- loadConfiguration (const(Right())) exactPreparedTarget (const False) (work </> "restart.json") >>= right
   bracket (installConfiguration config >>= right) closeConfiguration $ \installed -> do
     -- Discovery belongs to the newly installed registry, never the previous lifetime.
@@ -168,7 +164,7 @@ restartNativeChecks work native = do
     catalogues <- forM public $ \profile -> do
       discovered <- probeConfiguredProfile installed(publicId profile)(publicRevision profile) >>= right
       pure(publicId profile,discovered)
-    backupCoordinationStore installed backup
+    void(backupCoordinationStore installed backup)
     withCoordinationStore installed $ \owner -> do
       currentIdentity <- storeIdentity owner
       assertion "ordinary restart preserves epoch/stream and changes process generation" (storeAuthorityEpoch currentIdentity==storeAuthorityEpoch originalIdentity && storeStreamId currentIdentity==storeStreamId originalIdentity && storeProcessGeneration currentIdentity/=storeProcessGeneration originalIdentity)

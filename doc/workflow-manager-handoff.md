@@ -1703,6 +1703,10 @@ G1.
   `shutdown` answers `stopped` on the live channel and then ends the
   process through the termination path, which cancels the owned runs with
   their cleanup. Offline it answers `stopped` and changes nothing (PG7).
+  Offline `backup` copies the stopped Store into a new private directory
+  under the configuration lease and answers `backupId`, `sha256` and
+  `bytes`. An existing destination receives `output-conflict`, and the
+  live channel refuses `backup` with `state-conflict` (PG8).
 - The open of a serving lifetime answers each command ask of an earlier
   lifetime that has no reply. An ordinary command gets its current receipt
   or a failure reply, and an administration ask gets

@@ -5,7 +5,7 @@
 module Agentic.Cli.LocalAdmin (runLocalAdmin) where
 
 import Agentic.Manager.Configuration
-import Agentic.Manager.LocalAdmin (administerLocally, callLocalAdministration, offlineAdministration)
+import Agentic.Manager.LocalAdmin (administerLocally, backupStopped, callLocalAdministration, offlineAdministration)
 import Agentic.Manager.Profile (Diagnostic (UnreadableConfiguration), publicId, publicRevision)
 import Agentic.Manager.Protocol.LocalAdmin
 import Agentic.Manager.Quarantine (unavailableStoreCheck)
@@ -26,7 +26,10 @@ import System.IO (stdin, stdout)
 -- has no serving lifetime to drain and refuses at the same point. Offline
 -- shutdown acquires the configuration lease, which proves that no manager
 -- serves the configuration, and answers that the manager is stopped without
--- opening the Store, so it changes nothing.
+-- opening the Store, so it changes nothing. A live manager refuses backup.
+-- Offline backup holds the configuration lease and copies the Store through
+-- its copying lifetime, so it neither reconciles a restart nor goes through
+-- the dispatch of the other operations.
 runLocalAdmin :: (FilePath -> IO (Either Diagnostic Configuration)) -> FilePath -> IO ()
 runLocalAdmin load path = do
   input <- try @IOException (BS.hGet stdin 2097153)
@@ -57,6 +60,8 @@ runLocalAdmin load path = do
                         case (installed, request) of
                           (Left _, _) -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
                           (Right owner, Shutdown) -> closeConfiguration owner >> pure stoppedManager
+                          (Right owner, Backup destination) -> bracket (pure owner) closeConfiguration $ \active ->
+                            backupStopped active destination
                           (Right owner, _) -> bracket (pure owner) closeConfiguration $ \active ->
                             offline request (withCoordinationStore active)
         pure $ case result of

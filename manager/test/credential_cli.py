@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise frozen stdin administration offline and through the original live Store."""
 from pathlib import Path
+import hashlib
 import json
 import os
 import select
@@ -102,6 +103,23 @@ release_unknown = call({"version": 1, "operation": "release-quarantine", "quaran
                         "cleanupEvidenceId": "cleanup_unknown", "cleanupEvidenceDigest": "0" * 64})
 assert not release_unknown["ok"] and release_unknown["operation"] == "release-quarantine", release_unknown
 assert release_unknown["error"]["code"] == "state-conflict", release_unknown
+# Offline backup copies the stopped Store into a new private directory: the
+# database copy, the captures and the completion binding. The result is the
+# digest and size of the database copy and the identity of the binding. An
+# existing destination refuses with output-conflict and keeps its copy.
+backup_dir = work / "cli-backup"
+BACKUP = {"version": 1, "operation": "backup", "outputFile": str(backup_dir)}
+backed = call(BACKUP)
+assert backed["ok"], backed
+assert backup_dir.stat().st_mode & 0o777 == 0o700, oct(backup_dir.stat().st_mode)
+assert sorted(path.name for path in backup_dir.iterdir()) == ["captures", "complete", "coordination.sqlite3"], \
+    sorted(path.name for path in backup_dir.iterdir())
+database = (backup_dir / "coordination.sqlite3").read_bytes()
+assert backed["result"] == {"backupId": "backup_" + hashlib.sha256((backup_dir / "complete").read_bytes()).hexdigest(),
+                            "sha256": hashlib.sha256(database).hexdigest(), "bytes": str(len(database))}, backed
+conflict = call(BACKUP)
+assert not conflict["ok"] and conflict["error"]["code"] == "output-conflict", conflict
+assert (backup_dir / "coordination.sqlite3").read_bytes() == database, "a refused backup changed the earlier copy"
 
 holding = subprocess.Popen([str(owner), "hold-credentials", str(original)],
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -114,6 +132,11 @@ try:
     # Offline shutdown takes the lease, so a Store owner refuses it.
     held_shutdown = call(SHUTDOWN)
     assert not held_shutdown["ok"] and held_shutdown["error"]["code"] == "storage-unavailable", held_shutdown
+    # Offline backup takes the lease too, so a Store owner refuses it before
+    # the destination exists.
+    held_backup = call({**BACKUP, "outputFile": str(work / "cli-held-backup")})
+    assert not held_backup["ok"] and held_backup["error"]["code"] == "storage-unavailable", held_backup
+    assert not (work / "cli-held-backup").exists(), "a refused backup created its destination"
 finally:
     holding.terminate()
     holding.communicate(timeout=10)
@@ -136,7 +159,7 @@ assert rotated["ok"] and rotated["result"]["credential"]["clientId"] == issued["
 revoked = call({"version": 1, "operation": "revoke-credential",
                 "credentialId": rotated["result"]["credential"]["credentialId"]})
 assert revoked["ok"]
-print("PASS frozen stdin CLI, offline status, check-store, check-quarantine and release-quarantine, offline reload-profiles validation without the lease or the Store, offline shutdown without the Store, exclusive offline ownership, private issuance and revocation")
+print("PASS frozen stdin CLI, offline status, check-store, check-quarantine and release-quarantine, offline reload-profiles validation without the lease or the Store, offline shutdown without the Store, offline backup into a new directory with the output-conflict refusal, exclusive offline ownership, private issuance and revocation")
 
 # A separate, short private namespace avoids Unix socket path limits on the data root.
 admin_root = Path(tempfile.mkdtemp(prefix="admin.", dir=os.environ["TMPDIR"]))
@@ -196,6 +219,10 @@ try:
     live_release = call({"version": 1, "operation": "release-quarantine", "quarantineId": "reservation_unknown",
                          "cleanupEvidenceId": "cleanup_unknown", "cleanupEvidenceDigest": "0" * 64})
     assert not live_release["ok"] and live_release["error"]["code"] == "state-conflict", live_release
+    # The live channel refuses backup, and the destination is not created.
+    live_backup = call({**BACKUP, "outputFile": str(work / "cli-live-backup")})
+    assert not live_backup["ok"] and live_backup["error"]["code"] == "state-conflict", live_backup
+    assert not (work / "cli-live-backup").exists(), "a refused live backup created its destination"
     for payload, code, eof in [
         (b'{', "malformed-request", True),
         (b'{', "malformed-request", False),
@@ -330,4 +357,4 @@ for symbolic in [False, True]:
     assert sentinel.read_bytes() == b"keep"
     assert address.is_symlink() if symbolic else address.read_bytes() == b"keep"
     address.unlink()
-print("PASS live original-Store administration, live status, check-store and reload-profiles, retained-response revocation, endpoint ownership and no offline fallback")
+print("PASS live original-Store administration, live status, check-store and reload-profiles, the live backup refusal, retained-response revocation, endpoint ownership and no offline fallback")

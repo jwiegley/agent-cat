@@ -7616,7 +7616,7 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 08:16]
+:MODIFIED: [2026-10-03 Sat 08:49]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G5
 :SOURCE_REPO: agent-cat
@@ -7764,6 +7764,13 @@ Full failure/capacity evidence, operational procedures, reproducible packages, r
     "author": "johnw",
     "text": "PG7 (2026-10-03): the functional shutdown operation of WM-042 is in place with service_http.py operations cases 1 to 3 passing at N8 (shutdown with a run at its person question and an open stream, exit 0, offline stopped, next lifetime runs the queued request with no client command). Not a capacity run. Findings in acat-5j0l.",
     "created_at": "2026-10-03T15:16:10Z"
+  },
+  {
+    "id": 720,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "PG8: offline backup through local administration. Typed Backup constructor, backupStopped dispatched after installConfiguration under the configuration lease, frozen {backupId, sha256, bytes}, output-conflict for an existing destination, state-conflict through the live channel. Evidence (PG/PG8): build-final, manager-store-check main suite N8, manager-command-check N8 with command_contract.py and credential_cli.py (audit rerun on final source, audit-r1), operations N8 cases 1-4 (audit rerun, audit-r1), Phase A journey N8, make -C doc check. Not of record under the PG1 rule: stale PF17 manager PID 61004 was running. Restore stays unimplemented. Follow-up: acat-pg8-fess-followup-8x8u.",
+    "created_at": "2026-10-03T15:49:37Z"
   }
 ]
 #+end_src
@@ -13409,6 +13416,46 @@ Non-blocking findings of fess pg-PG1-r1 (fess/pg-PG1-r1.md) on subtask PG1 (capa
 3. (low) manager/test/service_http.py per-lifetime finally blocks in route_checks, worker_failure_checks, manager_failure_checks, tui_failure_checks and storage_checks: they still send terminate and wait 25 s with no kill, and only the dispatch-level reaping() completes the cleanup, so two stop paths exist. Fix: route these blocks through CapacityHarness.reap.
 
 Open items from the PG1 limitations: no run of record exists until the orphan processes (PIDs 61004, 111 and 9444) are ended and the one-minute load is at most 16. Frontend processes that the TUI modes start are not in the reaping list.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG8
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg8-fess-followup-8x8u
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 08:49]
+:MODIFIED: [2026-10-03 Sat 08:49]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG8-r1 (report fess/pg-PG8-r1.md in the private evidence
+directory).
+
+Resolved in the PG8 commit:
+
+- (medium) The implementer's command-check.log and operations.log predated the final
+  credential_cli.py and service_http.py. The audit reruns on the final binaries (command check at N8
+  with command_contract.py and credential_cli.py, and operations at N8 with cases 4a, 4b and 4c) passed
+  and are stored under PG/PG8/audit-r1.
+- (low) manager/STORAGE.md said that a refused backup creates no destination. STORAGE.md and
+  COMMANDS.md now state that a failure after creation leaves a destination without `complete`, that
+  such a destination is not a backup, and that the operator removes it before a retry.
+
+Open:
+
+1. (low) manager/test/service_http.py case 4a: the check that `complete` is last compares
+   modification times with <=, so it cannot detect a wrong order inside one timestamp tick. Fix: fail
+   the copy before `complete` in StoreCheck and assert that `complete` does not exist, or record the
+   check as weak in the test docstring.
+2. (low) manager/src/Agentic/Manager/Protocol/LocalAdmin.hs backedUp: every backup of one manager
+   root has the same backupId, because the completion binding records only the source root identity.
+   Documented. A per-backup identity needs a contract decision; record it for the restore work.
+3. (low) manager/test/service_http.py operations case 2b: an existing flake. The cancel POST during
+   the drain got 412 stale-revision (impl-r1/operations-attempt3-case2b-cancel-race.log). Fix: reread
+   the control revision on a 412 before the case fails.
 
 * TODO [#C] Phase B part 1 review follow-ups: download quota, id row bound, legacy history, precision gaps
 :PROPERTIES:
@@ -24672,7 +24719,7 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 08:16]
+:MODIFIED: [2026-10-03 Sat 08:49]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-042
 :SOURCE_REPO: agent-cat
@@ -24869,6 +24916,13 @@ recipe that ignores WAL or unresolved effects.
     "author": "johnw",
     "text": "PG7 (2026-10-03): shutdown is implemented. Live: typed Shutdown constructor; ServeHooks gains serveStop, filled by managerServeCmd with the stop request of withManagerSignals (mark termination, throwTo owner UserInterrupt, idempotent) and passed by serveManager as hookShutdown. The live channel commits an administration command record (AdministerShutdown, ShutdownAdministration), appends the receipt, sends {state: stopped}, closes the sending half and then runs the stop request, so the existing termination path cancels owned runs with their cleanup, ends open streams, appends the shutdown notice and exits 0. Offline shutdown takes and releases the configuration lease and answers stopped without opening the Store (storage-unavailable when the lease is held). Checks passed at N8: build, manager-command-check with command_contract.py and credential_cli.py, service_http.py operations cases 1 to 3 and failures-manager (rerun on the final source), update-haskell-inventory and check-haskell, JOURNEY-ONCE(pg7, 8), make -C doc check. A run cancelled by shutdown is published by the next lifetime as lost supervision with no cancel record, as with the termination signal. Evidence: PG/PG7 in the private evidence directory, fess pg-PG7-r1 (not blocking; findings in acat-5j0l). Not a run of record (PID 61004 running). WM-042 stays open: backup and restore still answer state-conflict.",
     "created_at": "2026-10-03T15:16:09Z"
+  },
+  {
+    "id": 719,
+    "issue_id": "acat-wm-042-sdg9",
+    "author": "johnw",
+    "text": "PG8: offline backup through local administration. Typed Backup constructor, backupStopped dispatched after installConfiguration under the configuration lease, frozen {backupId, sha256, bytes}, output-conflict for an existing destination, state-conflict through the live channel. Evidence (PG/PG8): build-final, manager-store-check main suite N8, manager-command-check N8 with command_contract.py and credential_cli.py (audit rerun on final source, audit-r1), operations N8 cases 1-4 (audit rerun, audit-r1), Phase A journey N8, make -C doc check. Not of record under the PG1 rule: stale PF17 manager PID 61004 was running. Restore stays unimplemented. Follow-up: acat-pg8-fess-followup-8x8u.",
+    "created_at": "2026-10-03T15:49:37Z"
   }
 ]
 #+end_src

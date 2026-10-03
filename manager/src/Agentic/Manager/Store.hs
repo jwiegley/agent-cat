@@ -13,7 +13,7 @@ module Agentic.Manager.Store
     AuthorizationWatch, authorizationRevision, advanceAuthorizationRevision, markAuthorizationChange, recallProjection, retainProjection, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, withAuthorizationRequestReadObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, appendReviewRecord, noticeAfterCommit, PostCommit, noPostCommit, takePostCommit, appendPostCommit, Transaction, execute, query, refuseTransaction, refuseBusy, refuseBusyAt, refuseBusyTransaction, repeatChangedRead, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
     commandReceiptColumns, commandRowReceipt,
-    Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, readRetainedEventsWith, retainEvents, backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
+    Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, readRetainedEventsWith, retainEvents, StoreBackup (..), backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
   ) where
 
 import Agentic.Manager.Store.Admission (StoreAdmission (..))
@@ -32,7 +32,7 @@ import Agentic.Manager.Root (validateRootSeparation)
 import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration, restartMigration, retentionMigration, credentialMigration)
 import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
-   openPrivateRoot, privateRootIdentity, readPrivateFileAt, ensurePrivateDirectoryAt, removePrivateFileAt,
+   openPrivateRoot, privateRootIdentity, readPrivateFileAt, ensurePrivateDirectoryAt, createPrivateDirectoryAt, removePrivateFileAt,
    publishPrivateCaptureAt, CapturePublication (..), privateCaptureBytes, privateCaptureSha256,
    withPrivateDirectoryAt, writePrivateExclusiveAt, SnapshotCheckpoint, maxArtifactBytes, strictFlowCodec, FlowCodec, Actor (Manager), Address (To, Approvers), About (..), Position, Record (..), Schema (FlowCommand, FlowFailure, FlowReceipt, FlowReview, FlowNotice), FlowSegment (..), FailureKind (Refused), failureBody, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, FrontendInvocation, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
 import Control.Concurrent (rtsSupportsBoundThreads)
@@ -70,8 +70,8 @@ import qualified Database.SQLite3 as SQL
 import qualified Database.SQLite3.Direct as Direct
 import Foreign.C.Types (CInt (..))
 import Foreign.Ptr (Ptr)
-import System.FilePath ((</>))
-import System.IO.Error (isDoesNotExistError)
+import System.FilePath ((</>), takeDirectory, takeFileName)
+import System.IO.Error (isAlreadyExistsError, isDoesNotExistError)
 import System.IO (Handle, hClose)
 import Control.Exception (IOException)
 import System.Posix.IO
@@ -93,8 +93,10 @@ data StoreIdentity = StoreIdentity
   } deriving (Eq, Show)
 
 -- | Fixed storage refusals. SQLite details and bound private data are not public diagnostics.
+-- 'StoreOutputConflict' refuses a backup whose destination already exists.
 data StoreFailure = StoreBusy | StoreClosed | StorePoisoned | StoreLimit
   | StoreDeadline | StoreVersion | StoreIntegrity | StoreUnavailable | StoreCleanupUnproven
+  | StoreOutputConflict
   deriving (Eq, Show)
 instance Exception StoreFailure
 
@@ -649,18 +651,38 @@ requireNoRestoration root = do
     Left failure -> throwIO failure
     Right _ -> throwIO StoreUnavailable
 
+-- | The published facts of one backup: the completion binding bytes, and the
+-- lowercase hexadecimal SHA-256 digest and the size in bytes of the database
+-- copy.
+data StoreBackup = StoreBackup
+  { backupBinding :: !BS.ByteString, backupSha256 :: !Text, backupBytes :: !Integer }
+
 -- | A same-root, offline coherent snapshot. An active Store refuses slot acquisition.
 -- Callers first finish Admission and close its Store through their original owners.
-backupCoordinationStore :: InstalledConfiguration -> FilePath -> IO ()
-backupCoordinationStore installed destination = withStoreMode CopyingStore installed $ \(CoordinationStore _ root db _ _ _ _ _ _ _ _ _ _ _ _) ->
+-- The destination is a new directory that the backup creates in an existing
+-- private parent directory outside manager storage. An existing destination
+-- refuses with 'StoreOutputConflict' before anything is written. The database
+-- copy and the captures precede the completion binding, which is published
+-- last. The digest and the size are those of the database copy after its
+-- connection closes.
+backupCoordinationStore :: InstalledConfiguration -> FilePath -> IO StoreBackup
+backupCoordinationStore installed destination = withStoreMode CopyingStore installed $ \(CoordinationStore _ root db _ _ _ _ _ _ _ _ _ _ _ _) -> do
+  validateRootSeparation root [destination]
+  bracket (openPrivateRoot "coordination backup parent" (takeDirectory destination)) closePrivateRoot $ \parent -> do
+    created <- try @IOException (createPrivateDirectoryAt parent [takeFileName destination])
+    case created of
+      Left failure | isAlreadyExistsError failure -> throwIO StoreOutputConflict
+      Left failure -> throwIO failure
+      Right () -> pure ()
   bracket (openPrivateRoot "coordination backup" destination) closePrivateRoot $ \backup -> do
-    validateRootSeparation root [destination]
     writePrivateExclusiveAt backup ["coordination.sqlite3"] BS.empty
     withSnapshotDatabase backup False $ \target -> do
       copyDatabase target db
       copyCaptures db root backup
+    (digest, size) <- withPrivateRead backup "coordination.sqlite3" fileDigest
     let binding = TE.encodeUtf8(T.pack(privateRootIdentity root))
     publishBytes backup ["complete"] binding
+    pure (StoreBackup binding digest size)
 
 -- | Restore only with a readable current safety state under the original service lease.
 -- No Store escapes, and an interrupted publication leaves startup fenced by the marker.
@@ -777,10 +799,24 @@ withCapture :: PrivateRoot -> Text -> (Handle -> IO a) -> IO a
 withCapture root ident action = do
   unless(not(T.null ident) && T.length ident<=128 && T.all (\c -> isAscii c && (isAlphaNum c || c=='_' || c=='-')) ident)(throwIO StoreIntegrity)
   bracket (openPrivateSubroot root ["captures"]) closePrivateRoot $ \captures ->
-    withPrivateDirectoryAt captures [] $ \parent ->
-      bracket (bracketOnError
-        (openFdAt (Just parent) (T.unpack ident) ReadOnly defaultFileFlags {cloexec=True,nofollow=True,nonBlock=True}) closeFd
-        (\fd -> checkPrivateDescriptor fd >> fdToHandle fd)) hClose action
+    withPrivateRead captures (T.unpack ident) action
+
+-- | Read one private regular file of the root, without following a link.
+withPrivateRead :: PrivateRoot -> FilePath -> (Handle -> IO a) -> IO a
+withPrivateRead root name action =
+  withPrivateDirectoryAt root [] $ \parent ->
+    bracket (bracketOnError
+      (openFdAt (Just parent) name ReadOnly defaultFileFlags {cloexec=True,nofollow=True,nonBlock=True}) closeFd
+      (\fd -> checkPrivateDescriptor fd >> fdToHandle fd)) hClose action
+
+-- | The lowercase hexadecimal SHA-256 digest and the size of the rest of the handle.
+fileDigest :: Handle -> IO (Text, Integer)
+fileDigest handle = loop 0 (hashInit :: Hash.Context SHA256)
+  where
+    loop !total context = do
+      bytes <- BS.hGetSome handle 65536
+      if BS.null bytes then pure (T.pack (show (hashFinalize context)), total)
+      else loop (total + fromIntegral (BS.length bytes)) (hashUpdate context bytes)
 
 checkCapture :: PrivateRoot -> Text -> Integer -> Text -> IO ()
 checkCapture root ident expected digest = withCapture root ident $ \handle ->

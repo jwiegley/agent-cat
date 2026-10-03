@@ -491,20 +491,45 @@ available. Changed declarations or unavailable bytes do not become eligible.
 
 `backupCoordinationStore installed destination` and
 `restoreCoordinationStore installed source` are local offline operations exposed
-through `Agentic.Manager`. Their directory argument is an existing private root
-outside manager storage. First finish Admission using its explicit shutdown
-policy and close its Store through the original owner. A live or quarantined
-Store retains its slot and lease and refuses the offline operation. No listener
-or network boundary exists at this layer. Future service composition must close
-exposure before releasing its Store and invoking these operations.
+through `Agentic.Manager`. Both directories are outside manager storage. First
+finish Admission using its explicit shutdown policy and close its Store through
+the original owner. A live or quarantined Store retains its slot and lease and
+refuses the offline operation. No listener or network boundary exists at this
+layer. The offline `backup` operation of local administration calls
+`backupCoordinationStore` under the configuration lease, and a serving manager
+refuses `backup`, as the
+[command contract](COMMANDS.md#backup) describes. `restore` has no local
+administration operation.
 
-Backup requires an initialized current-schema target and a fresh destination.
-It uses SQLite backup, copies all referenced immutable captures with bounded
-streaming and verification, and publishes its durable completion binding last.
-The binding names the original private root identity. Native history remains in
-that root as observational evidence and is not a source of recovered control
-handles. The snapshot does not relocate native history or support cross-root
-migration.
+Backup requires an initialized current-schema target. Its destination is a
+fresh private directory: the backup creates it with mode 0700 in an existing
+private parent directory, after it checks that the destination is outside
+manager storage. An existing destination refuses with `StoreOutputConflict`
+before anything is written, and a refusal before creation creates no
+destination. A failure after creation leaves a destination without `complete`.
+Such a destination is not a backup, and the operator removes it before a retry
+into the same path. The
+backup uses SQLite backup into `coordination.sqlite3` of the destination,
+copies all referenced immutable captures into its `captures` directory with
+bounded streaming and verification, and publishes its durable completion
+binding, the file `complete`, last. The binding names the original private
+root identity. The backup returns a `StoreBackup` with the binding bytes and
+the SHA-256 digest and size of the database copy after its connection closes.
+The source Store keeps its rows. The end of the copying lifetime checkpoints
+the write-ahead log of the source database, and that checkpoint is the only
+change to the source Store files. Native history remains in that root as
+observational evidence and is not a source of recovered control handles. The
+snapshot does not relocate native history or support cross-root migration.
+
+A backup records the reservations of the Store as they are, and a
+restoration carries the reservations of the backup that are not released
+forward as restoration claims. `check-quarantine` reports every such claim
+as `unverifiable`, because its cleanup evidence is not in the restored
+Store, so `release-quarantine` refuses it with `cleanup-unverified`. The
+restoration claims of a backup that was taken with active reservations
+therefore stay unverifiable for `check-quarantine`. An operator takes a
+backup with no active reservation, as offline `status` reports, to avoid
+such claims.
 
 Restore requires that same root and a readable current safety state. Missing,
 corrupt, incomplete or over-budget current safety facts refuse before database

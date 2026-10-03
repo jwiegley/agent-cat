@@ -122,8 +122,8 @@ perform store principal request = case request of
     pure (object ["credential" .= fst metadata, "previousCredentialId" .= previous, "secretWritten" .= True], snd metadata)
   -- Store status, inspection, quarantine checks and quarantine release
   -- belong to "Agentic.Manager.Quarantine", and the profile reload, the
-  -- drain and the shutdown belong to "Agentic.Manager.LocalAdmin". The other
-  -- recognized operations have no implementation yet.
+  -- drain, the shutdown and the backup belong to "Agentic.Manager.LocalAdmin".
+  -- The other recognized operations have no implementation yet.
   Status -> throwIO StateConflict
   CheckStore -> throwIO StateConflict
   CheckQuarantine _ -> throwIO StateConflict
@@ -131,6 +131,7 @@ perform store principal request = case request of
   ReloadProfiles -> throwIO StateConflict
   Drain -> throwIO StateConflict
   Shutdown -> throwIO StateConflict
+  Backup _ -> throwIO StateConflict
   OtherAdmin _ -> throwIO StateConflict
 
 -- | The command body of a credential operation, from the metadata of the

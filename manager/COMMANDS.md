@@ -65,8 +65,8 @@ refuse before dispatch with `operation: null`. Errors do not reflect input or
 parser diagnostics. The implemented operations are `issue-credential`,
 `rotate-credential`, `revoke-credential`, `list-credentials`, `status`,
 `check-store`, `check-quarantine`, `release-quarantine`, `reload-profiles`,
-`drain`, and `shutdown`. The other recognized operations, `backup` and
-`restore`, receive `state-conflict` before the CLI reads the configuration.
+`drain`, `shutdown`, and `backup`. The other recognized operation, `restore`,
+receives `state-conflict` before the CLI reads the configuration.
 
 `status` and `check-store` are read-only. They change no Store row and append
 nothing to the manager log. `status` returns the authority epoch and stream
@@ -406,6 +406,56 @@ end of the worker processes of a run at its person question, the exit status
 Store file change, a new lifetime that prepares the queued request with no
 client command, and the shutdown records in the manager log with one receipt
 for each command and one start relay for each run.
+
+### Backup
+
+`backup` takes one field, `outputFile`, the absolute path of a directory
+that does not exist. Its parent must be an existing private directory of the
+operator, and the directory must be outside manager storage. Only offline
+administration takes a backup. Through the live channel, the serving
+manager refuses `backup` with `state-conflict` and creates nothing.
+
+Offline, with the offline configuration, the CLI installs the configuration
+and so acquires the configuration lease. It then calls
+`backupCoordinationStore` in `Agentic.Manager.Store` through `backupStopped`
+in `Agentic.Manager.LocalAdmin`, and releases the lease after the backup.
+The backup does not go through `administerLocally` and does not open an
+administering Store lifetime, so it reconciles no restart and writes no
+manager log. When a manager holds the lease, offline `backup` refuses with
+`storage-unavailable` before the destination exists, as the other offline
+operations do.
+
+The backup creates the destination directory with mode 0700 and then writes
+the database copy, the captures that the database names and, last, the
+completion binding, as the
+[storage contract](STORAGE.md#restart-and-offline-restoration) describes. An
+existing destination refuses with `output-conflict`, and the backup then
+writes nothing. A destination inside manager storage, a parent that is not a
+private directory and every other failure refuse with
+`storage-unavailable`. A failure after the backup creates the destination
+leaves a directory without the completion binding. That directory is not a
+backup, and the operator removes it before a retry into the same path. The source Store keeps its rows. Only the checkpoint
+of its write-ahead log at the end of the copying lifetime can change its
+database file.
+
+The result is the frozen `backupId`, `sha256` and `bytes`. `sha256` is the
+lowercase hexadecimal SHA-256 digest of the published database copy, the
+file `coordination.sqlite3` of the destination, and `bytes` is its size as a
+canonical unsigned decimal string. The completion binding records the
+identity of the source manager root and no backup identity. `backupId` is
+therefore `backup_` followed by the lowercase hexadecimal SHA-256 digest of
+the completion binding bytes. Two backups of one manager root have the same
+`backupId`, and `sha256` tells their database copies apart.
+`Agentic.Manager.Protocol.LocalAdmin.backedUp` builds the result.
+
+Case 4 of the `operations` mode of `manager/test/service_http.py` checks an
+offline backup after the shutdown of case 3, with no active reservation: the
+frozen result, a destination that holds the database copy with the rows of
+the source Store, the capture that a draft request holds and the completion
+binding last, and a source Store with unchanged rows and unchanged other
+files. It also checks that a second backup into the same destination refuses
+with `output-conflict` and that a backup through the live channel of the next
+lifetime refuses with `state-conflict`.
 
 ## Credential lifecycle through the serving manager
 

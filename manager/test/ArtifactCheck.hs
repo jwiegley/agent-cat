@@ -1013,10 +1013,8 @@ eventChecks work = do
   -- HTTP boundary maps that refusal to 410 view-expired.
   let backup = work </> "backup"
       restoredBearer = BS.replicate 32 98
-  createDirectory backup
-  setFileMode backup 0o700
   withInstalled config $ \installed -> do
-    backupCoordinationStore installed backup
+    void (backupCoordinationStore installed backup)
     restoreCoordinationStore installed backup
     withCoordinationStore installed $ \store -> do
       rotated <- storeStreamId <$> storeIdentity store

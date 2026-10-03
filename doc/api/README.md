@@ -856,7 +856,8 @@ the command boundary. Offline administration and a configured same-user local
 channel implement credential listing, issuance, rotation and revocation, the
 read-only `status`, `check-store` and `check-quarantine` operations, and
 `release-quarantine`. The configured local channel also implements
-`reload-profiles` and `drain`.
+`reload-profiles`, `drain` and `shutdown`. Offline administration also
+implements `backup`.
 `check-quarantine` answers `clean` with cleanup evidence when the reservation
 never launched a run, when the run log of its run holds the terminal record
 of the runtime, or when that run has no terminal record and the exclusive lock
@@ -909,8 +910,20 @@ does not delay the shutdown. The next lifetime prepares the requests that
 wait in the queue with no client command, and no command executes again.
 Offline, while no manager holds the configuration lease, `shutdown` returns
 `state` `stopped` and changes nothing. No `/v1` route or problem code
-changes. The operations `backup` and `restore` receive `state-conflict`.
-Existing `RUNNER --tui` and native frontend commands remain unchanged.
+changes. `backup` takes `outputFile`, the absolute path of a new directory
+in an existing private parent directory, outside manager storage. Offline,
+under the configuration lease, it creates the directory with mode 0700 and
+copies into it the database, the captures that the database names and, last,
+the completion binding. It returns `backupId`, `sha256` and `bytes`.
+`sha256` is the lowercase hexadecimal SHA-256 digest of the database copy and
+`bytes` is its size. `backupId` is `backup_` followed by the lowercase
+hexadecimal SHA-256 digest of the completion binding bytes, which name the
+source manager root, so two backups of one manager root have the same
+`backupId`. An existing destination receives `output-conflict` and nothing is
+written. The source Store keeps its rows. Through the live channel, `backup`
+receives `state-conflict`. The operation `restore` receives
+`state-conflict`. Existing `RUNNER --tui` and native frontend commands
+remain unchanged.
 
 ```text
 RUNNER --manager serve --config ABSOLUTE_FILE [--legacy-history ROOT=PROFILE]...
