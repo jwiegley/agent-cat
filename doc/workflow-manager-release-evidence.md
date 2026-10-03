@@ -132,3 +132,66 @@ source, so `nix build` with substitution disabled built nothing. The one-minute
 load average was 6.2 at the start and 5.9 at the end. All eleven older roots
 upgraded to version 12, passed `check-store` and served, and the version 13
 root was refused by offline administration and by serve.
+
+## Rollback to explicit local clients
+
+The `rollback` mode of `manager/test/service_http.py` exercises the rollback
+of scenario A24 with the packaged executable. It reads `PACKAGE_RUNNER` as
+the `package` mode does, and the file is the manager process, the runner of
+the one profile with `--scripted`, the local TUI and the flow verb. The
+manager has one execution reservation.
+
+```sh
+out=$(nix build .#agentic-run --no-update-lock-file --option substitute false --print-out-paths --no-link)
+fixture=$(mktemp -d)
+mkdir "$fixture/N8"
+PACKAGE_RUNNER="$out/bin/agentic-run" direnv exec . python3 -B manager/test/service_http.py \
+  "$PWD" "$fixture/N8" "$out/bin/agentic-run" 8 rollback
+```
+
+In the first lifetime a request of `hello` completes and its verified result
+is saved, a request of `harden` waits at its person question, and a second
+request of `hello` waits for capacity. A drain refuses a new enqueue with 503
+`storage-unavailable` while the queued request stays queued. The waiting run
+is cancelled through its HTTP control, and `status` then reports no active
+reservation and no owned worker. `shutdown` stops the serve process with exit
+status 0, and an offline backup goes through the offline configuration.
+
+The mode then records the type, size and modification time of every path of
+the manager root. It requires that no process names the configuration files
+or the manager root and that nothing listens on the manager port. It runs
+`agentic-run --tui --local` in a pseudo-terminal with its own
+`XDG_CONFIG_HOME` and `XDG_STATE_HOME`, selects `harden` with the scripted
+target, answers the person question and waits for the result. It reads the
+manager log and the two run logs with `agentic-run flow` and reads the saved
+verified result again. The record must be unchanged after the local run and
+the reads, and the cancelled run log must end with `run.cancelled`. Offline
+`status` follows only then, and the record must detect its writes. A second
+lifetime on the same root prepares the review of the queued request before
+any command of the lifetime, and its run succeeds after the exact approval.
+The flow verb then shows one enqueue command of that request, one receipt for
+each command and one start relay for each of the three runs.
+
+The run of record passed at `-N8` on 2026-10-03. The base revision was
+`ab186c91f4691ac826504c57509b05f997e57372`, and the working copy held the
+change to `manager/test/service_http.py` and to the documentation without a
+commit. These files are outside the filtered source, so `nix build` with
+substitution disabled built nothing and printed the output path of the table
+above. The one-minute load average was 6.1 at the start and 6.4 at the end.
+
+| Item | Identity |
+|---|---|
+| SHA-256 of `bin/agentic-run` | `6ad55c59c69d57923b2ec929d3cd937405ada1fe430f36ef0f056dbfa995e4fc` |
+| Completed run and its verified result | `run_d00ff93021207d6623e1ea16a0b33c663862f4222473dfd2`, `artifact_e912b96acd0a2c73e9439e0b3e800c2682cf1775f9167b7a01bb25e83956db53`, 103 bytes, SHA-256 `ecac60bb91156983a4dd317d294d851870a16a4301634281c3d954818be34add` |
+| Cancelled run and its cancel command | `run_c4732ebce5ba04bd19525ce67fe1cafdec6d7ea372274803`, `command_546217f1ac1555ed8d13c045646dd17990fd882119e4510e` |
+| Offline backup | `backup_a7ea3d01100e1bbae3c095367cb800fcb52434e9e18a31c0008d6339d5c46f6e` |
+| Recorded paths of the manager root | 37, with `coordination.sqlite3` and no write-ahead log after the checkpoint, one manager-log file and two run stores |
+| Local TUI run | `tui-97053-1541148882571000` under the private `XDG_STATE_HOME` |
+| Queued request, its new review and its run | `request_a57642f2192ac453178ac0597b84c9e2d07b96192c372c73`, `preparation_46cc8c37893e0e925e3c6374e3ea7cd5cf1730e5fe5e0558`, `run_2149b3d4c8ae3e9f2ff47554384ef3dc80f5b9ce73750327` |
+
+Offline `status` after the comparison changed the modification time of the
+manager root directory. The manager log of the two lifetimes held 14 commands
+with one receipt each. The local modes of the Emacs client and of the Pi
+extension are covered by their existing local suites, `ci/emacs.sh` of
+agent-workflows-emacs-native and `npm test` and `npm run test:integration` of
+`ext-pi`, which the gate runs. This mode does not run them.

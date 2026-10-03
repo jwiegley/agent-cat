@@ -717,6 +717,88 @@ Procedure:
    new exact approval.
 4. Read `status` and resolve each lost run and each quarantined claim.
 
+## Rollback to explicit local clients
+
+A rollback stops the use of the manager and returns each user to the explicit
+local mode of a client. The manager root stays on disk as read-only history.
+A later roll forward serves the same root again. A rollback is a choice of
+executable and client mode. It is not a data operation. The schema upgrade
+of a newer executable is the data compatibility of the Store, and a
+restoration from a backup is operator recovery. The rollback uses neither.
+
+Preconditions: a manager serves through `SERVE_FILE`.
+
+Procedure:
+
+1. Drain the manager as in [Drain](#drain). New admission work refuses with
+   `storage-unavailable`. Queued requests stay queued.
+2. Let each owned run finish, or cancel it through its HTTP control as in
+   [Cancel an owned run](#cancel-an-owned-run). Wait until `status` reports
+   `activeReservations` 0 and `ownedWorkers` 0.
+3. Shut down as in [Shut down](#shut-down), and confirm that the serve
+   process exited with status 0.
+4. Back up offline through `OFFLINE_FILE` as in
+   [Back up offline](#back-up-offline). Keep the answer with the backup.
+5. Record the type, size and modification time of every path of the
+   manager root, for example with the macOS system `stat` in
+   `find MANAGER_ROOT -exec stat -f '%N %HT %z %Fm' {} +`.
+6. Start each client in its explicit local mode. The TUI starts with
+   `RUNNER --tui --local`. It keeps its runs under its own state root in
+   `XDG_STATE_HOME` and reads neither the manager root nor the configuration
+   files. The Emacs client returns to local mode with `wf-local`. The Pi
+   extension runs in local mode when neither `AGENT_CAT_MANAGER_PROFILE` nor
+   `AGENT_CAT_MANAGER_PROFILES` is set.
+7. Read the manager history read-only. `RUNNER flow MANAGER_ROOT/flow
+   MANAGER_ROOT/runs/runs/RUN/runtime ...` verifies and prints the manager
+   log and the run logs, as in [Manager log and run logs](#manager-log-and-run-logs).
+   The verified result files that the clients saved stay readable. These reads
+   and the local runs change no file of the manager root. Compare the record
+   of step 5 to confirm it.
+
+Offline `status` and every other offline operation of
+`RUNNER --manager admin` open the Store and change the manager root, so the
+record of step 5 no longer matches. Read offline `status` only after the
+comparison of step 7.
+
+Roll forward: start `RUNNER --manager serve --config SERVE_FILE` on the same
+root. The manager prepares the reviews of the queued requests with no client
+command. Each review then needs its exact approval as usual. A cancelled run
+stays cancelled, and no command executes again.
+
+Limits:
+
+- No live ownership transfer. A local client does not adopt a run of the
+  manager, and the manager does not adopt a local run. A run that a shutdown
+  cancelled reads `lost` in the next lifetime, as
+  [Shut down](#shut-down) states.
+- No manifest rewrite. The rollback does not rewrite the supervisor manifests
+  of the run stores or retarget their stored invocation records. The local
+  runs of the clients stay in their own state roots and do not enter the
+  manager history.
+- No newer database opened by an older executable. An executable refuses a
+  Store whose schema version is newer than its own: offline `status` refuses
+  with `storage-unavailable`, and `RUNNER --manager serve` exits with status
+  2. The Store has no downgrade operation.
+
+The `rollback` mode of `manager/test/service_http.py` executes this
+procedure with the packaged `bin/agentic-run` as the manager, the runner of
+the profile, the local TUI and the flow verb. It completes one run and saves
+its verified result, leaves one run at its person question and one request
+in the queue, drains, cancels the waiting run, shuts down and backs up
+offline. It then records the type, size and modification time of every path
+of the manager root, runs `harden` to completion in `RUNNER --tui --local`
+by keys with its own `XDG_CONFIG_HOME` and `XDG_STATE_HOME` while no manager
+listens, and reads the history with `RUNNER flow` and the saved result. The
+record must not change, no process of the manager may remain, and the
+cancelled run must stay cancelled. Offline `status` follows, and the record
+must detect its writes. The roll forward then serves the root, prepares the
+review of the queued request before any command of the lifetime, and
+completes its run after the approval. The manager log holds one enqueue
+command of that request, one receipt for each command and one start relay
+for each run. The local suites of the Emacs client (`ci/emacs.sh` of
+agent-workflows-emacs-native) and of the Pi extension (`npm test` and
+`npm run test:integration` of `ext-pi`) cover their local modes.
+
 ## The procedure exercise
 
 Case 7 of the `operations` mode of `manager/test/service_http.py` executes
@@ -756,6 +838,7 @@ repeat them:
 | The `storage-quota` endings and the recovery of a log that cannot open | `storage`. |
 | A disk write failure under a file-size limit | `faults-io`. |
 | An unreachable manager behind a TCP forwarder | `tui-failures`. |
+| The rollback to explicit local clients and the roll forward | `rollback`. |
 
 No mode exercises a Store that the quick check reports `corrupt`, a true
 `ENOSPC`, or a proxy on another host.

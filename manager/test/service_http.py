@@ -148,12 +148,36 @@ operations_mode = len(sys.argv) == 6 and sys.argv[5] == OPERATIONS
 # storage-unavailable, serve exits with status 2, and user_version stays 13.
 PACKAGE = "package"
 package_mode = len(sys.argv) == 6 and sys.argv[5] == PACKAGE
-if package_mode:
+# The rollback mode is the WM-043 rollback of scenario A24 with the packaged
+# artifact. Like the package mode, it reads the bin/agentic-run of the Nix
+# package from PACKAGE_RUNNER and uses that file as the manager process, as
+# the runner of profile_1 with --scripted, as the local TUI and as the flow
+# verb. The manager has one execution reservation. In the first lifetime a
+# request of hello completes and its verified result is saved, a request of
+# harden waits at its person question, and a second request of hello waits
+# for capacity. A drain then refuses a new enqueue, the waiting run is
+# cancelled through its HTTP control with its cleanup, the manager stops
+# through shutdown, and an offline backup goes through the offline
+# configuration. The mode then records the type, size and modification time
+# of every path of the manager root. It rolls back to the explicit local TUI
+# under its own XDG_CONFIG_HOME and XDG_STATE_HOME, runs harden to completion
+# by keys while no manager listens, and reads the manager history read-only
+# through the flow verb and the saved verified result. The recorded file
+# stats must not change, no process of the manager may remain, and the
+# cancelled run stays cancelled. Only then does it read offline status. It
+# then rolls forward: a second lifetime on the same root prepares the review
+# of the queued request with no client command, the run of that request
+# succeeds after its exact approval, and the flow verb shows that no command
+# executed twice.
+ROLLBACK = "rollback"
+rollback_mode = len(sys.argv) == 6 and sys.argv[5] == ROLLBACK
+if package_mode or rollback_mode:
     if not os.environ.get("PACKAGE_RUNNER"):
-        raise SystemExit("The package mode needs PACKAGE_RUNNER, the bin/agentic-run of the Nix package, and PACKAGE_RUNNER is unset.")
+        raise SystemExit(f"The {sys.argv[5]} mode needs PACKAGE_RUNNER, the bin/agentic-run of the Nix package, and PACKAGE_RUNNER is unset.")
     runner = Path(os.environ["PACKAGE_RUNNER"])
     if not (runner.is_file() and os.access(runner, os.X_OK)):
-        raise SystemExit(f"The package mode needs PACKAGE_RUNNER, the bin/agentic-run of the Nix package, and {runner} is not an executable file.")
+        raise SystemExit(f"The {sys.argv[5]} mode needs PACKAGE_RUNNER, the bin/agentic-run of the Nix package, and {runner} is not an executable file.")
+if package_mode:
     if not os.environ.get("SCHEMA_FIXTURES"):
         raise SystemExit("The package mode needs SCHEMA_FIXTURES, the directory of manager-store-check schema-fixtures, and SCHEMA_FIXTURES is unset.")
     schema_fixtures = Path(os.environ["SCHEMA_FIXTURES"])
@@ -2506,7 +2530,7 @@ def lifecycle_elapsed():
 # and emacs-service-controls modes configure the control fixture profiles.
 control_profiles = (control_profiles or tui_mode in (TUI_CONTROLS, TUI_REDIRECT) or client_controls_mode or emacs_lifecycle_mode
                     or emacs_controls_mode)
-assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode or cross_client_mode or capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode or faults_io_mode or failures_backup_mode or package_mode
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode or cross_client_mode or capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode or faults_io_mode or failures_backup_mode or package_mode or rollback_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert not (endpoints_mode or tui_mode or cross_client_mode) or os.environ.get("TUI_CHECK")
 assert not capacity_inputs_mode or os.environ.get("ARTIFACT_CHECK")
@@ -3060,7 +3084,7 @@ class CapacityFixture(TuiModeFixture):
 
 
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
-                         "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode or control_profiles or person_mode or package_mode else ["control", "export"] if exports_mode else []),
+                         "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode or control_profiles or person_mode or package_mode or rollback_mode else ["control", "export"] if exports_mode else []),
                          "profileIds": CONTROL_PROFILES or (["profile_1", "profile_plain"] if person_mode else
                                                             CAPACITY_PROFILES if capacity_admission_mode or capacity_inputs_mode or capacity_streams_mode or faults_io_mode or failures_backup_mode else ["profile_1"]),
                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential")})
@@ -5829,6 +5853,357 @@ def package_schema_checks():
 if package_mode:
     package_checks()
     package_schema_checks()
+    raise SystemExit(0)
+
+
+def rollback_root_stats(root):
+    """The type, size and modification time of the manager root and of every
+    path under it, by relative path, from lstat, so that a new, removed or
+    rewritten file or directory changes the record."""
+    return {str(path.relative_to(root)): (stat.S_IFMT(status.st_mode), status.st_size, status.st_mtime_ns)
+            for path in [root, *root.rglob("*")] for status in (path.lstat(),)}
+
+
+def rollback_manager_processes(markers):
+    """The process identifiers and commands of the current process listing
+    whose command names one of the markers, other than this harness."""
+    listing = subprocess.run(["ps", "-Ao", "pid=,command="], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, timeout=10, check=True).stdout
+    found = []
+    for line in listing.splitlines():
+        pid, _, command = line.strip().partition(" ")
+        if int(pid) != os.getpid() and any(marker in command for marker in markers):
+            found.append((int(pid), command))
+    return found
+
+
+def rollback_checks():
+    """WM-043 rollback of scenario A24 with the packaged artifact through the
+    real HTTPS manager. runner is the bin/agentic-run of PACKAGE_RUNNER.
+    Case 1 prepares the history of the manager root and stops the manager.
+    Case 2 rolls back to the explicit local TUI and reads the history
+    read-only. Case 3 rolls forward on the same root."""
+    from tui_probe import CTRL_D, TuiSession, quit_completed_run, select_workflow
+    authorized = {"Authorization": "Bearer " + bearer}
+    status_request = {"version": 1, "operation": "status"}
+    served = json.loads(config.read_text())
+    assert served["runners"] == [{"alias": "runner", "executable": str(runner), "prefix": []}], served["runners"]
+    assert [(item["runner"], item["targetArguments"]) for item in served["profiles"]] == [("runner", ["--scripted"])], served["profiles"]
+    assert served["limits"]["executionReservations"] == 1, served["limits"]
+    root = Path(served["managerRoot"])
+    offline_config = work / "offline.json"
+    offline_config.write_text(json.dumps({name: value for name, value in served.items() if name != "administrationRoot"}))
+    offline_config.chmod(0o600)
+    binary_sha256 = hashlib.sha256(runner.read_bytes()).hexdigest()
+    print("ROLLBACK runner", runner, "sha256", binary_sha256, "is the manager executable, the runner of profile_1,",
+          "the local TUI and the flow verb", flush=True)
+
+    def lifetime(number):
+        output = (work / f"server-{number}.stdout").open("wb")
+        errors = (work / f"server-{number}.stderr").open("wb")
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        return process, output, errors
+
+    def stop(number, process, output, errors):
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
+        output.close()
+        errors.close()
+        (work / f"server-{number}.exit").write_text(str(process.returncode) + "\n")
+        assert process.returncode == 0, ("the manager exit", number, process.returncode)
+
+    def shutdown(process):
+        stopped = administration({"version": 1, "operation": "shutdown"})
+        assert stopped["result"] == {"state": "stopped"}, stopped
+        process.wait(timeout=60)
+        assert process.returncode == 0, ("the packaged manager exit after shutdown", process.returncode)
+
+    def catalogue(name):
+        status, page, raw = request("/v1/workflows?profileId=profile_1", authorized)
+        assert status == 200 and page["page"]["next"] is None, ("workflows", status)
+        validate("WorkflowPage", page, raw)
+        workflow = next(item for item in page["items"] if item["name"] == name)
+        assert workflow["inputs"] == [], ("the workflow declares inputs", name, workflow["inputs"])
+        return workflow
+
+    def create_request(capabilities, workflow):
+        body = json.dumps({"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                           "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]},
+                          separators=(",", ":")).encode()
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        status, created, raw = request("/v1/requests", authorized | {
+            "Content-Type": "application/json", "Idempotency-Key": key}, method="POST", payload=body)
+        assert status == 201, ("request creation", status, created.get("code"))
+        validate("Request", created, raw)
+        return created
+
+    def terminal(client, run):
+        snapshot, _, _ = client[1]("/v1/runs/" + run + "/snapshot", "RunSnapshot",
+                                   lambda value: value["runtime"] is not None
+                                   and value["runtime"]["status"] in ("succeeded", "failed", "cancelled"))
+        return snapshot["runtime"]["status"]
+
+    def alive(pid):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        return True
+
+    # Case 1. The history of the manager root.
+    process, output, errors = lifetime(1)
+    try:
+        wait_ready(process)
+        status, capabilities, raw = request("/v1/capabilities", authorized)
+        assert status == 200, ("capabilities", status)
+        validate("Capabilities", capabilities, raw)
+        hello, harden = catalogue("hello"), catalogue("harden")
+        client = mixed_client(capabilities, authorized)
+        observed, wait_for, _, _ = client
+
+        # 1a. A completed run with its verified result saved.
+        completed = create_request(capabilities, hello)
+        enqueue_mixed(completed, hello, client)
+        completed_approval, completed_run = approve_review(completed, hello, client)
+        assert terminal(client, completed_run) == "succeeded", "the hello run did not succeed"
+        artifact = verified_download(completed_run, client, authorized)
+        saved = work / "verified-result.json"
+        result_bytes = saved.read_bytes()
+        assert hashlib.sha256(result_bytes).hexdigest() == artifact["sha256"], "the saved result differs from the published digest"
+        wait_for(completed["links"]["self"], "Request",
+                 lambda value: value["runId"] == completed_run and value["admission"]["state"] == "released")
+
+        # 1b. A run waits at its person question.
+        waiting = create_request(capabilities, harden)
+        enqueue_mixed(waiting, harden, client)
+        waiting_approval, waiting_run = approve_review(waiting, harden, client)
+        control, _, _ = wait_for("/v1/runs/" + waiting_run + "/control", "RunControl",
+                                 lambda value: value["decisionHeadId"] is not None)
+        decision, _, _ = observed("/v1/decisions/" + control["decisionHeadId"], "Decision")
+        assert decision["kind"] == "question" and decision["state"] == "pending" and decision["runId"] == waiting_run, (
+            decision["kind"], decision["state"])
+
+        # 1c. A request waits for capacity, and a draft is ready but not
+        # enqueued.
+        queued = create_request(capabilities, hello)
+        enqueue_mixed(queued, hello, client)
+        wait_for(queued["links"]["self"], "Request",
+                 lambda value: value["phase"] == "queued" and value["admission"]["reasons"] == ["capacity"])
+        late = create_request(capabilities, hello)
+        late_value, late_tag, _ = observed(late["links"]["self"], "Request")
+        assert late_value["phase"] == "draft" and not late_value["readiness"]["missing"], late_value["phase"]
+        workers = descendants(process.pid)
+        assert workers, "the waiting run has no worker process"
+        print("PASS rollback case 1a: run", completed_run, "of hello succeeded and its verified result", artifact["id"], "of",
+              artifact["bytes"], "bytes is saved; run", waiting_run, "of harden waits at question", decision["id"] + ";",
+              "request", queued["id"], "waits for capacity", flush=True)
+
+        # 1d. The drain refuses new admission work, and the queued request
+        # stays queued.
+        drained = administration({"version": 1, "operation": "drain"})
+        assert drained["result"] == {"state": "draining"}, drained
+        reported = administration(status_request)["result"]
+        assert reported["state"] == "draining" and reported["live"] and not reported["ready"], reported
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        status, problem, raw, _ = exchange(late["links"]["self"], authorized | {
+            "Content-Type": "application/json", "Idempotency-Key": key, "If-Match": late_tag},
+            method="POST", payload=b'{"operation":"enqueue"}')
+        assert status == 503 and problem["code"] == "storage-unavailable", ("the enqueue during the drain", status, problem.get("code"))
+        validate("Problem", problem, raw)
+        value, _, _ = observed(queued["links"]["self"], "Request")
+        assert value["phase"] == "queued" and value["admission"]["state"] == "waiting", (value["phase"], value["admission"])
+        print("PASS rollback case 1b: drain answered", drained["result"], "and status reported draining, live and not ready;",
+              "an enqueue during the drain refused with 503 storage-unavailable, and request", queued["id"], "stayed queued", flush=True)
+
+        # 1e. The waiting run is cancelled through its HTTP control, and its
+        # cleanup releases its reservation and its worker.
+        control, tag, _ = observed("/v1/runs/" + waiting_run + "/control", "RunControl")
+        assert control["cancelAllowed"] and control["supervision"] == "owned", (control["cancelAllowed"], control["supervision"])
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        status, receipt, raw, _ = exchange("/v1/runs/" + waiting_run + "/control", authorized | {
+            "Content-Type": "application/json", "Idempotency-Key": key, "If-Match": tag},
+            method="POST", payload=b'{"operation":"cancel"}')
+        assert status == 202, ("the cancel during the drain", status, receipt.get("code"))
+        validate("CommandReceipt", receipt, raw)
+        cancel_command = receipt["id"]
+        command, _, _ = wait_for(receipt["links"]["self"], "CommandReceipt",
+                                 lambda value: value["acknowledgement"] is not None or value["state"] in ("refused", "unresolved"))
+        assert command["state"] in ("acknowledged", "effect-observed"), ("the cancel command", command["state"])
+        assert terminal(client, waiting_run) == "cancelled", "the waiting run did not end cancelled"
+        wait_for(waiting["links"]["self"], "Request",
+                 lambda value: value["runId"] == waiting_run and value["admission"]["state"] == "released")
+        deadline = time.monotonic() + 30
+        while True:
+            reported = administration(status_request)["result"]
+            if reported["activeReservations"] == 0 and reported["ownedWorkers"] == 0:
+                break
+            assert time.monotonic() < deadline, ("the cleanup of the cancelled run", reported)
+            time.sleep(0.2)
+        deadline = time.monotonic() + 10
+        while any(alive(pid) for pid in workers) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert not [pid for pid in workers if alive(pid)], ("worker processes outlived the cancel", workers)
+        value, _, _ = observed(queued["links"]["self"], "Request")
+        assert value["phase"] == "queued" and value["admission"]["state"] == "waiting", (value["phase"], value["admission"])
+        print("PASS rollback case 1c: run", waiting_run, "was cancelled through", cancel_command, "during the drain; status",
+              "reported no active reservation and no owned worker, none of", len(workers), "worker processes outlived the",
+              "cleanup, and request", queued["id"], "stayed queued", flush=True)
+
+        # 1f. Shutdown.
+        shutdown(process)
+    finally:
+        stop(1, process, output, errors)
+    print("PASS rollback case 1d: shutdown answered stopped and the packaged serve process exited with status 0", flush=True)
+
+    # 1g. The offline backup through the offline configuration.
+    destination = work / "rollback-backup"
+    backed = administration({"version": 1, "operation": "backup", "outputFile": str(destination)}, path=offline_config)
+    copied = (destination / "coordination.sqlite3").read_bytes()
+    assert backed["result"]["sha256"] == hashlib.sha256(copied).hexdigest() and (destination / "complete").is_file(), backed["result"]
+    print("PASS rollback case 1e: the offline backup through the offline configuration answered", backed["result"], flush=True)
+
+    # The record of the manager root, before any further status call.
+    before = rollback_root_stats(root)
+    (work / "rollback-stats-before.json").write_text(json.dumps(before, indent=1, sort_keys=True))
+    logs = sorted(str(path.relative_to(root)) for path in (root / "flow").rglob("*") if path.is_file())
+    stores = sorted((root / "runs" / "runs").glob("*/runtime"))
+    assert "coordination.sqlite3" in before and logs and len(stores) == 2, (sorted(before), logs, stores)
+    database = sorted(name for name in before if name.startswith("coordination.sqlite3"))
+    print("ROLLBACK recorded", len(before), "paths of the manager root: the database files", database,
+          "(the write-ahead log", "exists)" if "coordination.sqlite3-wal" in before else "does not exist after the checkpoint)",
+          len(logs), "manager-log files and", len(stores), "run stores", flush=True)
+
+    # Case 2. The rollback to the explicit local TUI, with no manager.
+    markers = (str(config), str(offline_config), str(root))
+    remaining = rollback_manager_processes(markers)
+    assert not remaining and not [pid for pid in workers if alive(pid)], ("a manager process remains", remaining)
+    with socket.socket() as probe, contextlib.suppress(ConnectionRefusedError):
+        probe.connect(("127.0.0.1", port))
+        raise AssertionError("a process listens on the manager port after the rollback")
+    local = work / "local"
+    local_config, local_state = local / "config", local / "state"
+    for directory in (local, local_config, local_state):
+        directory.mkdir(mode=0o700)
+    command = [str(runner), "--tui", "--local", "+RTS", "-N" + native, "-RTS"]
+    with TuiSession(runner, local_state, rows=40, columns=150, command=command, explicit_state=False,
+                    extra_environment={"XDG_CONFIG_HOME": str(local_config)}) as session:
+        select_workflow(session, 0)
+        cursor = session.wait_for(b"Execution target")
+        session.send(b"s")
+        cursor = session.wait_for(b"launch confirmation", after=cursor)
+        session.send(b"y")
+        person = session.wait_for(b"Ctrl-D SUBMIT", after=session.wait_for(b"Your answer", after=cursor, timeout=45))
+        session.send(b"no" + CTRL_D)
+        finished = session.wait_for(b"Succeeded", after=person, timeout=45)
+        session.wait_for(b"RESULT AVAILABLE", after=finished)
+        quit_completed_run(session, finished)
+        session.assert_restored()
+    local_runs = sorted(path.parent for path in local_state.rglob("events.ndjson"))
+    assert len(local_runs) == 1, ("the local TUI run stores", local_runs)
+    local_events = [json.loads(line)["event"] for line in (local_runs[0] / "events.ndjson").read_text().splitlines()]
+    assert local_events[-1]["type"] == "run.completed", local_events[-1]["type"]
+    assert any(event["type"] == "control.ack" and event.get("command") == "answerPerson" for event in local_events)
+    print("PASS rollback case 2a: with no manager process and no listener on the manager port, the packaged",
+          "agentic-run --tui --local ran harden to completion by keys under its own XDG state root", local_runs[0], flush=True)
+
+    # 2b. The manager history, read-only.
+    status, records, summary = read_flow("rollback-history", [root / "flow"] + stores, runner)
+    assert status == 0 and summary["verified"] and not summary["problems"], ("the flow verb", status, summary["problems"])
+    starts = {record["about"]["command"]: record["body"]["nativeRun"] for record in records
+              if record["schema"] == "relay" and record["body"]["kind"] == "start"}
+    approvals = {name: uri.rsplit("/", 1)[-1] for name, uri in (("completed", completed_approval), ("waiting", waiting_approval))}
+    assert sorted(starts) == sorted(approvals.values()), ("the start relays of the history", starts, approvals)
+    runs_by_name = {name: root / "runs" / "runs" / starts[command] / "runtime" for name, command in approvals.items()}
+    endings = {}
+    for name, store in runs_by_name.items():
+        run_events = [json.loads(line)["event"] for line in (store / "events.ndjson").read_text().splitlines()]
+        endings[name] = run_events[-1]["type"]
+    assert endings == {"completed": "run.completed", "waiting": "run.cancelled"}, endings
+    cancels = [record for record in records if record["schema"] == "command" and record["body"].get("operation") == "cancel"]
+    assert [record["about"]["command"] for record in cancels] == [cancel_command], cancels
+    reread = saved.read_bytes()
+    assert reread == result_bytes and hashlib.sha256(reread).hexdigest() == artifact["sha256"], "the saved verified result changed"
+    assert json.loads(reread)["runId"] == starts[approvals["completed"]], ("the verified result names another run", reread[:200])
+    print("PASS rollback case 2b: the packaged flow verb verified", len(logs), "manager-log files and", len(stores), "run logs",
+          "read-only;", len(records), "records hold the start relay of each approval and the one cancel command;",
+          "the completed run ended", endings["completed"], "and the cancelled run ended", endings["waiting"] + ";",
+          "the saved verified result of", len(reread), "bytes still has SHA-256", artifact["sha256"], flush=True)
+
+    # 2c. The comparison of the record.
+    after = rollback_root_stats(root)
+    (work / "rollback-stats-after.json").write_text(json.dumps(after, indent=1, sort_keys=True))
+    changed = sorted(name for name in set(before) | set(after) if before.get(name) != after.get(name))
+    assert not changed, ("the local run or the reads changed the manager root", changed)
+    remaining = rollback_manager_processes(markers)
+    assert not remaining, ("a manager process appeared during the rollback", remaining)
+    print("PASS rollback case 2c: the local run and the reads changed none of", len(before), "recorded paths of the manager",
+          "root, no process of the manager remains, and run", waiting_run, "stays cancelled", flush=True)
+    print("RECORD rollback: the local modes of the other clients are covered by their existing local suites, which the gate",
+          "runs: Emacs local mode by ci/emacs.sh of agent-workflows-emacs-native, and Pi local mode by npm test and",
+          "npm run test:integration of ext-pi", flush=True)
+
+    # 2d. Offline status, only after the comparison.
+    # Offline status opens the Store, which changes the manager root, so the
+    # record must detect it. This shows that the comparison of case 2c sees a
+    # writer of the manager root.
+    reported = administration(status_request, path=offline_config)["result"]
+    assert reported["state"] == "stopped" and not reported["live"] and reported["activeReservations"] == 0, reported
+    written = rollback_root_stats(root)
+    detected = sorted(name for name in set(after) | set(written) if after.get(name) != written.get(name))
+    assert detected, "the record of the manager root did not detect the offline status"
+    print("PASS rollback case 2d: offline status after the comparison reported", reported["state"], "with",
+          reported["activeReservations"], "active reservations, and the record detected its writes to", detected, flush=True)
+
+    # Case 3. The roll forward on the same root.
+    process, output, errors = lifetime(2)
+    try:
+        wait_ready(process)
+        status, capabilities, raw = request("/v1/capabilities", authorized)
+        assert status == 200, ("capabilities", status)
+        client = mixed_client(capabilities, authorized)
+        observed, wait_for, _, _ = client
+        prepared, _, _ = wait_for(queued["links"]["self"], "Request", lambda value: value["preparationId"] is not None)
+        forward_approval, forward_run = approve_review(queued, hello, client)
+        assert terminal(client, forward_run) == "succeeded", "the rolled-forward run did not succeed"
+        wait_for(queued["links"]["self"], "Request",
+                 lambda value: value["runId"] == forward_run and value["admission"]["state"] == "released")
+        snapshot, _, _ = observed("/v1/runs/" + waiting_run + "/snapshot", "RunSnapshot")
+        assert snapshot["runtime"]["status"] == "cancelled", snapshot["runtime"]["status"]
+        shutdown(process)
+    finally:
+        stop(2, process, output, errors)
+    status, records, summary = read_flow("rollback-forward", [root / "flow"] + sorted((root / "runs" / "runs").glob("*/runtime")), runner)
+    assert status == 0 and summary["verified"] and not summary["problems"], ("the flow verb", status, summary["problems"])
+    lifetimes = summary["joins"]["lifetimes"]
+    assert len(lifetimes) == 2 and all(item["shutdown"] is not None for item in lifetimes), ("lifetimes", lifetimes)
+    second = lifetimes[1]["lifetime"]
+    later = [record for record in records if record["log"] == second["log"] and record["position"] > second["position"]]
+    reviews = [record for record in later if record["schema"] == "review" and record["about"].get("request") == queued["id"]]
+    commands = [record for record in later if record["schema"] == "command"]
+    assert len(reviews) == 1 and commands and reviews[0]["position"] < commands[0]["position"], (
+        "the roll forward did not prepare the review before any command", reviews, commands[:1])
+    enqueues = [record for record in records if record["schema"] == "command" and record["body"].get("operation") == "enqueue"
+                and record["about"].get("request") == queued["id"]]
+    assert len(enqueues) == 1, ("the enqueue commands of the queued request", len(enqueues))
+    receipts = Counter((record["log"], record["replyTo"]) for record in records
+                       if record["schema"] == "receipt" and record.get("replyTo") is not None)
+    assert all(count == 1 for count in receipts.values()), ("a command has more than one receipt",
+                                                            [key for key, count in receipts.items() if count > 1])
+    relays = Counter(record["body"]["nativeRun"] for record in records if record["schema"] == "relay" and record["body"]["kind"] == "start")
+    assert len(relays) == 3 and all(count == 1 for count in relays.values()), ("start relays", relays)
+    print("PASS rollback case 3: the roll forward prepared review", prepared["preparationId"], "of request", queued["id"],
+          "at manager-log position", reviews[0]["position"], "before the first command", commands[0]["position"], "of the",
+          "lifetime; run", forward_run, "succeeded after its exact approval", forward_approval.rsplit("/", 1)[-1] + ";",
+          "the request has one enqueue command,", len(receipts), "commands have one receipt each, and each of", len(relays),
+          "runs has one start relay", flush=True)
+    print("PASS rollback: the packaged agentic-run", runner, "with SHA-256", binary_sha256, "rolled back to the explicit",
+          "local TUI with read-only manager history and rolled forward at -N" + native, flush=True)
+
+
+if rollback_mode:
+    rollback_checks()
     raise SystemExit(0)
 
 
