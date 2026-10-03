@@ -656,6 +656,9 @@ executable manager-admission-check
     Agentic.Manager.Test.AcceptanceAudit
     Agentic.Manager.Test.PrivateLog
     Agentic.Manager.Service
+    Agentic.Manager.Quarantine
+    Agentic.Manager.Administration
+    Agentic.Manager.Protocol.LocalAdmin
     Agentic.Manager.Approval
     Agentic.Manager.Artifacts
     Agentic.Manager.History
@@ -756,6 +759,7 @@ executable manager-artifact-check
     Agentic.Manager.Observation
     Agentic.Manager.Events
     Agentic.Manager.Service
+    Agentic.Manager.Quarantine
     Agentic.Manager.Overview
     Agentic.Manager.Approval
     Agentic.Manager.History
