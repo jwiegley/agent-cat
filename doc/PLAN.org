@@ -7616,7 +7616,7 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 15:14]
+:MODIFIED: [2026-10-03 Sat 15:36]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G5
 :SOURCE_REPO: agent-cat
@@ -7834,6 +7834,13 @@ Full failure/capacity evidence, operational procedures, reproducible packages, r
     "author": "johnw",
     "text": "PG29 (2026-10-03), G5 functional gate part 6, on agent-cat 381875e7f5 and emacs-native db7d212, both trees clean, no source change. BUILD(-ftui-tests agentic-run routing-fixed-point-probe) exit 0. At N8 in the PF23 form (EMACS, WF_EMACS_DIR, WF_EMACS_UI set): cross-client, cross-client-lifecycle, cross-client-lineage, emacs-service, emacs-service-lifecycle and emacs-service-controls exit 0. Control cross-client-broken-answer exit 1 with 'CROSS-ASSERT the cross-client answer is JSON false', and emacs-service-broken-answer exit 1 with 'JOURNEY-ASSERT Emacs answer is JSON false'. In the Emacs worktree with a temporary HOME: ci/emacs.sh exit 0 (smoke 38 of 38, transport 97 of 97) and ci/emacs-ui.py exit 0 (8 PASS lines). Each step is in the gate summary PG/PG29/impl-r1/g5-summary.md, part 6, with both commits. Evidence (private): PG/PG29/impl-r1. Fess pg-PG29-r1 non-blocking, findings in acat-pg29-fess-followup-w9y7. Limitation: stale PID 61004 and frontends 111 and 9444 ran throughout; no step is a capacity measurement. The Emacs steps used the PD7 wf binary.\n",
     "created_at": "2026-10-03T22:14:13Z"
+  },
+  {
+    "id": 764,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "PG30 (G5 functional gate part 7) passed: BUILD, ext-pi npm run check, npm test (220 passed, 29 live-gated skipped), npm run test:integration (9 of 9), pi-host at N8, bash tui/ci/tui.sh, the incremental BUILD after it and make -C doc check, each exit 0. The handoff and release evidence record G5 as met for function on local macOS, with the security stage, the human operator exercise, cross-machine evidence, the capacity runs of record and the independent closure review pending, and production activation not authorized. Evidence: resume-20260923/PG/PG30/impl-r1 (logs and exit files 01 to 08, g5-summary.md), on commit 17a5ec73aa. Not closed: the closeout closes gates after review. Follow-up: acat-pg30-fess-followup-zmqy.",
+    "created_at": "2026-10-03T22:36:08Z"
   }
 ]
 #+end_src
@@ -14256,6 +14263,27 @@ Non-blocking findings of fess pg-PG29-r1 (report fess/pg-PG29-r1.md in the priva
 
 1. PG/PG29/impl-r1/g5-summary.md lines 359-361: the Emacs steps used the PD7 wf binary (built 2026-10-02 09:21). The summary justifies this only by the unchanged Emacs worktree sources. wf also links the agentic library of the tui worktree. wf imports only Agentic.Runtime modules, and runtime/, src/ and engine/ have not changed since the PD7 build. Add that sentence to the part 6 section of the gate summary.
 2. The stale pf17-capacity manager PID 61004 (-N8) and the stopped frontends PID 111 and 9444 still run. They raised the host load during the PG29 journeys (1-minute load 6.96 to 11.01). The operator or the Integrator ends them before the capacity runs of record (see acat-pg26-capacity-run-of-record-2z6q and acat-pg27-run-of-record-21e9).
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG30
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg30-fess-followup-zmqy
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 15:36]
+:MODIFIED: [2026-10-03 Sat 15:36]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking fess findings of subtask PG30 (report: resume-20260923/fess/pg-PG30-r1.md).
+
+1. Medium. doc/workflow-manager-handoff.md, "Gate of Phase G" paragraph (lines 61-64), and g5-summary.md:409: the paragraph says every step exited with its expected status and that only PG24 needed a fix. PG26 round 1 had a failing key (capacity-inputs pages.first-page-p50-ms 740.5 against 500, summary exit 1), capacity-inputs ran a second time without a fix, and PG26 round 2 needed the harness change e8c04cd4. Fix: state these facts and remove "Only PG24 needed a fix".
+2. Low. Handoff "Authorizations" item (about line 150) names only PG3 and PG4 as needs-authorization because of PID 61004. PG26 and PG27 returned it for the same reason. Fix: name PG3, PG4, PG26 and PG27.
+3. Low. Handoff commit table (lines 47-58) has no row for PG25 or PG29. Fix: add "PG25 | None | No change, the gate steps passed on 1ac80da9" and "PG29 | 17a5ec73 | tracker record of the cross-client and Emacs gate runs".
+4. Low. Handoff line 70, PG24 gate row, names only manager-admission-check. The fix 1ac80da9 also changed manager-artifact-check. Fix: name both stanzas.
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PG8
 :PROPERTIES:
@@ -24245,7 +24273,7 @@ check fail.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 20:45]
+:MODIFIED: [2026-10-03 Sat 15:36]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-036
 :SOURCE_REPO: agent-cat
@@ -24419,6 +24447,13 @@ invocation tuples or exposing secrets.
     "author": "johnw",
     "text": "Delivered by PE10 to PE16 and PE22. Phase E closeout (commit a17a015b): both review lenses of 33f84fe4..841ce0c7 rate this package met for function (\"approve with notes\", no critical or high finding), and the Phase E gate PE28 passed on 841ce0c7. Evidence: PE/PE10 to PE/PE28 in the private resume-20260923 directory, section \"Phase E of 2026-10\" of doc/workflow-manager-handoff.md. Tested host: built Pi fork ~/src/fork/pi at 7857926ee with the @earendil-works packages at 0.99.1 linked; source acceptance only, no installation, production adoption or deployment. The remaining package items are security items deferred by the operator direction of 2026-09-30, listed in acat-phase-e-deferred-security-5jl4. Non-blocking review notes: acat-phase-e-review-findings-0l73. PE27 (devDependency pins) awaits operator authorization. Not closed: obr refuses the close because the dependency acat-wm-035-9uqq (WM-035) is open, and WM-035 is a functional package outside this run's verdicts, so no forced close. Close once WM-035 closes.",
     "created_at": "2026-10-02T03:45:47Z"
+  },
+  {
+    "id": 767,
+    "issue_id": "acat-wm-036-5ndj",
+    "author": "johnw",
+    "text": "PG30 gate: ext-pi npm run check and npm test (220 passed, 29 live-gated skipped) exit 0. Evidence: resume-20260923/PG/PG30/impl-r1 (logs and exit files 01 to 08, g5-summary.md), on commit 17a5ec73aa.",
+    "created_at": "2026-10-03T22:36:09Z"
   }
 ]
 #+end_src
@@ -24596,7 +24631,7 @@ verified output, and lineage behave consistently with the other clients.
 :LABELS:   ["p8","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 20:45]
+:MODIFIED: [2026-10-03 Sat 15:36]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-038
 :SOURCE_REPO: agent-cat
@@ -24740,6 +24775,13 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Adopt the shared root-role r
     "author": "johnw",
     "text": "Delivered by PE21 to PE26. Phase E closeout (commit a17a015b): both review lenses of 33f84fe4..841ce0c7 rate this package met for function (\"approve with notes\", no critical or high finding), and the Phase E gate PE28 passed on 841ce0c7. Evidence: PE/PE10 to PE/PE28 in the private resume-20260923 directory, section \"Phase E of 2026-10\" of doc/workflow-manager-handoff.md. Tested host: built Pi fork ~/src/fork/pi at 7857926ee with the @earendil-works packages at 0.99.1 linked; source acceptance only, no installation, production adoption or deployment. The remaining package items are security items deferred by the operator direction of 2026-09-30, listed in acat-phase-e-deferred-security-5jl4. Non-blocking review notes: acat-phase-e-review-findings-0l73. PE27 (devDependency pins) awaits operator authorization. Not closed: it depends on acat-wm-037-dz3v, which stays open only behind acat-wm-035-9uqq through WM-036. Close with WM-037.",
     "created_at": "2026-10-02T03:45:48Z"
+  },
+  {
+    "id": 768,
+    "issue_id": "acat-wm-038-mgb7",
+    "author": "johnw",
+    "text": "PG30 gate: npm run test:integration 9 of 9 and pi-host at N8 (steps 1 to 13 PASS) exit 0. Evidence: resume-20260923/PG/PG30/impl-r1 (logs and exit files 01 to 08, g5-summary.md), on commit 17a5ec73aa.",
+    "created_at": "2026-10-03T22:36:10Z"
   }
 ]
 #+end_src
@@ -25206,7 +25248,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 15:14]
+:MODIFIED: [2026-10-03 Sat 15:36]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -25474,6 +25516,13 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "PG29 (2026-10-03), G5 functional gate part 6, on agent-cat 381875e7f5 and emacs-native db7d212, both trees clean, no source change. BUILD(-ftui-tests agentic-run routing-fixed-point-probe) exit 0. At N8 in the PF23 form (EMACS, WF_EMACS_DIR, WF_EMACS_UI set): cross-client, cross-client-lifecycle, cross-client-lineage, emacs-service, emacs-service-lifecycle and emacs-service-controls exit 0. Control cross-client-broken-answer exit 1 with 'CROSS-ASSERT the cross-client answer is JSON false', and emacs-service-broken-answer exit 1 with 'JOURNEY-ASSERT Emacs answer is JSON false'. In the Emacs worktree with a temporary HOME: ci/emacs.sh exit 0 (smoke 38 of 38, transport 97 of 97) and ci/emacs-ui.py exit 0 (8 PASS lines). Each step is in the gate summary PG/PG29/impl-r1/g5-summary.md, part 6, with both commits. Evidence (private): PG/PG29/impl-r1. Fess pg-PG29-r1 non-blocking, findings in acat-pg29-fess-followup-w9y7. Limitation: stale PID 61004 and frontends 111 and 9444 ran throughout; no step is a capacity measurement. The Emacs steps used the PD7 wf binary.\n",
     "created_at": "2026-10-03T22:14:13Z"
+  },
+  {
+    "id": 766,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PG30 records WM-041 as partial: 129 ceiling keys passed in the PG26 and PG27 gate runs, none of which is a run of record because PID 61004 ran on the host. Evidence: resume-20260923/PG/PG30/impl-r1 (logs and exit files 01 to 08, g5-summary.md), on commit 17a5ec73aa.",
+    "created_at": "2026-10-03T22:36:09Z"
   }
 ]
 #+end_src
@@ -26052,7 +26101,7 @@ explicitly authorized operation.
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 13:13]
+:MODIFIED: [2026-10-03 Sat 15:36]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-044
 :SOURCE_REPO: agent-cat
@@ -26571,6 +26620,13 @@ is ready, not that an operator has deployed it.
     "author": "johnw",
     "text": "PG25 (G5 part 2) confirmed the /v1 contract is additive only from 88d999b7 to 1ac80da968 and matches the accepted additive-field list in doc/api/README.md. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PG/PG25/impl-r1/g5-summary.md and openapi-additive.log.",
     "created_at": "2026-10-03T20:13:32Z"
+  },
+  {
+    "id": 765,
+    "issue_id": "acat-wm-044-6utw",
+    "author": "johnw",
+    "text": "PG30 records the gate of Phase G in doc/workflow-manager-handoff.md and doc/workflow-manager-release-evidence.md; make -C doc check exit 0. Evidence: resume-20260923/PG/PG30/impl-r1 (logs and exit files 01 to 08, g5-summary.md), on commit 17a5ec73aa.",
+    "created_at": "2026-10-03T22:36:08Z"
   }
 ]
 #+end_src
