@@ -13564,6 +13564,50 @@ Open:
    (queued > 0 || oldest == Null) checks nothing about the age when queued requests exist. When
    queued is above 0, also check that oldestQueuedAgeSeconds is a non-negative number.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG13
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg13-fess-followup-xyew
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 10:46]
+:MODIFIED: [2026-10-03 Sat 10:46]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG13-r1 (report fess/pg-PG13-r1.md in the private evidence
+directory). PG13 added manager/OPERATIONS.md, the operator runbook, and case 7 of the
+operations mode of manager/test/service_http.py.
+
+Open:
+
+1. (medium) manager/README.md:6: the opening paragraph still says that the directory does not
+   yet contain a workflow-manager service. The runbook link below it describes that service.
+   Rewrite the paragraph or delete the stale sentence (WM-044 documentation reconciliation).
+2. (low) manager/test/service_http.py:5562-5565: step 7i only prints the restored status
+   lostRuns and unresolvedCommands. OPERATIONS.md:738 says the exercise checks them. Assert the
+   expected values or derive them from the earlier cases.
+3. (low) manager/test/service_http.py:5367-5368: check-quarantine runs over an empty
+   quarantineIds list on this fixture, so it never runs in case 7, although the runbook table
+   (OPERATIONS.md:730) lists it in 7a. Set up a quarantine and assert a non-empty list, or cite
+   failures-manager only.
+4. (low) manager/test/service_http.py:5486: the runbook tells the operator to save the status
+   answer line unchanged as fencing evidence. The test re-encodes the parsed answer. Write the
+   raw stdout line to the evidence file.
+5. (low) manager/test/service_http.py:5543-5555: step 7h, labelled lost replies, repeats an
+   enqueue whose reply arrived and simulates no loss. Cite the mode that covers orphaned
+   administration asks (committed-receipt-lost, outcome-uncertain) in the case-7 table, or
+   relabel 7h as the exact-repeat step.
+6. (low) manager/test/service_http.py:5572: step 7j accepts flow exit 2 with no stated reason.
+   Name the expected open run (likely the SIGKILL run of case 6d) and assert that only that
+   run log has no stop.
+7. (low) manager/OPERATIONS.md:247,280,548,598,618,650,669: seven procedures (list credentials,
+   revoke a credential, disk pressure, expired credentials, lost replies, corrupt store, proxy
+   or network failure) have no explicit Preconditions or Configuration line. Add them.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PG8
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -24911,7 +24955,7 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 10:26]
+:MODIFIED: [2026-10-03 Sat 10:47]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-042
 :SOURCE_REPO: agent-cat
@@ -25136,6 +25180,13 @@ recipe that ignores WAL or unresolved effects.
     "author": "johnw",
     "text": "PG12 (2026-10-03): the status result of local administration now carries additive bounded operational facts: live, ready, queuedRequests, oldestQueuedAgeSeconds, reservations by state (preparing, review, running, cleanup, quarantined), ownedWorkers, lostRuns, unresolvedCommands and serviceFault (a fixed class word). The counts are single SQL aggregates or in-memory STM reads. The live channel passes the Service facts through AdministrationHooks.hookFacts. Offline status reports live false and ready false. openapi.yaml adds only nine optional properties to the status result, listed in doc/api/README.md as accepted additive fields. Evidence (PG/PG12/impl-r1): build, manager-command-check at N8 with command_contract.py and credential_cli.py, service_http.py operations at N8 with cases 1 to 6 (case 6: idle, queued request, running run, draining with ready false and live true, worker SIGKILL raises lostRuns by one), make -C doc check, the openapi diff against 88d999b7 and the Phase A journey at N8, all exit 0. Not a capacity run. The lostRuns baseline in case 6 is 1 because of the open shutdown-without-cancel defect, so the SIGKILL shows 1 to 2. Findings in acat-pg12-fess-followup-8v0s.",
     "created_at": "2026-10-03T17:26:45Z"
+  },
+  {
+    "id": 727,
+    "issue_id": "acat-wm-042-sdg9",
+    "author": "johnw",
+    "text": "PG13: manager/OPERATIONS.md states the operator procedures of the local manager (two-configuration rule, diagnostics, validation and reload, credentials, drain, cancel and shutdown, offline backup and restore with fencing evidence, completion of an interrupted restoration, manager-log pruning, quarantine release, and the failure procedures). manager/README.md and doc/api/README.md link to it. Case 7 of the operations mode of manager/test/service_http.py executes the procedures in runbook order on one disposable fixture and cites failures-manager, credential-lifecycle, routes and failures-backup for the steps they own. Evidence: BUILD of agentic-run and routing-fixed-point-probe with -ftui-tests, operations at N8 (cases 1 to 7 pass), make -C doc check (exit 0). Runbook bodies match the bodies the operations mode sends, checked by reading. The exercise of the procedures by another human operator is pending and has not run. WM-042 stays open. Fess findings: acat-pg13-fess-followup-xyew.",
+    "created_at": "2026-10-03T17:47:05Z"
   }
 ]
 #+end_src

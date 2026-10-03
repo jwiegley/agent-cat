@@ -117,6 +117,13 @@ lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
 # restoration: an idle manager, a queued request, a running run, a worker
 # SIGKILL that the facts report as one more lost run, a drain that leaves the
 # manager live and not ready, and offline status after the lifetime ends.
+# Case 7 is the procedure exercise of manager/OPERATIONS.md: it runs the
+# runbook procedures in runbook order on the same manager root, with the
+# request bodies of the runbook and the documented interfaces only, in a
+# seventh and an eighth lifetime and offline between them. It cites cases 1
+# to 6 and the modes credential-lifecycle, routes, failures-manager,
+# failures-launched, failures-backup, storage, faults-io and tui-failures
+# for the steps that they own.
 OPERATIONS = "operations"
 operations_mode = len(sys.argv) == 6 and sys.argv[5] == OPERATIONS
 mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, OPERATIONS, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-client-controls", "emacs-client", "emacs-client-controls", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline", "emacs-service", "emacs-service-broken-answer") + JOURNEYS
@@ -5303,6 +5310,297 @@ def operations_status(authorized, shutdown_run, lifetime, stop):
           offline["queuedRequests"], "queued request,", offline["lostRuns"], "lost run and the",
           offline["unresolvedCommands"], "unresolved commands of the Store", flush=True)
     print("PASS operations: status case 6 held through the TLS 1.3 manager", flush=True)
+    operations_runbook(lifetime, stop)
+
+
+def operations_runbook(lifetime, stop):
+    """Case 7 executes the procedures of manager/OPERATIONS.md in the order
+    of that runbook, on the manager root that cases 1 to 6 left, through the
+    documented interfaces only: agentic-run --manager admin with the serve
+    configuration and the offline configuration, the /v1 routes and
+    agentic-run flow. Each request body below is the body that the runbook
+    shows. The seventh lifetime runs the live procedures from profile reload
+    to shutdown, the offline procedures back up and restore the Store, and
+    the eighth lifetime serves the restored Store to a reprovisioned
+    credential and runs the expired-credential, lost-reply and older-backup
+    procedures. The steps that cases 1 to 6 or other modes own are cited in
+    the last PASS line and are not repeated."""
+    status_request = {"version": 1, "operation": "status"}
+    served = json.loads(config.read_text())
+    assert "administrationRoot" in served, "the serve configuration names no administrationRoot"
+    # Two configurations: the offline configuration is the serve
+    # configuration without administrationRoot.
+    offline_config = work / "runbook-offline.json"
+    offline_config.write_text(json.dumps({name: value for name, value in served.items() if name != "administrationRoot"}))
+    offline_config.chmod(0o600)
+    operator = work / "runbook-operator"
+    operator.mkdir(mode=0o700)
+    forever = "2999-01-01T00:00:00Z"
+    all_scopes = ["observe", "submit", "control"]
+
+    def bearer_header(path):
+        return {"Authorization": "Bearer " + path.read_bytes().decode("ascii")}
+
+    def answered(authorized):
+        code, value, _ = request("/v1/capabilities", authorized)
+        return code, value.get("code") if code != 200 else None
+
+    def listed(path=None):
+        return {item["credentialId"]: item for item in
+                administration({"version": 1, "operation": "list-credentials"}, path=path)["result"]["credentials"]}
+
+    def new_request(capabilities, authorized, profile):
+        code, catalogue, raw = request("/v1/workflows?profileId=" + profile, authorized)
+        assert code == 200, ("workflows", profile, code)
+        validate("WorkflowPage", catalogue, raw)
+        workflow = next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+        body = json.dumps({"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                           "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]},
+                          separators=(",", ":")).encode()
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        code, created, raw = request("/v1/requests", authorized | {
+            "Content-Type": "application/json", "Idempotency-Key": key}, method="POST", payload=body)
+        assert code == 201, ("request creation", code, created.get("code"))
+        validate("Request", created, raw)
+        return created, workflow
+
+    # 7a. Diagnostics and configuration validation while no manager serves.
+    # Each offline status opens the Store in restart mode with a new process
+    # generation and keeps the authority epoch and the stream identity.
+    first = administration(status_request, path=offline_config)["result"]
+    second = administration(status_request, path=offline_config)["result"]
+    assert (first["state"], first["live"], first["ready"]) == ("stopped", False, False), first
+    assert (second["authorityEpoch"], second["streamId"]) == (first["authorityEpoch"], first["streamId"]), (first, second)
+    assert second["processGeneration"] != first["processGeneration"], "offline status kept its process generation"
+    checked = administration({"version": 1, "operation": "check-store"}, path=offline_config)["result"]
+    assert checked["integrity"] == "valid", checked
+    claims = [administration({"version": 1, "operation": "check-quarantine", "quarantineId": ident},
+                             path=offline_config)["result"]["state"] for ident in checked["quarantineIds"]]
+    unreachable = administration(status_request, refused="storage-unavailable")
+    validated = administration({"version": 1, "operation": "reload-profiles"}, path=offline_config)["result"]
+    profiles = sorted(profile["id"] for profile in served["profiles"])
+    assert validated["profileIds"] == profiles, validated
+    print("PASS operations case 7a: with no manager serving, two offline status answers kept authority epoch",
+          first["authorityEpoch"], "and stream", first["streamId"], "with two process generations; check-store reported",
+          checked["integrity"], "with", len(claims), "quarantine identities", claims, "; the serve configuration refused",
+          "with", unreachable["error"]["code"] + "; offline reload-profiles validated", validated["profileIds"], flush=True)
+
+    process, output, errors = lifetime(7)
+    try:
+        # 7b. Start, readiness and a live profile reload.
+        wait_ready(process)
+        serving = administration(status_request)["result"]
+        assert (serving["state"], serving["live"], serving["ready"], serving["serviceFault"]) == ("serving", True, True, "none"), serving
+        assert serving["authorityEpoch"] == first["authorityEpoch"], serving
+        reloaded = administration({"version": 1, "operation": "reload-profiles"})["result"]
+        assert reloaded["profileIds"] == profiles and reloaded["revision"] != validated["revision"], (validated, reloaded)
+        print("PASS operations case 7b: serve answered status serving, live and ready with service fault none, and a",
+              "live reload-profiles installed", reloaded["profileIds"], "with revision", reloaded["revision"], flush=True)
+
+        # 7c. Client provisioning and listing, rotation with overlap, and
+        # revocation, which ends the overlap at once.
+        issued = administration({"version": 1, "operation": "issue-credential", "label": "Runbook operator client",
+                                 "scopes": all_scopes, "profileIds": profiles, "expiresAt": forever,
+                                 "outputFile": str(operator / "client-1")})["result"]["credential"]
+        original = bearer_header(operator / "client-1")
+        assert answered(original) == (200, None), answered(original)
+        assert listed()[issued["credentialId"]]["state"] == "active"
+        rotated = administration({"version": 1, "operation": "rotate-credential", "credentialId": issued["credentialId"],
+                                  "expiresAt": forever, "outputFile": str(operator / "client-2")})["result"]
+        successor = bearer_header(operator / "client-2")
+        assert rotated["previousCredentialId"] == issued["credentialId"], rotated
+        metadata = listed()
+        old, new = metadata[issued["credentialId"]], metadata[rotated["credential"]["credentialId"]]
+        assert old["state"] == new["state"] == "active" and old["clientId"] == new["clientId"], (old, new)
+        assert answered(original) == (200, None) and answered(successor) == (200, None)
+        administration({"version": 1, "operation": "revoke-credential", "credentialId": issued["credentialId"]})
+        assert answered(original) == (401, "unauthenticated") and answered(successor) == (200, None)
+        assert listed()[issued["credentialId"]]["state"] == "revoked"
+        administration({"version": 1, "operation": "rotate-credential", "credentialId": issued["credentialId"],
+                        "expiresAt": forever, "outputFile": str(operator / "client-3")}, refused="state-conflict")
+        assert not (operator / "client-3").exists(), "a refused rotation published a credential file"
+        print("PASS operations case 7c: issue-credential provisioned", issued["credentialId"], "for", profiles,
+              "; rotate-credential gave", rotated["credential"]["credentialId"], "of the same client, and both",
+              "authenticated during the overlap; revoke-credential of the predecessor gave it 401 at once while the",
+              "successor kept 200; list-credentials reported active, active and then revoked; a rotation of the",
+              "revoked credential refused with state-conflict and published no file", flush=True)
+
+        # 7d. Drain, cancel of an owned run, and shutdown.
+        code, capabilities, raw = request("/v1/capabilities", successor)
+        assert code == 200
+        validate("Capabilities", capabilities, raw)
+        attempts = []
+        client = mixed_client(capabilities, successor, attempts)
+        observed, wait_for, _, _ = client
+        created, workflow = new_request(capabilities, successor, "profile_2")
+        _, run = approve_mixed(created, workflow, client)
+        head, _, _ = drive_mixed(run, client, stop_at_question=True, overview=False)
+        assert head is not None, ("the run did not reach its question", run)
+        assert administration({"version": 1, "operation": "drain"})["result"] == {"state": "draining"}
+        draining = administration(status_request)["result"]
+        assert (draining["state"], draining["live"], draining["ready"]) == ("draining", True, False), draining
+        control, tag, _ = observed("/v1/runs/" + run + "/control", "RunControl")
+        assert control["cancelAllowed"] and control["supervision"] == "owned", (control["cancelAllowed"], control["supervision"])
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        code, receipt, raw, _ = exchange("/v1/runs/" + run + "/control", successor | {
+            "Content-Type": "application/json", "Idempotency-Key": key, "If-Match": tag},
+            method="POST", payload=b'{"operation":"cancel"}')
+        assert code == 202, ("the cancel during the drain", code, receipt.get("code"))
+        validate("CommandReceipt", receipt, raw)
+        command, _, _ = wait_for(receipt["links"]["self"], "CommandReceipt",
+                                 lambda value: value["acknowledgement"] is not None or value["state"] in ("refused", "unresolved"))
+        assert command["state"] in ("acknowledged", "effect-observed"), ("the cancel command", command["state"])
+        snapshot, _, _ = wait_for("/v1/runs/" + run + "/snapshot", "RunSnapshot",
+                                  lambda value: value["runtime"] is not None and value["runtime"]["status"] in ("succeeded", "failed", "cancelled"))
+        assert snapshot["runtime"]["status"] == "cancelled", snapshot["runtime"]["status"]
+        deadline = time.monotonic() + 40
+        while True:
+            idle = administration(status_request)["result"]
+            if idle["activeReservations"] == 0 and idle["ownedWorkers"] == 0:
+                break
+            assert time.monotonic() < deadline, ("the drained manager did not become idle", idle)
+            time.sleep(0.2)
+        stopped = administration({"version": 1, "operation": "shutdown"})
+        assert stopped["result"] == {"state": "stopped"}, stopped
+        process.wait(timeout=60)
+        print("PASS operations case 7d: run", run, "waited at question", head, "; drain answered draining and status",
+              "reported live and not ready; the cancel", receipt["id"], "ended the run cancelled; status reported no",
+              "reservation and no owned worker; shutdown answered stopped and the process exited", flush=True)
+    finally:
+        stop(7, process, output, errors)
+
+    # 7e. Fencing evidence, offline backup, restore and reprovisioning.
+    evidence_answer = administration(status_request, path=offline_config)
+    fence = evidence_answer["result"]
+    assert (fence["state"], fence["activeReservations"]) == ("stopped", 0), fence
+    assert (fence["authorityEpoch"], fence["streamId"]) == (first["authorityEpoch"], first["streamId"]), fence
+    evidence = operator / "fencing-evidence.json"
+    # The frozen parser reads numbers as Decimal, and every number of a
+    # status answer is an integer.
+    evidence.write_text(json.dumps(evidence_answer, default=int) + "\n")
+    evidence.chmod(0o600)
+    backup = operator / "backup-runbook"
+    backed = administration({"version": 1, "operation": "backup", "outputFile": str(backup)}, path=offline_config)["result"]
+    assert (backup / "complete").is_file(), "the backup has no completion binding"
+    assert backed["sha256"] == hashlib.sha256((backup / "coordination.sqlite3").read_bytes()).hexdigest(), backed
+    restored = administration({"version": 1, "operation": "restore", "backupFile": str(backup),
+                               "fencingEvidenceFile": str(evidence)}, path=offline_config)["result"]
+    assert restored["credentialsRevoked"] is True and restored["reprovisioned"] is False, restored
+    assert restored["authorityEpoch"] != fence["authorityEpoch"] and restored["streamId"] != fence["streamId"], restored
+    assert all(item["state"] == "revoked" for item in listed(offline_config).values()), "a restored credential is not revoked"
+    administration({"version": 1, "operation": "issue-credential", "label": "Runbook reprovisioned client",
+                    "scopes": all_scopes, "profileIds": profiles, "expiresAt": forever,
+                    "outputFile": str(operator / "client-restored")}, path=offline_config)
+    reprovisioned = bearer_header(operator / "client-restored")
+    after = administration(status_request, path=offline_config)["result"]
+    assert (after["authorityEpoch"], after["streamId"]) == (restored["authorityEpoch"], restored["streamId"]), (after, restored)
+    assert administration({"version": 1, "operation": "check-store"}, path=offline_config)["result"]["integrity"] == "valid"
+    print("PASS operations case 7e: the offline status answer with authority epoch", fence["authorityEpoch"], "and no",
+          "active reservation is the fencing evidence; backup answered", backed, "; restore answered", restored,
+          "and revoked every restored credential; an offline issue-credential reprovisioned a client, and offline status",
+          "and check-store reported the new identities and a valid Store", flush=True)
+
+    # 7f. The restored Store serves the reprovisioned credential only.
+    process, output, errors = lifetime(8)
+    try:
+        wait_ready(process)
+        assert answered(successor) == (401, "unauthenticated"), answered(successor)
+        code, capabilities, raw = request("/v1/capabilities", reprovisioned)
+        assert code == 200 and capabilities["authorityEpoch"] == restored["authorityEpoch"], (code, capabilities.get("authorityEpoch"))
+        validate("Capabilities", capabilities, raw)
+        attempts_after = []
+        client = mixed_client(capabilities, reprovisioned, attempts_after)
+        observed = client[0]
+        cancelled, _, _ = observed("/v1/runs/" + run, "Run")
+        assert cancelled["runtime"] is not None and cancelled["runtime"]["status"] == "cancelled", cancelled["runtime"]
+        print("PASS operations case 7f: the next lifetime refused the credential of before the restoration with 401 and",
+              "served the reprovisioned credential under authority epoch", capabilities["authorityEpoch"], "; run", run,
+              "of the backup reads cancelled", flush=True)
+
+        # 7g. Expired credentials.
+        soon = (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        short = administration({"version": 1, "operation": "issue-credential", "label": "Runbook short credential",
+                                "scopes": ["observe"], "profileIds": ["profile_1"], "expiresAt": soon,
+                                "outputFile": str(operator / "client-short")})["result"]["credential"]
+        short_auth = bearer_header(operator / "client-short")
+        assert answered(short_auth) == (200, None)
+        deadline = time.monotonic() + 15
+        while answered(short_auth)[0] == 200:
+            assert time.monotonic() < deadline, "the short credential did not expire"
+            time.sleep(0.25)
+        assert answered(short_auth) == (401, "unauthenticated")
+        assert listed()[short["credentialId"]]["state"] == "expired"
+        administration({"version": 1, "operation": "rotate-credential", "credentialId": short["credentialId"],
+                        "expiresAt": forever, "outputFile": str(operator / "client-short-2")}, refused="state-conflict")
+        assert not (operator / "client-short-2").exists(), "a refused rotation published a credential file"
+        print("PASS operations case 7g: a credential that expired at", soon, "received 401 unauthenticated,",
+              "list-credentials reported it expired, and its rotation refused with state-conflict", flush=True)
+
+        # 7h. Lost replies: an exact repeat of an attempt returns the
+        # original receipt and executes nothing again.
+        created, workflow = new_request(capabilities, reprovisioned, "profile_2")
+        enqueue_mixed(created, workflow, client)
+        _, path, headers, payload, receipt_uri, original_receipt = next(item for item in attempts_after if item[0] == "enqueue")
+        code, repeated, raw, _ = exchange(path, headers, method="POST", payload=payload)
+        assert code == 202 and repeated["id"] == original_receipt["id"] and repeated["links"]["self"] == receipt_uri, (
+            "the exact repeat", code, repeated.get("code"))
+        validate("CommandReceipt", repeated, raw)
+        read_back, _, _ = observed(receipt_uri, "CommandReceipt")
+        assert read_back["id"] == original_receipt["id"] and read_back["operation"] == "enqueue", read_back
+        print("PASS operations case 7h: an exact repeat of enqueue", original_receipt["id"], "returned the original",
+              "receipt, and GET", receipt_uri, "read it as", read_back["state"], flush=True)
+
+        # 7i. Older backup: an attempt under the authority epoch of before the
+        # restoration refuses with authority-changed before any ledger lookup.
+        _, path, headers, payload, _, _ = next(item for item in attempts if item[0] == "set-input")
+        code, problem, raw, _ = exchange(path, headers | reprovisioned, method="POST", payload=payload)
+        assert (code, problem.get("code")) == (409, "authority-changed"), ("the attempt of the earlier epoch", code, problem.get("code"))
+        validate("Problem", problem, raw)
+        restored_status = administration(status_request)["result"]
+        print("PASS operations case 7i: an attempt with an Idempotency-Key of the earlier authority epoch received 409",
+              "authority-changed; status of the restored Store reported", restored_status["lostRuns"], "lost runs and",
+              restored_status["unresolvedCommands"], "unresolved commands", flush=True)
+        assert administration({"version": 1, "operation": "shutdown"})["result"] == {"state": "stopped"}
+        process.wait(timeout=60)
+    finally:
+        stop(8, process, output, errors)
+
+    # 7j. Diagnostics after the exercise: the flow verb reads the manager
+    # logs and run logs, the private fault logs hold only fault lines, and
+    # check-store reports a valid Store.
+    flow_dir = work / "manager" / "flow"
+    stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+    status, records, summary = read_flow("operations-runbook-flow", [flow_dir] + stores, runner)
+    assert status in (0, 2) and summary["verified"] and not summary["problems"], ("the flow verb", status, summary["problems"])
+    old_log = str(flow_dir / (first["streamId"] + ".ndjson"))
+    new_log = str(flow_dir / (restored["streamId"] + ".ndjson"))
+    lifetimes = [item for item in summary["joins"]["lifetimes"] if item["lifetime"]["log"] == old_log]
+    since = lifetimes[-1]["lifetime"]["position"]
+    administered = []
+    for record in records:
+        if record["schema"] != "command" or record["log"] != old_log or record["position"] <= since \
+                or "administration" not in record["body"]:
+            continue
+        replies = [reply for reply in records if reply["log"] == old_log and reply.get("replyTo") == record["position"]]
+        assert len(replies) == 1, ("an administration command without one reply", record["position"], replies)
+        if replies[0]["schema"] == "receipt" and replies[0]["body"].get("ok", True):
+            administered.append(record["body"]["administration"])
+    assert administered == ["reload-profiles", "issue-credential", "rotate-credential", "revoke-credential", "drain", "shutdown"], administered
+    assert any(record["log"] == new_log for record in records), "the restored stream has no manager log"
+    faults = [line for number in (7, 8) for line in (work / f"server-{number}.stderr").read_text().splitlines()]
+    assert all(line.startswith("manager-fault ") for line in faults), [line for line in faults if not line.startswith("manager-fault ")]
+    assert administration({"version": 1, "operation": "check-store"}, path=offline_config)["result"]["integrity"] == "valid"
+    print("PASS operations case 7j: the flow verb exited", status, "and verified the manager logs and", len(stores),
+          "run logs; the log of stream", first["streamId"], "holds", administered, "of the seventh lifetime with one",
+          "reply each, and the restored stream has its own log;", len(faults), "fault-log lines of the two lifetimes",
+          "have the manager-fault form; check-store reported a valid Store", flush=True)
+    print("PASS operations case 7: the runbook procedures ran in runbook order through the documented interfaces;",
+          "the refused reloads and the stale review are case 1, the drain details case 2, the shutdown cleanup case 3,",
+          "the backup copy case 4, the fencing mismatch case 5 and the status facts case 6; the rotation cutoff and",
+          "the revocation of retained responses are credential-lifecycle, the seal and the prune are routes, the",
+          "quarantine release is failures-manager and failures-launched, the interrupted backup and the completion",
+          "of an interrupted restoration are failures-backup, the storage endings are storage, the disk write",
+          "failure is faults-io and the proxy failure is tui-failures, which this case cites and does not run", flush=True)
 
 
 if operations_mode:

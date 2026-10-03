@@ -228,7 +228,8 @@ findings" below and in `acat-phase-f-review-findings-4e23`.
 | WM-040 | Met for function, with the gate run of PF22. | `acat-wm-040-3olb` open for the Integrator |
 | WM-041 | Partial. Every mode passes, and the summary has 0 MISSING keys. `events.catch-up-p50-ms`, `events.catch-up-p95-ms` and `pages.first-page-p50-ms` fail in the gate run of record. `failures.backup.passed` passes through the `failures-backup` mode of PG10. `reservations.r16.release-to-review-p50-ms` failed only at high host load. | `acat-wm-041-17ax`, `acat-wm-041-core-3vvz` |
 | G3, G4 | Open. G4 has its gate evidence for the three clients and the witness. G3 needs the rest of WM-041 and the deferred security stage. | `acat-g4-pech`, `acat-g3-v1iz` |
-| WM-042 to WM-044, G5 | Not started, apart from the quarantine release of WM-042. | `acat-wm-042-sdg9`, `acat-wm-043-zm3d`, `acat-wm-044-6utw`, `acat-g5-u0w2` |
+| WM-042 | Partial. The local administration operations `reload-profiles`, `drain`, `shutdown`, `backup` and `restore`, the completion of an interrupted restoration and the status facts are implemented (PG5 to PG12). `manager/OPERATIONS.md` states the operator procedures, and case 7 of the `operations` mode of `manager/test/service_http.py` executes them in runbook order on a disposable fixture (PG13). The exercise of the procedures by another human operator is pending and has not run. | `acat-wm-042-sdg9` |
+| WM-043, WM-044, G5 | Not started. | `acat-wm-043-zm3d`, `acat-wm-044-6utw`, `acat-g5-u0w2` |
 
 The fess follow-up issues of this part are `acat-pf19-fess-followup-ewpu`,
 `acat-pf20-fess-followup-nb2n`, `acat-pf21-fess-followup-nak8`,

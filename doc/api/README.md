@@ -961,6 +961,8 @@ the same file without it, which administration uses only when no manager
 serves. Trusted embedding hosts this channel with
 `withLocalAdministration`. Its implementation and authority limits are described
 in [the command contract](../../manager/COMMANDS.md#local-credential-administration).
+The [operator runbook](../../manager/OPERATIONS.md) gives the procedures that
+use these operations, with their exact request bodies and failure answers.
 
 Service startup is foreground and takes trust, TLS, profiles, and storage
 configuration only from the selected local file. Administration consumes one

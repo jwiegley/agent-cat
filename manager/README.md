@@ -8,6 +8,11 @@ Implementation follows the [approved design](../doc/research/workflow-manager.md
 [work packages](../doc/research/workflow-manager-implementation-plan.md), and the
 [operator-approved SQLite scope amendment](../doc/research/workflow-manager-storage-amendment.md).
 
+The [operator runbook](OPERATIONS.md) gives the procedures of the local
+manager: configuration validation and profile reload, credential
+administration, drain and shutdown, offline backup and restore, manager-log
+pruning, quarantine release, and the failure procedures.
+
 ## Retained history and lineage
 
 `Agentic.Manager.History` materializes complete observations of the manager root
