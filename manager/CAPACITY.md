@@ -119,6 +119,15 @@ their own manager lifetime with their own manager root, and the safety path
 continues the lifetime of the queue workload. The mode writes the file `capacity-admission.json` in its fixture
 directory.
 
+The `capacity-inputs` mode of `manager/test/service_http.py` runs the
+workloads of the sections "Drafts", "Page sets", "Captures" and "Artifact
+readers", in that order. The drafts workload, the page-set workload and the
+capture workload each run in their own manager lifetime with their own
+manager root. The artifact readers run below HTTP in the executable
+`manager-artifact-check`, which the environment variable `ARTIFACT_CHECK`
+of the mode names. The mode writes the file `capacity-inputs.json` in its
+fixture directory after each workload.
+
 The capacity profiles are `cap_01` to `cap_20`. Each one names the runner of
 `routing-fixed-point-probe` with the target arguments `--scripted`,
 `personAnswering` `local-control`, and its own resource key, `cap_key_01` to
@@ -297,28 +306,43 @@ across one accepted upload, minus the 67108864 bytes of the capture.
 
 ## Artifact readers
 
-The configuration adds the profile `cap_acp`, whose target runs an ACP
-fixture adapter of `engine/acp/test`. The adapter answers each prompt with one
-`agent_message_chunk` of 1000000 ASCII bytes. One run of the `prompt-source`
-workflow on `cap_acp` succeeds, and its verified source result is the
-artifact under test. Two holder credentials each open a TLS connection with
-a receive buffer (`SO_RCVBUF`) of 4096 bytes, send `GET` of the download, read
-the status line and the headers, and then read 16384 bytes each second, so
-that each write of the manager completes within its five-second deadline
-while the download stays in progress. Two seconds after both holders have
-read their headers, a third credential sends `GET` of the same download and
-reads its response at full speed. The holders then read the rest of their
-bodies at full speed and compare the SHA-256 digest of each body with the
-artifact metadata.
+The verified result of a program is its receipt, about 103 bytes long, and
+one write of the manager answers its download. No HTTP client can hold a
+download place long enough to measure the limit of two places. This workload
+therefore runs below HTTP, in the command `manager-artifact-check
+capacity-readers DIRECTORY`. The check opens its own Store root in the
+directory with the base configuration, one credential with the scopes
+`observe` and `export`, and one verified source result. Two holders each
+start a download of that result through `withArtifactDownloadWithin` with
+the total deadline of 300 seconds (`artifactResponseDeadline`). Each holder
+charges one artifact response place, returns the loans of its view and keeps
+the place. When both holders keep a place, a third download starts. After
+the third download ends, the holders send their bodies through
+`respondBytes`, and the check compares the size and the SHA-256 digest of
+each body with the artifact metadata. The status and the code of the third
+download are the public problem of its refusal, from `faultProblem`. Its
+wait runs from before its start to its refusal. The check prints the
+measured values on one line that starts with `CAPACITY-READERS`. The check
+process holds the Store, so the harness samples its resident memory under
+the rules for the manager.
+
+This workload and the basis of its ceilings are a correction that was made
+before any readers measurement ran. The first form of the workload read the
+result of a `prompt-source` run through two slow HTTP clients, and it could
+not hold a place because that result is a receipt. The correction keeps the
+values of the ceilings, except that H of `readers.manager-rss-peak-bytes` no
+longer counts a capture, because the readers no longer continue the lifetime
+of the capture workload. That ceiling is now 536870912 bytes in place of
+671088640 bytes.
 
 | Key | Ceiling | Unit | Basis |
 | --- | --- | --- | --- |
-| `readers.holders-accepted` | equals `2` | count | Two artifact response places for each manager. |
+| `readers.holders-accepted` | equals `2` | count | Two artifact response places for each Store. |
 | `readers.holders-verified` | equals `true` | flag | A download returns exact verified bytes. |
-| `readers.third-refusal-status` | equals `429` | status | A third download while both places are held. |
-| `readers.third-refusal-code` | equals `storage-quota` | code | A third download while both places are held. |
-| `readers.third-wait-ms` | 5000 to 6000 | ms | The five-second place wait and one second for the response. |
-| `readers.manager-rss-peak-bytes` | at most 671088640 | bytes | B + 2 H, where H is two downloads and one capture of 67108864 bytes each. |
+| `readers.third-refusal-status` | equals `429` | status | The public problem of a third download while both places are held. |
+| `readers.third-refusal-code` | equals `storage-quota` | code | The public problem of a third download while both places are held. |
+| `readers.third-wait-ms` | 5000 to 6000 | ms | The five-second place wait and one second for the refusal. |
+| `readers.manager-rss-peak-bytes` | at most 536870912 | bytes | B + 2 H, where H is two downloads of 67108864 bytes each. |
 
 ## Page sets
 

@@ -46,7 +46,7 @@ import Agentic.Runtime hiding (Checkpoint)
 import Control.Concurrent.Async (AsyncCancelled (..), Concurrently (..), async, asyncThreadId, cancel, concurrently, mapConcurrently, poll, wait, waitCatch, withAsync)
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Conc (ThreadStatus (..), BlockReason (..), threadStatus)
-import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, readMVar, takeMVar)
 import Control.DeepSeq (NFData, force)
 import Control.Exception (IOException, bracket, evaluate, fromException, throwIO, try)
 import Control.Monad (forM_, unless, void)
@@ -58,13 +58,14 @@ import Data.ByteArray (convert)
 import Data.Foldable (toList)
 import Data.IORef (modifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BL
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Database.SQLite3 as SQL
 import System.Directory (createDirectory, renameDirectory, renameFile, removeFile)
 import System.Environment (getArgs)
 import System.FilePath ((</>))
-import System.IO (hSetBuffering, stdout, BufferMode (LineBuffering))
+import System.IO (hSetBuffering, stdin, stdout, BufferMode (LineBuffering))
 import System.IO.Error (isDoesNotExistError, isPermissionError)
 import System.Posix.Files (createSymbolicLink, setFileMode)
 import System.Timeout (timeout)
@@ -86,6 +87,7 @@ main = do
     ["ordinary-stream",work] -> ordinaryStreamChecks work
     ["response-ingestion",work] -> responseIngestionChecks work
     ["stream-ingestion",work] -> streamIngestionChecks work
+    ["capacity-readers",work] -> capacityReaderChecks work
     [work,source] -> do
       createDirectory(work </> "composition")
       compositionChecks(work </> "composition")
@@ -112,7 +114,7 @@ main = do
       createDirectory(work </> "stream-ingestion")
       streamIngestionChecks(work </> "stream-ingestion")
       artifactChecks work source
-    _ -> error "usage: manager-artifact-check [retention|composition|observation|events|admission-contention|response-order|collections|fault-classification|ordinary-admission|ordinary-stream|response-ingestion|stream-ingestion] PRIVATE_DIRECTORY [PACKAGE_DIRECTORY]"
+    _ -> error "usage: manager-artifact-check [retention|composition|observation|events|admission-contention|response-order|collections|fault-classification|ordinary-admission|ordinary-stream|response-ingestion|stream-ingestion|capacity-readers] PRIVATE_DIRECTORY [PACKAGE_DIRECTORY]"
 
 -- Each converted cause site keeps its own class or records its own erased
 -- cause, genuine Store failures keep the storage-unavailable problem, and the
@@ -568,6 +570,67 @@ responseIngestionChecks work = do
         outcome <- wait response
         check "a revocation during the hold refuses the next write" (outcome == Left (CommandRefusal Command.Unauthenticated))
         atomically (readTVar writes) >>= check "a revocation during the hold stops the response before its next write" . (== 1)
+
+-- | The workload of the section "Artifact readers" of manager/CAPACITY.md,
+-- below HTTP. The verified result of a program is its receipt, and one write
+-- answers its download, so no HTTP client holds a download place long enough
+-- to measure the place limit. Two holders each charge one artifact response
+-- place through 'withArtifactDownloadWithin' with 'artifactResponseDeadline',
+-- return the loans of their views and keep the place. While both places stay
+-- held, a third download waits for a place and refuses. The holders then send
+-- their bodies through 'Transport.respondBytes', and each body must have the
+-- size and the SHA-256 of the artifact metadata.
+--
+-- The check prints the measured values as one line, @CAPACITY-READERS@ and a
+-- JSON object, before its checks, so that a failed check keeps the values.
+-- The status and the code of the third download are the public problem of its
+-- refusal. After its checks, the check reads its standard input to the end,
+-- so that the harness stops its resident sampler while the process lives.
+capacityReaderChecks :: FilePath -> IO ()
+capacityReaderChecks work = do
+  (config,_) <- fixture work
+  withInstalled config $ \installed -> withCoordinationStore installed $ \store -> do
+    seed store
+    proof <- authenticateCredential store bearer >>= right
+    (association,reference,_) <- sourceRun store
+    ingest store association reference
+    handle <- scalar store "SELECT result_artifact_id FROM runs WHERE id='run_21'"
+    entered <- newTVarIO (0 :: Int)
+    release <- newEmptyMVar
+    let download respond = faultOf (withArtifactDownloadWithin artifactResponseDeadline store proof handle respond)
+        holder = download $ \view value bytes -> do
+          releaseResponseLoans view
+          atomically (modifyTVar' entered (+1))
+          readMVar release
+          body <- newIORef mempty
+          _ <- Transport.respondBytes HTTP.status200 [] view bytes (collect body)
+          sent <- BL.toStrict . Builder.toLazyByteString <$> readIORef body
+          pure (field "bytes" value == String (T.pack (show (BS.length sent)))
+            && field "sha256" value == String (T.pack (show (hash sent :: Digest SHA256))))
+        collect body response = do
+          let (_, _, withBody) = Wai.responseToStream response
+          withBody (\stream -> stream (\chunk -> modifyIORef' body (<> chunk)) (pure ()))
+          pure ResponseReceived
+    (held, accepted, holders, third, waited) <- withAsync (concurrently holder holder) $ \holding -> do
+      held <- timeout 10000000 (atomically (readTVar entered >>= \count -> unless (count >= artifactResponsePlaces) retry))
+      accepted <- atomically (readTVar entered)
+      begun <- getMonotonicTimeNSec
+      third <- download (\_ _ _ -> pure False)
+      refused <- getMonotonicTimeNSec
+      putMVar release ()
+      (first, second) <- wait holding
+      pure (held, accepted, [first, second], third, refused - begun)
+    let (status, code) = either faultProblem (const (200, "none")) third
+        verified = holders == [Right True, Right True]
+        record = object
+          ["readers.holders-accepted" .= accepted, "readers.holders-verified" .= verified,
+           "readers.third-refusal-status" .= status, "readers.third-refusal-code" .= code,
+           "readers.third-wait-ms" .= (fromIntegral (waited `div` 100000) / 10 :: Double)]
+    putStrLn ("CAPACITY-READERS " <> T.unpack (TE.decodeUtf8 (Command.encoded record)))
+    check "two downloads hold both artifact response places at the same time" (held == Just () && accepted == artifactResponsePlaces)
+    check "a third download refuses with storage-quota while both places stay held" (third == Left (CommandRefusal Command.StorageQuota))
+    check "both held downloads send the exact verified bytes of the artifact" verified
+  void (BS.hGetContents stdin)
 
 -- | The first runtime event of the fixture run.
 ingestionStart :: RuntimeEvent

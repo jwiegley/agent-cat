@@ -7169,7 +7169,7 @@ Protected HTTP access exposes authorized catalogue, history, snapshots, verified
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 13:16]
+:MODIFIED: [2026-10-02 Fri 18:57]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G3
 :SOURCE_REPO: agent-cat
@@ -7268,6 +7268,13 @@ Request, approval, control, export, and lineage routes pass hostile-input, repla
     "author": "johnw",
     "text": "Evidence scope: Phase F part 1 closeout (handoff section 'Phase F part 1 of 2026-10-02', remaining-scope report revision 2; evidence under resume-20260923/PF and Z/CLOSEOUT-pf). Open. The Phase F gate (PF21 to PF24) did not run.",
     "created_at": "2026-10-02T20:16:21Z"
+  },
+  {
+    "id": 676,
+    "issue_id": "acat-g3-v1iz",
+    "author": "johnw",
+    "text": "Phase F part 2 closeout (2026-10-02): open. Needs the rest of WM-041 (PF18 owner answer, PF19, PF20) and the Phase F gate (PF21 to PF24).",
+    "created_at": "2026-10-03T01:57:00Z"
   }
 ]
 #+end_src
@@ -7279,7 +7286,7 @@ Request, approval, control, export, and lineage routes pass hostile-input, repla
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 13:16]
+:MODIFIED: [2026-10-02 Fri 18:57]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G4
 :SOURCE_REPO: agent-cat
@@ -7476,6 +7483,13 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
     "author": "johnw",
     "text": "Evidence scope: Phase F part 1 closeout (handoff section 'Phase F part 1 of 2026-10-02', remaining-scope report revision 2; evidence under resume-20260923/PF and Z/CLOSEOUT-pf). Open. WM-039 partial; the Phase F gate did not run.",
     "created_at": "2026-10-02T20:16:21Z"
+  },
+  {
+    "id": 677,
+    "issue_id": "acat-g4-pech",
+    "author": "johnw",
+    "text": "Phase F part 2 closeout (2026-10-02): open. WM-039 witness modes pass for function at N8; G4 needs the gate run of the witness and the client suites (PF21 to PF24).",
+    "created_at": "2026-10-03T01:57:01Z"
   }
 ]
 #+end_src
@@ -12762,6 +12776,30 @@ Non-blocking findings of fess pf-PF17-r2 (fess/pf-PF17-r2.md) on subtask PF17 (t
 5. (low) manager/test/capacity-ceilings.json: the keys *.capabilities-saturated-ms have no ceiling and show as UNCHECKED. The 5000 ms bound (CAPACITY_PROBE_MS) is enforced only inside the mode. Fix: add ceiling keys in a later ceiling revision, without a change to the ceilings that were already measured.
 6. (low) manager/src/Agentic/Manager/Service.hs line 150: while the service owns sixteen preparations, fill now runs refreshAdmission False. When that poll returns AdmissionIdle, fill clears faultCell, which it did not touch before. The Haddock does not say this. Fix: state it in the comment of fill, or keep faultCell unchanged on a poll that does not admit.
 7. (low, implementer limitation) ext-pi binds its bridge socket under the Pi state directory. When that path is longer than the macOS sun_path limit of 104 bytes, the bind fails with EADDRINUSE, because the truncated path names an existing directory. A cross-client-lifecycle attempt with a fixture tag one character longer than that of PF7 failed this way (kept root /Users/johnw/Products/k.M0a5ItPm/tmp/pf17-cross-client-lifecycle.UYfWXUdr). Fix: ext-pi binds the socket at a short path, or refuses a path longer than the limit with a clear message.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF18
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf18-fess-followup-s432
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 19:11]
+:MODIFIED: [2026-10-02 Fri 19:11]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF18-r1 (fess/pf-PF18-r1.md) on subtask PF18 (the WM-041 mode capacity-inputs of manager/test/service_http.py, the subcommand manager-artifact-check capacity-readers of manager/test/ArtifactCheck.hs, and the section "Artifact readers" of manager/CAPACITY.md under decision (a) of 2026-10-02).
+
+1. (medium) manager/test/service_http.py CapacityHarness.finish, which capacity-admission shares, changed after the only capacity-admission regression run (PF/PF18/impl-r1/round1-pre/capacity-admission-regression.log, 18:48; service_http.py last changed 19:03). No run shows that capacity-admission passes on the final source. Fix: run JOURNEY-ONCE n=8 with the mode capacity-admission once on the current source and keep the log and exit files.
+2. (medium) manager/CAPACITY.md line 345 and manager/test/capacity-ceilings.json readers.manager-rss-peak-bytes: the basis says "B + 2 H, where H is two downloads of 67108864 bytes each". The check downloads a 5-byte artifact ("false", manager/test/ArtifactCheck.hs line 1638) and samples the check process, not a manager. The measured 74 MB does not bound manager memory with two 64 MiB downloads in progress. The ceiling was tightened, not loosened. Fix: reword the basis to describe the actual workload, or state that this key does not measure 64 MiB downloads.
+3. (medium) manager/test/capacity-ceilings.json pages.first-page-p50-ms: 281 ms against a ceiling of 500 ms in the final run, and 581 ms (FAIL) in round 1. The first page of a lifetime takes 1263 ms to materialize 4096 legacy handles. Later gate runs can fail on this key. Fix: diagnose the first-page latency of a legacy history before PF20 and the gate. Do not move the ceiling.
+4. (low) Spec drift: the drafts lifetime uses drafts 4, globalDrafts 10 and four credentials, not the requirement's example of 8, 16 and three. Lifetime 2 sets globalPageSets 8 and globalCaptureBytes 134217728. Both follow the ceilings that PF16 published. Fix: none in code. This record states that the PF16-published bounds govern.
+5. (low) manager/test/service_http.py line 17318 and manager/test/ArtifactCheck.hs line 1577: a failing check calls error, which writes FAIL to stderr, but the step 4 assertion lists the FAIL lines of stdout only, so its diagnostic is always []. The nonzero exit still fails the step. Fix: read artifact-check-readers.stderr in the step 4 assertion message.
+6. (low) manager/test/service_http.py lines 17299-17302: the harness reads checker.stdout with no timeout. A check that hangs before CAPACITY-READERS stops only at the outer 900-second timeout. Fix: add a bounded wait, for example a timer that kills the checker after 120 s.
+7. (low) doc/workflow-manager-handoff.md: the section "Stop at PF18" described the blocked round-1 readers path. The Integrator replaced it in the PF18 commit with the section "PF18 under decision (a)". No further action.
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PF2
 :PROPERTIES:
@@ -23269,7 +23307,7 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Adopt the shared root-role r
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 14:01]
+:MODIFIED: [2026-10-02 Fri 18:56]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-039
 :SOURCE_REPO: agent-cat
@@ -23427,6 +23465,13 @@ configuration is changed.
     "author": "johnw",
     "text": "PF8 (cross-client-lineage): the mode in manager/test/service_http.py runs with its own CrossClientFixture. The harness creates and settles two parents through HTTP. The TUI History view, Pi /wfm-history and Emacs wf-history list the runs in the order of every page of GET /v1/runs. The TUI forks the first parent by keys and quits at the lineage review without y, Pi approves the exact lineage review with /wfm-review, and Emacs shows 'Lineage: fork of run P' and the child success with the Result SHA-256 of the harness download. The child names its parent and the fork operation, its fork and enqueue commands name the tui client and its approve command names the pi client, /v1/runs/<parent>/lineage-requests lists exactly the child, and the verified result downloads. The mode writes cross-client-lineage-witness.json (WitnessRecord, shared with the cross-client mode). Evidence: one N8 run passed in 66 seconds with all numbered PASS lines; make -C doc check passed; the cross-client and tui-history regressions passed after the refactor. emacs-native cc56b94 adds the Emacs lineage line and the witness-lineage case. The witness is local single-machine evidence only; cross-machine acceptance stays open. Follow-up: acat-pf8-fess-followup-qx8r.",
     "created_at": "2026-10-02T21:01:05Z"
+  },
+  {
+    "id": 673,
+    "issue_id": "acat-wm-039-0vfi",
+    "author": "johnw",
+    "text": "Phase F part 2 closeout (2026-10-02): status recorded in doc/workflow-manager-handoff.md, section 'Phase F part 2 of 2026-10-02'. Met for function as local single-machine evidence: cross-client, cross-client-lifecycle and cross-client-lineage pass at N8 (PF4 to PF8), and the cross-client-broken-answer control fails with its literal message. The gate run (PF23) has not run, so the package stays open. Deferred security items of 2026-09-30 carry forward unchanged.",
+    "created_at": "2026-10-03T01:56:58Z"
   }
 ]
 #+end_src
@@ -23438,7 +23483,7 @@ configuration is changed.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 16:36]
+:MODIFIED: [2026-10-02 Fri 18:56]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-040
 :SOURCE_REPO: agent-cat
@@ -23657,6 +23702,13 @@ legacy workflow build cannot conceal an unchecked manager development.
     "author": "johnw",
     "text": "PF15: bisim/ci/manager.sh adds the WM-040 gate with one subcommand per step (closure, lean, build, cases, admission, vertical, history, refusals, corpus) and three controls. Evidence PF/PF15/impl-r1: all nine steps exited 0 (cases 45 with 0 mismatches; vertical N8 with the RestartParent, ResumeParent and ForkParent comparisons). control-oracle exited 1 with MANAGER-CONFORMANCE mismatch and 14 counterexamples kept. control-model built the copied Agentic.Manager, then failed at Exec.lean:161 inside answerExec_eq. control-case exited 1 with MANAGER-CONFORMANCE mismatch for answer-head. No control changed the tree, and git status --short bisim/corpus stayed empty. make -C doc check passed. compareNativeRuns compares answers, effects, checkpoint, bills, policy and manifest lineage, and the restart, resume and fork children are compared, now documented in bisim/manager/README.md. Fess pf-PF15-r1 not blocking; findings filed as acat-pf15-fess-followup-zpyo. WM-040 stays open for the closeout.",
     "created_at": "2026-10-02T23:36:54Z"
+  },
+  {
+    "id": 674,
+    "issue_id": "acat-wm-040-3olb",
+    "author": "johnw",
+    "text": "Phase F part 2 closeout (2026-10-02): met for function. The ManagerConformance Lean library with proved deciders, manager-oracle with 45 retained cases, manager-conformance-check with the admission, cases, history and refusals lanes, and bisim/ci/manager.sh with three controls landed as PF9 to PF15. The gate run (PF22) has not run, so the package stays open. Open limits: the history and refusals lanes did not rerun after later changes. See the handoff section 'Phase F part 2 of 2026-10-02'.",
+    "created_at": "2026-10-03T01:56:59Z"
   }
 ]
 #+end_src
@@ -23668,7 +23720,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 18:21]
+:MODIFIED: [2026-10-02 Fri 19:12]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -23817,6 +23869,20 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "PF17 (2026-10-02): the mode capacity-admission of manager/test/service_http.py measures the admission part of WM-041 in four lifetimes. At 1 and 16 execution reservations, concurrent runs are created and approved through HTTP, queued requests show FIFO eligibility, and cleanup admits the next queued request without a client command. A cohorts lifetime shows that profiles that share a resource key, and profiles without keys, wait with exactly profile-busy and are admitted after the discard of the holding review. The queue holds 100 requests and refuses the 101st with the advertised code. A credential at its ordinary rate, with the queue full, sends a cancel that the safety-control capacity accepts, and the run ends cancelled. GET /v1/capabilities answers within 5000 ms during saturation. Manager fix in the same change: readDraftAt in manager/src/Agentic/Manager/Drafts.hs refused a GET with 412 stale-revision when a concurrent commit changed the request revision. It now repeats the read at the busy site drafts-request-revision. A new DraftCheck case fails on the old code (54 of 437 reads refused) and passes at N1 and N8. Evidence (private, PF/PF17/impl-r2): py_compile exit 0, build exit 0, capacity-admission at N8 exit 0, capacity_summary.py summary 36 PASS, 0 FAIL, 93 MISSING for the other parts, 3 UNCHECKED, DraftCheck exit 0, AdmissionCheck N8 exit 0, tui-journey N8 exit 0, cross-client-lifecycle exit 0, make -C doc check exit 0. Fess pf-PF17-r2 reran the mode independently and passed, and is not blocking. Its findings are filed as acat-pf17-fess-followup-3xb3. Reconciliation: the mode issues 5, 5, 1 and 14 credentials over its four lifetimes, as manager/CAPACITY.md states, in place of the eight of the task text. The package stays open: PF18 to PF20 measure the other parts.",
     "created_at": "2026-10-03T01:21:25Z"
+  },
+  {
+    "id": 675,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "Phase F part 2 closeout (2026-10-02): partial. PF16 published the workloads and 129 ceilings, and PF17 capacity-admission passes with 36 keys inside their ceilings (with the readDraftAt stale-revision fix). The run stopped at PF18: the 'Artifact readers' workload cannot run as written, because every verified result is the run receipt (about 103 bytes). Owner options (a) measure below HTTP (recommended), (b) a fixture-only large artifact, (c) drop the readers.* keys. PF18 work (service_http.py capacity-inputs mode, hold_adapter.py length argument, CAPACITY.md) stays uncommitted; steps 1 to 3 passed, and the summary gave 36 PASS, 1 FAIL (pages.first-page-p50-ms 581 ms against 500 ms) and 92 MISSING. PF19 and PF20 did not start.",
+    "created_at": "2026-10-03T01:56:59Z"
+  },
+  {
+    "id": 678,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PF18 (2026-10-02, decision (a)): the mode capacity-inputs of manager/test/service_http.py measures the drafts, page sets, captures and artifact readers of WM-041. Drafts run to the PF16 bounds (drafts 4, globalDrafts 10, four credentials) with the per-client and global refusals. A capture of 67108864 bytes is accepted and globalCaptureBytes plus one byte is refused. Page sets run to two for each client and to globalPageSets, expire after 60 s, and manager RSS stays inside its ceiling. Artifact readers are measured below HTTP, because every verified result is a receipt of about 103 bytes: the new manager-artifact-check capacity-readers holds two places through withArtifactDownloadWithin, and a third download waited 5001 ms and was refused with 429 storage-quota; both held bodies matched the metadata size and SHA-256. manager/CAPACITY.md records the readers workload change as a correction before measurement; only readers.manager-rss-peak-bytes changed value (671088640 to 536870912). Evidence (private, PF/PF18/impl-r1): py_compile exit 0, build exit 0, capacity-inputs at N8 exit 0 in 113 s, capacity_summary.py summary 43 PASS, 0 FAIL, 86 MISSING for the other parts, standalone capacity-readers exit 0, make -C doc check exit 0. Fess pf-PF18-r1 is not blocking; its findings are filed as acat-pf18-fess-followup-s432. The capacity-admission regression did not run on the final source. The package stays open: PF19 and PF20 measure the other parts.",
+    "created_at": "2026-10-03T02:12:29Z"
   }
 ]
 #+end_src
@@ -23828,7 +23894,7 @@ workloads rather than extrapolating unmeasured capacity.
 :LABELS:   ["p9","wm-checkpoint","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 13:16]
+:MODIFIED: [2026-10-02 Fri 19:12]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041-core
 :SOURCE_REPO: agent-cat
@@ -23943,6 +24009,13 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
     "author": "johnw",
     "text": "Evidence scope: Phase F part 1 closeout (handoff section 'Phase F part 1 of 2026-10-02', remaining-scope report revision 2; evidence under resume-20260923/PF and Z/CLOSEOUT-pf). Not started in Phase F part 1.",
     "created_at": "2026-10-02T20:16:20Z"
+  },
+  {
+    "id": 679,
+    "issue_id": "acat-wm-041-core-3vvz",
+    "author": "johnw",
+    "text": "PF18 (2026-10-02): capacity-inputs passes at N8 with 43 keys inside their ceilings (drafts, page sets, captures, and artifact readers measured below HTTP under decision (a)). See acat-wm-041-17ax for the evidence scope. Stays open.",
+    "created_at": "2026-10-03T02:12:29Z"
   }
 ]
 #+end_src

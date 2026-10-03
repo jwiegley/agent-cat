@@ -379,6 +379,51 @@ CAPACITY_PROBE_MS = 5000
 CAPACITY_SECONDS = 900
 CAPACITY_RECORD = "capacity-admission.json"
 CAPACITY_LITERAL = "capacity"
+# The capacity-inputs mode measures the workloads of the sections "Drafts",
+# "Page sets", "Captures" and "Artifact readers" of manager/CAPACITY.md. The
+# first three run in three lifetimes of the protected manager, each with its
+# own manager root. They use the harness of the capacity-admission mode:
+# credentials issued through TuiModeFixture.issue, one persistent TLS
+# connection for each credential, latencies from time.monotonic and the
+# resident peak of the manager from proc_pidinfo every 250 milliseconds. The
+# artifact readers run below HTTP in the check that the environment variable
+# ARTIFACT_CHECK names, the executable manager-artifact-check.
+# 1. With drafts 4 and globalDrafts 10, credential drafts-a creates five
+#    drafts, and its fifth create is refused with 429 storage-quota.
+#    drafts-b and drafts-c create three drafts each, so that ten drafts
+#    exist, and the create of drafts-d is refused with 429 storage-quota.
+# 2. With globalPageSets 8 and a local retention root of
+#    CAPACITY_LEGACY_ENTRIES legacy runs bound through --legacy-history, five
+#    observe credentials read the first page of GET /v1/runs. pages-1 opens
+#    sets A and B, and its third first page is refused with 429
+#    storage-quota. pages-2 to pages-4 open two sets each, and the first page
+#    of pages-5 is refused with 429 storage-quota. The continuation of A 58
+#    seconds after its first page answers 200, and the continuation of B 61
+#    seconds after its first page answers 410 view-expired. When every set
+#    has expired, pages-5 reads a first page and every later page.
+# 3. With globalCaptureBytes 134217728, captures-a creates three
+#    captured-input drafts R1, R2 and R3. A capture of CAPACITY_CAPTURE_BYTES
+#    bytes for R1 is accepted, one of CAPACITY_CAPTURE_BYTES + 1 bytes for R2
+#    is refused with 413 size-limit, one of CAPACITY_CAPTURE_BYTES bytes for
+#    R2 fills the global capacity, and one byte for R3 is refused with 429
+#    storage-quota. The mode records the growth of the manager root across
+#    the first accepted capture.
+# 4. ARTIFACT_CHECK capacity-readers, with its own Store root, holds both
+#    artifact response places of the Store through two downloads of a
+#    verified result. A third download waits for a place and refuses with
+#    429 storage-quota after five to six seconds. The holders then send
+#    their bodies, and each body has the size and the SHA-256 of the
+#    artifact. The harness samples the resident memory of the check process
+#    as it samples the manager.
+# 5. The mode writes CAPACITY_INPUTS_RECORD with a measured value for each
+#    ceiling key of these four sections. A value outside its ceiling is a
+#    finding for capacity_summary.py and does not end the mode. Each step
+#    prints its own PASS line, and the mode ends within CAPACITY_SECONDS.
+CAPACITY_INPUTS = "capacity-inputs"
+capacity_inputs_mode = len(sys.argv) == 6 and sys.argv[5] == CAPACITY_INPUTS
+CAPACITY_INPUTS_RECORD = "capacity-inputs.json"
+CAPACITY_CAPTURE_BYTES = 67108864
+CAPACITY_LEGACY_ENTRIES = 4096
 # The modes that configure the control fixture profiles in place of the
 # scripted profile: profile_1 runs the recovery-offering retry adapter and
 # profile_steer runs the steerable adapter. The controls-routing mode also
@@ -2187,9 +2232,10 @@ def lifecycle_elapsed():
 # and emacs-service-controls modes configure the control fixture profiles.
 control_profiles = (control_profiles or tui_mode in (TUI_CONTROLS, TUI_REDIRECT) or client_controls_mode or emacs_lifecycle_mode
                     or emacs_controls_mode)
-assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode or cross_client_mode or capacity_admission_mode
+assert len(sys.argv) == 5 or mixed or boundary or pages_mode or events_mode or captures_mode or discard_mode or exports_mode or lineage_mode or control_profiles or person_mode or endpoints_mode or tui_mode or cross_client_mode or capacity_admission_mode or capacity_inputs_mode
 assert not tui_approval or os.environ.get("TUI_CHECK")
 assert not (endpoints_mode or tui_mode or cross_client_mode) or os.environ.get("TUI_CHECK")
+assert not capacity_inputs_mode or os.environ.get("ARTIFACT_CHECK")
 assert native in ("1", "8")
 print(f"work={work}", flush=True)
 sys.path.insert(0, str(source / "test"))
@@ -2331,12 +2377,12 @@ if cross_client_mode:
     configuration["profiles"][0]["resourceKeys"] = ["cross_one"]
     configuration["profiles"].append(dict(configuration["profiles"][0], id="profile_2",
                                           workspaceLabel="HTTPS second fixture", resourceKeys=["cross_two"]))
-# The capacity-admission mode installs the profiles CAPACITY_PROFILES in
-# place of profile_1. Each one runs the scripted fixture with its own
-# resource key cap_key_NN, so that only the execution reservations limit
-# how many of their runs are active at once. The profiles of
-# CAPACITY_COHORTS run the same fixture with their stated keys.
-if capacity_admission_mode:
+# The capacity modes install the profiles CAPACITY_PROFILES in place of
+# profile_1. Each one runs the scripted fixture with its own resource key
+# cap_key_NN, so that only the execution reservations limit how many of
+# their runs are active at once. The profiles of CAPACITY_COHORTS run the
+# same fixture with their stated keys.
+if capacity_admission_mode or capacity_inputs_mode:
     capacity_base = configuration["profiles"][0]
     configuration["profiles"] = [dict(capacity_base, id=name, workspaceLabel="HTTPS capacity fixture " + name[4:],
                                       resourceKeys=["cap_key_" + name[4:]]) for name in CAPACITY_PROFILES] + [
@@ -2692,30 +2738,33 @@ class CrossClientFixture(TuiModeFixture):
 
 
 class CapacityFixture(TuiModeFixture):
-    """The fixture of the capacity-admission mode. Before the manager starts,
-    TuiModeFixture issues the credential r1-1 and the credential harness
-    with observe, submit and control on CAPACITY_PROFILES into the manager
-    root of the module, which the first lifetime uses. begin() writes the
-    configuration of one lifetime with the given manager root, profiles and
-    limits, and issue_all() then issues the other credentials of that
-    lifetime through the live administration channel with
-    TuiModeFixture.issue. installed keeps every capacity and cohort profile,
-    because TuiModeFixture keeps only CAPACITY_PROFILES in the first
+    """The fixture of the capacity modes. Before the manager starts,
+    TuiModeFixture issues the credential named client and the credential
+    harness with observe, submit and control on CAPACITY_PROFILES into the
+    manager root of the module. The first lifetime of the capacity-admission
+    mode uses that root with its credential r1-1. The capacity-inputs mode
+    runs every lifetime in a root of its own, so its credentials in the root
+    of the module stay unused. begin() writes the configuration of one
+    lifetime with the given manager root, profiles, limits and local
+    retention roots, and issue_all() then issues the other credentials of
+    that lifetime through the live administration channel with
+    TuiModeFixture.issue. installed keeps every profile of the mode, because
+    TuiModeFixture keeps only CAPACITY_PROFILES in the first
     configuration."""
 
-    def __init__(self):
+    def __init__(self, client):
         self.installed = list(configuration["profiles"])
-        super().__init__(CAPACITY_PROFILES, ["observe", "submit", "control"], client="r1-1")
+        super().__init__(CAPACITY_PROFILES, ["observe", "submit", "control"], client=client)
         self.base_limits = dict(configuration["limits"])
 
-    def begin(self, root, profiles, limits):
+    def begin(self, root, profiles, limits, retention=()):
         """Write the configuration of one lifetime. A root other than the
         manager root of the module is created empty."""
         if root != work / "manager":
             root.mkdir(mode=0o700)
         self.profiles = profiles
         configuration.update(managerRoot=str(root), profiles=[profile for profile in self.installed if profile["id"] in profiles],
-                             limits=dict(self.base_limits, **limits))
+                             limits=dict(self.base_limits, **limits), localRetentionRoots=[str(path) for path in retention])
         config.write_text(json.dumps(configuration))
 
     def issue_all(self, names):
@@ -2728,7 +2777,7 @@ class CapacityFixture(TuiModeFixture):
 issued = administration({"version": 1, "operation": "issue-credential", "label": "HTTPS fixture",
                          "scopes": ["observe", "submit"] + (["control", "export"] if mixed else ["control"] if captures_mode or discard_mode or lineage_mode or control_profiles or person_mode else ["control", "export"] if exports_mode else []),
                          "profileIds": CONTROL_PROFILES or (["profile_1", "profile_plain"] if person_mode else
-                                                            CAPACITY_PROFILES if capacity_admission_mode else ["profile_1"]),
+                                                            CAPACITY_PROFILES if capacity_admission_mode or capacity_inputs_mode else ["profile_1"]),
                          "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential")})
 bearer = (work / "credential").read_bytes().decode("ascii")
 if collections:
@@ -2759,7 +2808,8 @@ if endpoints_mode:
                         "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / ("credential-" + name))})
 tui_fixture = (TuiModeFixture(*TUI_MODES[tui_mode]) if tui_mode else
                CrossClientFixture() if cross_client_mode else
-               CapacityFixture() if capacity_admission_mode else
+               CapacityFixture("r1-1") if capacity_admission_mode else
+               CapacityFixture("inputs-module") if capacity_inputs_mode else
                client_controls_fixture(CLIENT_CONTROLS_MODES[sys.argv[5]]) if client_controls_mode else
                TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="pi") if pi_client_mode or pi_host_smoke_mode or pi_host_mode or pi_host_model_mode else
                TuiModeFixture(["profile_1"], ["observe", "submit", "control", "export"], client="emacs") if emacs_service_mode else
@@ -16402,26 +16452,92 @@ def storage_checks():
     print("PASS storage: every storage-error ending held across four lifetimes of the TLS 1.3 manager", flush=True)
 
 
-def capacity_admission_checks():
-    """The workloads of the sections "Execution reservations at one",
-    "Execution reservations at sixteen", "Queue at one hundred" and "Safety
-    path" of manager/CAPACITY.md, in three lifetimes of the real HTTPS
-    manager. Each numbered step prints one PASS line. The mode writes
-    CAPACITY_RECORD with a measured value for each ceiling key of these
-    sections, and it writes the record again after each workload, so that a
-    later failure keeps the earlier values."""
-    sys.path.insert(0, str(source / "manager/test"))
-    import capacity_summary
-    fixture = tui_fixture
-    terminal = ("succeeded", "failed", "cancelled")
-    reviewing = ("review", "start-pending", "associated")
-    ceilings = capacity_summary.load_ceilings(str(source / "manager/test/capacity-ceilings.json"))
-    part = sorted(key for key in ceilings if key.split(".")[0] in ("reservations", "queue", "safety"))
-    measured, latencies, state = {}, {}, {}
+class CapacityTaskInfo(ctypes.Structure):
+    """struct proc_taskinfo of <sys/proc_info.h>, the PROC_PIDTASKINFO
+    flavor of proc_pidinfo."""
+    _fields_ = [("virtual_size", ctypes.c_uint64), ("resident_size", ctypes.c_uint64),
+                ("times", ctypes.c_uint64 * 4), ("counts", ctypes.c_int32 * 12)]
 
-    def save():
-        (work / CAPACITY_RECORD).write_text(json.dumps(measured, indent=1, sort_keys=True) + "\n")
 
+class CapacityResident(threading.Thread):
+    """The resident memory of the manager process every 250 milliseconds,
+    in bytes, from the start of the lifetime until stop(). Each sample is
+    the resident size of proc_pidinfo with PROC_PIDTASKINFO, which needs no
+    entitlement for a process of the same user. A ps without the task-port
+    entitlement refuses its rss keyword. The sampler stops before the
+    manager is stopped, so every attempt is of a live manager, and peak()
+    refuses a peak when more than one attempt in a hundred failed. A peak
+    read before stop() covers the samples up to that moment."""
+
+    def __init__(self, pid):
+        super().__init__(daemon=True)
+        self.proc_pidinfo = ctypes.CDLL(None).proc_pidinfo
+        self.pid, self.samples, self.failed, self.stopped = pid, [], 0, threading.Event()
+        self.start()
+
+    def run(self):
+        while not self.stopped.is_set():
+            info = CapacityTaskInfo()
+            if self.proc_pidinfo(self.pid, 4, ctypes.c_uint64(0), ctypes.byref(info), ctypes.sizeof(info)) == ctypes.sizeof(info):
+                self.samples.append(info.resident_size)
+            else:
+                self.failed += 1
+            self.stopped.wait(0.25)
+
+    def peak(self):
+        assert self.samples, "no resident memory sample of the manager"
+        assert self.failed * 100 <= len(self.samples) + self.failed, (
+            "resident memory samples failed", self.failed, len(self.samples))
+        return max(self.samples)
+
+    def stop(self):
+        self.stopped.set()
+        self.join(timeout=15)
+
+
+class CapacityCredential:
+    """One issued credential with its persistent connection and the count of
+    its ordinary mutations in each UTC minute. read_ms holds the
+    milliseconds of its last read, from before its first attempt to the end
+    of the body of its answer."""
+
+    def __init__(self, name):
+        self.name = name
+        self.headers = {"Authorization": "Bearer " + (work / ("credential-" + name)).read_bytes().decode("ascii")}
+        self.connection = PersistentConnection()
+        self.minutes = {}
+        self.read_ms = None
+
+    def count(self):
+        """Count one ordinary mutation in the UTC minute of its send."""
+        minute = int(time.time() // 60)
+        self.minutes[minute] = self.minutes.get(minute, 0) + 1
+
+
+class CapacityHarness:
+    """The measurement harness of the capacity modes, which measure the
+    workloads of manager/CAPACITY.md. part holds the ceiling keys of the
+    sections of the mode. measured maps each key to its value, latencies
+    holds the latency samples of each label, and save() writes measured to
+    the record file of the mode in its fixture directory. begin() starts one
+    manager lifetime through CapacityFixture and end() stops it. The other
+    methods are the reads and commands of a workload on the persistent
+    connection of one CapacityCredential."""
+
+    def __init__(self, record, sections):
+        sys.path.insert(0, str(source / "manager/test"))
+        import capacity_summary
+        self.summary = capacity_summary
+        self.fixture = tui_fixture
+        self.record = record
+        self.ceilings = capacity_summary.load_ceilings(str(source / "manager/test/capacity-ceilings.json"))
+        self.part = sorted(key for key in self.ceilings if key.split(".")[0] in sections)
+        self.measured, self.latencies, self.state = {}, {}, {}
+
+    def save(self):
+        (work / self.record).write_text(json.dumps(self.measured, indent=1, sort_keys=True) + "\n")
+
+    @staticmethod
     def percentile(samples, fraction):
         """The nearest-rank percentile: the sample at position ceil(q n) of
         the sorted samples, counted from 1."""
@@ -16429,90 +16545,37 @@ def capacity_admission_checks():
         assert ordered, "no latency samples"
         return round(ordered[max(1, math.ceil(fraction * len(ordered))) - 1], 1)
 
-    def latency_keys(prefix, label):
+    def latency_keys(self, prefix, label):
         """The p50 and p95 keys of the latency samples of label."""
-        measured[f"{prefix}.{label}-p50-ms"] = percentile(latencies[prefix + "." + label], 0.50)
-        measured[f"{prefix}.{label}-p95-ms"] = percentile(latencies[prefix + "." + label], 0.95)
+        self.measured[f"{prefix}.{label}-p50-ms"] = self.percentile(self.latencies[prefix + "." + label], 0.50)
+        self.measured[f"{prefix}.{label}-p95-ms"] = self.percentile(self.latencies[prefix + "." + label], 0.95)
 
-    def sample(label, value):
-        latencies.setdefault(label, []).append(value)
+    def sample(self, label, value):
+        self.latencies.setdefault(label, []).append(value)
 
-    class Credential:
-        """One issued credential with its persistent connection and the
-        count of its ordinary mutations in each UTC minute. read_ms holds
-        the milliseconds of its last read, from before its first attempt to
-        the end of the body of its answer."""
-
-        def __init__(self, name):
-            self.name = name
-            self.headers = {"Authorization": "Bearer " + (work / ("credential-" + name)).read_bytes().decode("ascii")}
-            self.connection = PersistentConnection()
-            self.minutes = {}
-            self.read_ms = None
-
-    class TaskInfo(ctypes.Structure):
-        """struct proc_taskinfo of <sys/proc_info.h>, the PROC_PIDTASKINFO
-        flavor of proc_pidinfo."""
-        _fields_ = [("virtual_size", ctypes.c_uint64), ("resident_size", ctypes.c_uint64),
-                    ("times", ctypes.c_uint64 * 4), ("counts", ctypes.c_int32 * 12)]
-
-    proc_pidinfo = ctypes.CDLL(None).proc_pidinfo
-
-    class Resident(threading.Thread):
-        """The resident memory of the manager process every 250
-        milliseconds, in bytes, from the start of the lifetime until stop().
-        Each sample is the resident size of proc_pidinfo with
-        PROC_PIDTASKINFO, which needs no entitlement for a process of the
-        same user. A ps without the task-port entitlement refuses its rss
-        keyword. The sampler stops before the manager is stopped, so every
-        attempt is of a live manager, and peak() refuses a peak when more
-        than one attempt in a hundred failed."""
-
-        def __init__(self, pid):
-            super().__init__(daemon=True)
-            self.pid, self.samples, self.failed, self.stopped = pid, [], 0, threading.Event()
-            self.start()
-
-        def run(self):
-            while not self.stopped.is_set():
-                info = TaskInfo()
-                if proc_pidinfo(self.pid, 4, ctypes.c_uint64(0), ctypes.byref(info), ctypes.sizeof(info)) == ctypes.sizeof(info):
-                    self.samples.append(info.resident_size)
-                else:
-                    self.failed += 1
-                self.stopped.wait(0.25)
-
-        def peak(self):
-            assert self.samples, "no resident memory sample of the manager"
-            assert self.failed * 100 <= len(self.samples) + self.failed, (
-                "resident memory samples failed", self.failed, len(self.samples))
-            return max(self.samples)
-
-        def stop(self):
-            self.stopped.set()
-            self.join(timeout=15)
-
-    def begin(name, root, profiles, limits, names):
+    def begin(self, name, root, profiles, limits, names, retention=(), arguments=()):
         """Start one lifetime with its configuration and issue its
-        credentials. Returns the process, its resident sampler and the
-        credentials by name."""
-        fixture.begin(root, profiles, limits)
+        credentials. retention names the local retention roots of the
+        configuration, and arguments are further arguments of serve. Returns
+        the process, its resident sampler and the credentials by name."""
+        self.fixture.begin(root, profiles, limits, retention)
         with (work / f"server-{name}.stdout").open("wb") as output, (work / f"server-{name}.stderr").open("wb") as errors:
-            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config), "+RTS", "-N" + native, "-RTS"],
-                                       stdout=output, stderr=errors)
-        resident = Resident(process.pid)
+            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config), *arguments,
+                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        resident = CapacityResident(process.pid)
         wait_ready(process)
-        fixture.issue_all(names)
-        credentials = {credential: Credential(credential) for credential in names}
-        capabilities, _, _ = read(credentials[names[0]], "/v1/capabilities", "Capabilities")
+        self.fixture.issue_all(names)
+        credentials = {credential: CapacityCredential(credential) for credential in names}
+        capabilities, _, _ = self.read(credentials[names[0]], "/v1/capabilities", "Capabilities")
         configured = configuration["limits"]
         assert all(capabilities["limits"][key] == configured[key] for key in configured), (
             "the capabilities do not report the configured limits", name, capabilities["limits"])
         assert capabilities["limits"]["queuedRequests"] == 100 and capabilities["limits"]["ordinaryMutationsPerMinute"] == 30, (
             "the capabilities do not advertise the queue and the rate", capabilities["limits"])
-        state.update(epoch=capabilities["authorityEpoch"], workflows={})
+        self.state.update(epoch=capabilities["authorityEpoch"], workflows={}, capabilities=capabilities)
         return process, resident, credentials
 
+    @staticmethod
     def end(name, process, resident, credentials):
         """End one lifetime as the operator stops it and keep its exit status."""
         for credential in credentials.values():
@@ -16523,6 +16586,7 @@ def capacity_admission_checks():
         process.wait(timeout=25)
         (work / f"server-{name}.exit").write_text(str(process.returncode) + "\n")
 
+    @staticmethod
     def read(credential, path, schema):
         """One schema-valid read on the connection of the credential. A
         read that meets the five-second Store allowance or the page-set
@@ -16541,93 +16605,93 @@ def capacity_admission_checks():
         validate(schema, value, raw)
         return value, received.get("etag"), raw
 
-    def post(credential, path, body, tag, ordinary=True):
+    def post(self, credential, path, body, tag, ordinary=True):
         """One command on the connection of the credential. Returns the
         status, the decoded body and the latency in milliseconds. An
         ordinary command counts in the UTC minute of its send."""
-        key = state["epoch"] + "." + secrets.token_urlsafe(16)
+        key = self.state["epoch"] + "." + secrets.token_urlsafe(16)
         payload = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode()
         headers = credential.headers | {"Content-Type": "application/json", "Idempotency-Key": key} | ({"If-Match": tag} if tag else {})
         if ordinary:
-            minute = int(time.time() // 60)
-            credential.minutes[minute] = credential.minutes.get(minute, 0) + 1
+            credential.count()
         status, value, raw, _ = exchange(path, headers, method="POST", payload=payload, persistent=credential.connection)
         if status in (201, 202):
             validate("Request" if status == 201 else "CommandReceipt", value, raw)
         return status, value, credential.connection.elapsed
 
-    def effected(credential, receipt, what):
+    def effected(self, credential, receipt, what):
         """Wait until the command of the receipt has its effect."""
         deadline = time.monotonic() + 30
         while True:
-            value, _, _ = read(credential, receipt["links"]["self"], "CommandReceipt")
+            value, _, _ = self.read(credential, receipt["links"]["self"], "CommandReceipt")
             if value["state"] in ("effect-observed", "refused", "unresolved"):
                 break
             assert time.monotonic() < deadline, ("command effect deadline", what)
             time.sleep(0.02)
         assert value["state"] == "effect-observed", ("command not effected", what, value["state"])
 
-    def workflow(credential, profile):
-        if profile not in state["workflows"]:
-            catalogue, _, _ = read(credential, "/v1/workflows?profileId=" + profile, "WorkflowPage")
-            state["workflows"][profile] = next(item for item in catalogue["items"] if item["name"] == "delayed-person")
-        return state["workflows"][profile]
+    def workflow(self, credential, profile, name="delayed-person"):
+        """The catalogue entry of the named workflow of the profile."""
+        if (profile, name) not in self.state["workflows"]:
+            catalogue, _, _ = self.read(credential, "/v1/workflows?profileId=" + profile, "WorkflowPage")
+            self.state["workflows"][profile, name] = next(item for item in catalogue["items"] if item["name"] == name)
+        return self.state["workflows"][profile, name]
 
-    def create(credential, profile):
-        """Create one delayed-person draft. Returns the status, the body and
-        the latency."""
-        item = workflow(credential, profile)
-        return post(credential, "/v1/requests", {"workflowId": item["id"], "descriptorRevision": item["revision"],
-                                                 "profileId": item["profileId"], "profileRevision": item["profileRevision"]}, None)
+    def create(self, credential, profile, name="delayed-person"):
+        """Create one draft of the named workflow. Returns the status, the
+        body and the latency."""
+        item = self.workflow(credential, profile, name)
+        return self.post(credential, "/v1/requests", {"workflowId": item["id"], "descriptorRevision": item["revision"],
+                                                      "profileId": item["profileId"], "profileRevision": item["profileRevision"]}, None)
 
-    def submit(credential, profile):
-        """Create one delayed-person request, supply the literal of each
-        input and send its enqueue. Returns the created request, the status
-        and body of the enqueue and its latency. An accepted enqueue has
-        its effect before the return."""
-        status, created, _ = create(credential, profile)
+    def submit(self, credential, profile, name="delayed-person"):
+        """Create one request of the named workflow, supply the literal of
+        each input and send its enqueue. Returns the created request, the
+        status and body of the enqueue and its latency. An accepted enqueue
+        has its effect before the return."""
+        status, created, _ = self.create(credential, profile, name)
         assert status == 201, ("request creation", credential.name, status, created.get("code"))
         uri = created["links"]["self"]
-        for declaration in workflow(credential, profile)["inputs"]:
-            _, tag, _ = read(credential, uri, "Request")
-            status, receipt, _ = post(credential, uri, {"operation": "set-input", "input": {
+        for declaration in self.workflow(credential, profile, name)["inputs"]:
+            _, tag, _ = self.read(credential, uri, "Request")
+            status, receipt, _ = self.post(credential, uri, {"operation": "set-input", "input": {
                 "name": declaration["name"], "source": "literal", "value": CAPACITY_LITERAL}}, tag)
             assert status == 202, ("set-input", credential.name, status, receipt.get("code"))
-            effected(credential, receipt, "set-input")
-        current, tag, _ = read(credential, uri, "Request")
+            self.effected(credential, receipt, "set-input")
+        current, tag, _ = self.read(credential, uri, "Request")
         assert not current["readiness"]["missing"] and not current["readiness"]["errors"], ("request readiness", current["readiness"])
-        status, receipt, elapsed = post(credential, uri, {"operation": "enqueue"}, tag)
+        status, receipt, elapsed = self.post(credential, uri, {"operation": "enqueue"}, tag)
         if status == 202:
-            effected(credential, receipt, "enqueue")
+            self.effected(credential, receipt, "enqueue")
         return created, status, receipt, elapsed
 
-    def approve(credential, preparation_id, request_id):
+    def approve(self, credential, preparation_id, request_id):
         """Approve the exact live review of the request. Returns the latency."""
-        preparation, tag, _ = read(credential, "/v1/preparations/" + preparation_id, "Preparation")
+        preparation, tag, _ = self.read(credential, "/v1/preparations/" + preparation_id, "Preparation")
         assert preparation["requestId"] == request_id and preparation["state"] == "live", ("review", request_id, preparation["state"])
         selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
-        status, receipt, elapsed = post(credential, "/v1/preparations/" + preparation_id,
-                                        {"operation": "approve", **{key: preparation[key] for key in selectors}}, tag)
+        status, receipt, elapsed = self.post(credential, "/v1/preparations/" + preparation_id,
+                                             {"operation": "approve", **{key: preparation[key] for key in selectors}}, tag)
         assert status == 202, ("approval", request_id, status, receipt.get("code"))
         return elapsed
 
-    def answer(credential, decision_id):
+    def answer(self, credential, decision_id):
         """Answer the pending person question with true. Returns the latency."""
-        decision, tag, _ = read(credential, "/v1/decisions/" + decision_id, "Decision")
+        decision, tag, _ = self.read(credential, "/v1/decisions/" + decision_id, "Decision")
         assert decision["state"] == "pending" and decision["kind"] == "question" and decision["position"] == 0, (
             "person question", decision_id, decision["state"], decision["kind"])
-        status, receipt, elapsed = post(credential, "/v1/decisions/" + decision_id, {
+        status, receipt, elapsed = self.post(credential, "/v1/decisions/" + decision_id, {
             "operation": "answer", "occurrenceId": decision["address"]["occurrenceId"], "generation": decision["generation"], "value": True}, tag)
         assert status == 202, ("answer", decision_id, status, receipt.get("code"))
-        effected(credential, receipt, "answer")
+        self.effected(credential, receipt, "answer")
         return elapsed
 
-    def one_page(credential, path, schema):
-        value, _, _ = read(credential, path, schema)
+    def one_page(self, credential, path, schema):
+        value, _, _ = self.read(credential, path, schema)
         assert value["page"]["next"] is None, ("collection beyond one page", path)
         return value
 
-    def capabilities_probe(credential, label):
+    def capabilities_probe(self, credential, label):
         """One GET /v1/capabilities during saturation, with no further
         attempt. It must answer 200 within CAPACITY_PROBE_MS, timed from
         before the request, which includes the opening of a connection, to
@@ -16637,26 +16701,58 @@ def capacity_admission_checks():
         elapsed = (time.monotonic() - started) * 1000
         assert status == 200, ("GET /v1/capabilities during saturation", label, status, value.get("code"))
         validate("Capabilities", value, raw)
-        sample(label, elapsed)
+        self.sample(label, elapsed)
         assert elapsed <= CAPACITY_PROBE_MS, ("GET /v1/capabilities during saturation", label, elapsed)
         return elapsed
 
-    def settle(credential, uri, ready, what):
+    def settle(self, credential, uri, ready, what):
         """Read the request until ready holds, within 60 seconds."""
         deadline = time.monotonic() + 60
         while True:
-            value, tag, _ = read(credential, uri, "Request")
+            value, tag, _ = self.read(credential, uri, "Request")
             if ready(value):
                 return value, tag
             assert time.monotonic() < deadline, (what, value["phase"], value["admission"]["reasons"])
             time.sleep(0.05)
 
-    def discard(credential, preparation_id):
+    def discard(self, credential, preparation_id):
         """Discard the live review of one preparation and wait for its effect."""
-        _, tag, _ = read(credential, "/v1/preparations/" + preparation_id, "Preparation")
-        status, receipt, _ = post(credential, "/v1/preparations/" + preparation_id, {"operation": "discard"}, tag)
+        _, tag, _ = self.read(credential, "/v1/preparations/" + preparation_id, "Preparation")
+        status, receipt, _ = self.post(credential, "/v1/preparations/" + preparation_id, {"operation": "discard"}, tag)
         assert status == 202, ("discard", preparation_id, status, receipt.get("code"))
-        effected(credential, receipt, "discard")
+        self.effected(credential, receipt, "discard")
+
+    def finish(self, mode, step, workloads):
+        """The last numbered step of a capacity mode: the record holds a
+        measured value for each key of the part, and the mode ended within
+        CAPACITY_SECONDS. A value outside its ceiling is a finding for
+        capacity_summary.py and does not end the mode."""
+        self.save()
+        missing = [key for key in self.part if key not in self.measured]
+        assert not missing, ("the record lacks keys of the part", missing)
+        outside = [key for key in self.part if not self.summary.holds(self.ceilings[key], self.measured[key])]
+        elapsed = time.monotonic() - mode_started
+        assert elapsed <= CAPACITY_SECONDS, ("the " + mode + " mode took longer than its bound", round(elapsed), CAPACITY_SECONDS)
+        print(f"PASS {mode} step {step}:", self.record, "holds a measured value for each of the", len(self.part), "ceiling keys of",
+              workloads + ";", len(outside), "of them outside their ceilings", outside, flush=True)
+        print(f"PASS {mode}:", workloads, "ran to their bounds in", f"{elapsed:.0f} seconds", flush=True)
+
+
+def capacity_admission_checks():
+    """The workloads of the sections "Execution reservations at one",
+    "Execution reservations at sixteen", "Queue at one hundred" and "Safety
+    path" of manager/CAPACITY.md, in three lifetimes of the real HTTPS
+    manager. Each numbered step prints one PASS line. The mode writes
+    CAPACITY_RECORD with a measured value for each ceiling key of these
+    sections, and it writes the record again after each workload, so that a
+    later failure keeps the earlier values."""
+    meter = CapacityHarness(CAPACITY_RECORD, ("reservations", "queue", "safety"))
+    terminal = ("succeeded", "failed", "cancelled")
+    reviewing = ("review", "start-pending", "associated")
+    measured, latencies, save, sample, latency_keys = meter.measured, meter.latencies, meter.save, meter.sample, meter.latency_keys
+    begin, end, read, post, create, submit = meter.begin, meter.end, meter.read, meter.post, meter.create, meter.submit
+    approve, answer, one_page, capabilities_probe = meter.approve, meter.answer, meter.one_page, meter.capabilities_probe
+    settle, discard = meter.settle, meter.discard
 
     def cohort_checks(credential):
         """Step 3, in its own lifetime with sixteen reservations. For
@@ -16921,15 +17017,312 @@ def capacity_admission_checks():
     # ceiling, and the summary lists them as UNCHECKED.
     for label in ("reservations.r16.capabilities-saturated", "queue.capabilities-saturated", "safety.capabilities-saturated"):
         measured[label + "-ms"] = round(max(latencies[label]), 1)
-    save()
-    missing = [key for key in part if key not in measured]
-    assert not missing, ("the record lacks keys of the part", missing)
-    above = [key for key in part if not capacity_summary.holds(ceilings[key], measured[key])]
-    elapsed = time.monotonic() - mode_started
-    assert elapsed <= CAPACITY_SECONDS, ("the capacity-admission mode took longer than its bound", round(elapsed), CAPACITY_SECONDS)
-    print("PASS capacity-admission step 6:", CAPACITY_RECORD, "holds a measured value for each of the", len(part), "ceiling keys of",
-          "the reservation, queue and safety workloads;", len(above), "of them above their ceilings", above, flush=True)
-    print("PASS capacity-admission: the reservation, queue and safety workloads ran to their bounds in", f"{elapsed:.0f} seconds", flush=True)
+    meter.finish(CAPACITY_ADMISSION, 6, "the reservation, queue and safety workloads")
+
+
+def capacity_head(connection, buffered):
+    """Read the status line and the headers of one HTTP/1.1 response from
+    the TLS connection, after the bytes already read. Returns the status,
+    the headers by lower-case name and the bytes after the headers."""
+    while b"\r\n\r\n" not in buffered:
+        chunk = connection.recv(65536)
+        assert chunk, "the connection closed before the end of the response headers"
+        buffered += chunk
+    head, rest = buffered.split(b"\r\n\r\n", 1)
+    lines = head.decode("latin-1").split("\r\n")
+    headers = {name.strip().lower(): value.strip() for name, value in (line.split(":", 1) for line in lines[1:])}
+    return int(lines[0].split()[1]), headers, rest
+
+
+def capacity_response(connection, buffered):
+    """Read one complete HTTP/1.1 response from the TLS connection, after
+    the bytes already read. The body has a Content-Length or the chunked
+    transfer coding. Returns the status, the headers and the body."""
+    status, headers, rest = capacity_head(connection, buffered)
+
+    def at_least(count):
+        nonlocal rest
+        while len(rest) < count:
+            chunk = connection.recv(65536)
+            assert chunk, "the connection closed before the end of the response body"
+            rest += chunk
+
+    if "content-length" in headers:
+        at_least(int(headers["content-length"]))
+        return status, headers, rest[:int(headers["content-length"])]
+    assert headers.get("transfer-encoding") == "chunked", ("a response without a length", headers)
+    body = b""
+    while True:
+        while b"\r\n" not in rest:
+            at_least(len(rest) + 1)
+        line, rest = rest.split(b"\r\n", 1)
+        size = int(line.split(b";")[0], 16)
+        at_least(size + 2)
+        if size == 0:
+            return status, headers, body
+        body, rest = body + rest[:size], rest[size + 2:]
+
+
+def capacity_inputs_checks():
+    """The workloads of the sections "Drafts", "Page sets", "Captures" and
+    "Artifact readers" of manager/CAPACITY.md. The first three run in three
+    lifetimes of the real HTTPS manager, and the artifact readers run below
+    HTTP in ARTIFACT_CHECK capacity-readers. Each numbered step prints one
+    PASS line. The mode writes CAPACITY_INPUTS_RECORD with a measured value
+    for each ceiling key of these sections, and it writes the record again
+    after each workload, so that a later failure keeps the earlier values."""
+    meter = CapacityHarness(CAPACITY_INPUTS_RECORD, ("drafts", "captures", "readers", "pages"))
+    measured, sample, read = meter.measured, meter.sample, meter.read
+
+    def refusal(prefix, outcome):
+        """The status, the problem code and the latency of one refusal. An
+        answer without a problem code records the code none."""
+        status, value, elapsed = outcome
+        measured.update({prefix + "-status": status, prefix + "-code": value.get("code", "none"), prefix + "-ms": round(elapsed, 1)})
+
+    # Step 1. Drafts.
+    names = ["drafts-a", "drafts-b", "drafts-c", "drafts-d"]
+    process, resident, credentials = meter.begin("drafts", work / "capacity-drafts", ["cap_01"],
+                                                   {"drafts": 4, "globalDrafts": 10}, names)
+    try:
+        outcomes = {}
+        for name, count in zip(names, (5, 3, 3, 1)):
+            for _ in range(count):
+                status, value, elapsed = meter.create(credentials[name], "cap_01")
+                outcomes.setdefault(name, []).append((status, value, elapsed))
+                if status == 201:
+                    sample("drafts.create", elapsed)
+    finally:
+        meter.end("drafts", process, resident, credentials)
+    created = {name: sum(1 for status, _, _ in outcomes[name] if status == 201) for name in names}
+    measured.update({"drafts.client-accepted": created["drafts-a"], "drafts.global-accepted": sum(created.values()),
+                     "drafts.manager-rss-peak-bytes": resident.peak()})
+    refusal("drafts.client-refusal", outcomes["drafts-a"][4])
+    refusal("drafts.global-refusal", outcomes["drafts-d"][0])
+    meter.latency_keys("drafts", "create")
+    meter.save()
+    assert [status for status, _, _ in outcomes["drafts-a"][:4]] == [201] * 4, ("the drafts within the allowance", outcomes["drafts-a"][:4])
+    assert all(status == 201 for name in names[1:3] for status, _, _ in outcomes[name]), "a draft within the global capacity was refused"
+    for name, index in (("drafts-a", 4), ("drafts-d", 0)):
+        status, value, _ = outcomes[name][index]
+        assert (status, value.get("code")) == (429, "storage-quota"), ("the draft beyond its bound", name, status, value.get("code"))
+    print("PASS capacity-inputs step 1: with drafts 4 and globalDrafts 10, drafts-a created", created["drafts-a"], "drafts and its fifth",
+          "create was refused with 429 storage-quota in", f"{measured['drafts.client-refusal-ms']:.0f} ms;", "after",
+          measured["drafts.global-accepted"], "drafts in all, the create of drafts-d was refused with 429 storage-quota in",
+          f"{measured['drafts.global-refusal-ms']:.0f} ms; resident peak", measured["drafts.manager-rss-peak-bytes"], "bytes", flush=True)
+
+    # Step 2. Page sets over CAPACITY_LEGACY_ENTRIES legacy runs.
+    LEGACY_ROOT.mkdir(mode=0o700)
+    legacy_results = clone_legacy_runs(legacy_frontend_run(), CAPACITY_LEGACY_ENTRIES - 1)
+    assert len(set(legacy_results)) == CAPACITY_LEGACY_ENTRIES, ("distinct legacy results", len(set(legacy_results)))
+    names = ["pages-%d" % index for index in range(1, 6)]
+    process, resident, credentials = meter.begin("pages", work / "capacity-pages", ["cap_01"], {"globalPageSets": 8}, names,
+                                                   retention=[LEGACY_ROOT], arguments=["--legacy-history", f"{LEGACY_ROOT}=cap_01"])
+    try:
+        def page(credential, target):
+            """One page of GET /v1/runs with no further attempt. Returns the
+            status, the body, the raw body, the latency of the exchange and
+            the moment after its reply. An accepted first page is a latency
+            sample."""
+            status, value, raw, _ = exchange(target, credential.headers, persistent=credential.connection)
+            if status == 200:
+                validate("RunPage", value, raw)
+                if target == "/v1/runs":
+                    sample("pages.first-page", credential.connection.elapsed)
+            return status, value, raw, credential.connection.elapsed, time.monotonic()
+
+        def opened(credential):
+            """Open one set. Returns its first page and the moment after the reply."""
+            status, value, _, _, replied = page(credential, "/v1/runs")
+            assert status == 200 and value["page"]["next"] is not None, ("a multi-page set", credential.name, status, value.get("code"))
+            return value, replied
+
+        p1, p5 = credentials["pages-1"], credentials["pages-5"]
+        a_started = time.monotonic()
+        held = [opened(p1), opened(p1)]
+        client_refused = page(p1, "/v1/runs")
+        held += [opened(credentials[name]) for name in names[1:4] for _ in range(2)]
+        global_refused = page(p5, "/v1/runs")
+        held_rss = resident.peak()
+        (set_a, _), (set_b, b_replied) = held[:2]
+        time.sleep(max(0.0, a_started + 58 - time.monotonic()))
+        before_expiry = page(p1, set_a["page"]["next"])
+        a_followed = before_expiry[4]
+        time.sleep(max(0.0, b_replied + 61 - time.monotonic()))
+        after_expiry = page(p1, set_b["page"]["next"])
+        # A continuation past the last page of a window builds the next
+        # window and renews the set lifetime. The first window of set A ends
+        # with its first page when that page holds 1024 members.
+        expiry = max(replied for _, replied in held) + 60
+        if len(set_a["items"]) >= 1024:
+            expiry = max(expiry, a_followed + 60)
+        time.sleep(max(0.0, expiry + 1 - time.monotonic()))
+        status, value, raw, _, _ = page(p5, "/v1/runs")
+        renewed_status, renewed_code = status, value.get("code")
+        # Each window of the set holds 1024 members. A page belongs to the
+        # window of its first member.
+        window_bytes, members = {}, []
+        while status == 200:
+            window = len(members) // 1024
+            window_bytes[window] = window_bytes.get(window, 0) + len(raw)
+            members += [item["id"] for item in value["items"]]
+            if value["page"]["next"] is None:
+                break
+            status, value, raw, _, _ = page(p5, value["page"]["next"])
+        assert status == 200, ("a page of the set after expiry", status, value.get("code"))
+    finally:
+        meter.end("pages", process, resident, credentials)
+    measured.update({"pages.held-sets": len(held), "pages.continuation-before-expiry-status": before_expiry[0],
+                     "pages.expired-continuation-status": after_expiry[0], "pages.expired-continuation-code": after_expiry[1].get("code", "none"),
+                     "pages.first-page-after-expiry-status": renewed_status, "pages.set-bytes-max": max(window_bytes.values()),
+                     "pages.manager-rss-peak-bytes": resident.peak()})
+    refusal("pages.client-refusal", (client_refused[0], client_refused[1], client_refused[3]))
+    refusal("pages.global-refusal", (global_refused[0], global_refused[1], global_refused[3]))
+    meter.latency_keys("pages", "first-page")
+    meter.save()
+    for outcome, what in ((client_refused, "the third set of one client"), (global_refused, "the ninth set")):
+        assert (outcome[0], outcome[1].get("code")) == (429, "storage-quota"), (what, outcome[0], outcome[1].get("code"))
+    assert before_expiry[0] == 200, ("the continuation before expiry", before_expiry[0], before_expiry[1].get("code"))
+    assert (after_expiry[0], after_expiry[1].get("code")) == (410, "view-expired"), ("the expired continuation", after_expiry[0])
+    assert renewed_status == 200, ("the first page after expiry", renewed_status, renewed_code)
+    assert len(members) == len(set(members)) == value["page"]["totalItems"] == CAPACITY_LEGACY_ENTRIES, (
+        "the set after expiry", len(members), len(set(members)), value["page"]["totalItems"])
+    print("PASS capacity-inputs step 2: over", CAPACITY_LEGACY_ENTRIES, "legacy runs, pages-1 held two sets and its third first page was",
+          "refused with 429 storage-quota; with", len(held), "sets held and a resident peak of", held_rss, "bytes, the first page of",
+          "pages-5 was refused with 429 storage-quota; the continuation of set A answered", before_expiry[0], "58 seconds after its",
+          "first page, and that of set B answered 410 view-expired 61 seconds after its first page; when every set had expired,",
+          "pages-5 read", len(members), "runs in", len(window_bytes), "windows of at most", measured["pages.set-bytes-max"], "bytes;",
+          "the accepted first pages took", [round(value) for value in meter.latencies["pages.first-page"]], "ms in their order",
+          flush=True)
+
+    # Step 3. Captures.
+    root = work / "capacity-captures"
+    process, resident, credentials = meter.begin("captures", root, ["cap_01"], {"globalCaptureBytes": 134217728}, ["captures-a"])
+    try:
+        def upload(credential, request_id, size):
+            """One POST /v1/captures of size bytes of the ASCII text capacity
+            repeated, on a new TLS connection. The latency runs from before
+            the request to the end of the response body and leaves out the
+            opening of the connection. Before each chunk of the body, a
+            readable connection is read without waiting. A TLS 1.3
+            post-handshake message makes the connection readable without
+            application data, and the body then continues. When the manager
+            has answered before the whole body is sent, the rest of the body
+            is not sent. Returns the status, the decoded body and the
+            latency."""
+            body = memoryview((CAPACITY_LITERAL.encode() * (size // len(CAPACITY_LITERAL) + 1))[:size])
+            key = meter.state["epoch"] + "." + secrets.token_urlsafe(16)
+            credential.count()
+            raw_socket = socket.create_connection(("127.0.0.1", port), timeout=70)
+            with context.wrap_socket(raw_socket, server_hostname="127.0.0.1") as connection:
+                started = time.monotonic()
+                connection.sendall((f"POST /v1/captures?requestId={request_id} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+                                    f"Authorization: {credential.headers['Authorization']}\r\n"
+                                    f"Content-Type: application/octet-stream\r\nIdempotency-Key: {key}\r\n"
+                                    f"Content-Length: {size}\r\n\r\n").encode())
+                answered = None
+                for offset in range(0, size, 65536):
+                    if select.select([connection], [], [], 0)[0]:
+                        connection.setblocking(False)
+                        try:
+                            answered = connection.recv(65536)
+                        except ssl.SSLWantReadError:
+                            answered = None
+                        finally:
+                            connection.settimeout(70)
+                        if answered is not None:
+                            break
+                    connection.sendall(body[offset:offset + 65536])
+                status, _, raw = capacity_response(connection, answered or b"")
+                elapsed = (time.monotonic() - started) * 1000
+            value = frozen.parse_json(raw)
+            validate("CaptureReceipt" if status == 202 else "Problem", value, raw)
+            return status, value, elapsed
+
+        def root_bytes():
+            """The bytes of the regular files under the manager root."""
+            total = 0
+            for directory, _, files in os.walk(root):
+                for name in files:
+                    with contextlib.suppress(FileNotFoundError):
+                        info = os.lstat(os.path.join(directory, name))
+                        total += info.st_size if stat.S_ISREG(info.st_mode) else 0
+            return total
+
+        writer = credentials["captures-a"]
+        drafts = []
+        for _ in range(3):
+            status, value, _ = meter.create(writer, "cap_01", "captured-input")
+            assert status == 201, ("captured-input draft", status, value.get("code"))
+            drafts.append(value["id"])
+        before = root_bytes()
+        first = upload(writer, drafts[0], CAPACITY_CAPTURE_BYTES)
+        growth = root_bytes() - before - CAPACITY_CAPTURE_BYTES
+        oversize = upload(writer, drafts[1], CAPACITY_CAPTURE_BYTES + 1)
+        second = upload(writer, drafts[1], CAPACITY_CAPTURE_BYTES)
+        beyond = upload(writer, drafts[2], 1)
+        accepted = [outcome for outcome in (first, second) if outcome[0] == 202]
+        measured.update({"captures.max-accepted": first[0] == 202 and first[1]["bytes"] == str(CAPACITY_CAPTURE_BYTES),
+                         "captures.aggregate-accepted-bytes": sum(int(value["bytes"]) for _, value, _ in accepted),
+                         "captures.root-growth-overhead-bytes": growth, "captures.manager-rss-peak-bytes": resident.peak()})
+        if accepted:
+            measured["captures.upload-max-ms"] = round(max(elapsed for _, _, elapsed in accepted), 1)
+        refusal("captures.oversize-refusal", oversize)
+        refusal("captures.aggregate-refusal", beyond)
+        meter.save()
+        assert first[0] == 202 and second[0] == 202, ("the captures within the bounds", first[0], second[0])
+        assert (oversize[0], oversize[1].get("code")) == (413, "size-limit"), ("the capture beyond its bound", oversize[0], oversize[1].get("code"))
+        assert (beyond[0], beyond[1].get("code")) == (429, "storage-quota"), ("the capture beyond the global capacity", beyond[0], beyond[1].get("code"))
+        print("PASS capacity-inputs step 3: a capture of", CAPACITY_CAPTURE_BYTES, "bytes was accepted in", f"{first[2]:.0f} ms",
+              "and grew the manager root by", growth, "bytes beyond its content; one of", CAPACITY_CAPTURE_BYTES + 1, "bytes was refused",
+              "with 413 size-limit in", f"{oversize[2]:.0f} ms;", "a second capture filled globalCaptureBytes with",
+              measured["captures.aggregate-accepted-bytes"], "bytes, and one more byte was refused with 429 storage-quota in",
+              f"{beyond[2]:.0f} ms; resident peak", measured["captures.manager-rss-peak-bytes"], "bytes", flush=True)
+    finally:
+        meter.end("captures", process, resident, credentials)
+    measured["captures.manager-rss-peak-bytes"] = resident.peak()
+    meter.save()
+
+    # Step 4. Artifact readers, below HTTP. The check holds the Store, so the
+    # harness samples the resident memory of the check process. The check
+    # prints its values on the line CAPACITY-READERS before its checks and
+    # then reads its standard input to the end, so that the sampler stops
+    # while the process lives.
+    readers = work / "capacity-readers"
+    readers.mkdir(mode=0o700)
+    with (work / "artifact-check-readers.stderr").open("wb") as errors:
+        checker = subprocess.Popen([os.environ["ARTIFACT_CHECK"], "capacity-readers", str(readers), "+RTS", "-N" + native, "-RTS"],
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors, text=True)
+    resident = CapacityResident(checker.pid)
+    lines = []
+    try:
+        for line in checker.stdout:
+            lines.append(line.rstrip("\n"))
+            if line.startswith("CAPACITY-READERS "):
+                break
+        resident.stop()
+        checker.stdin.close()
+        lines += checker.stdout.read().splitlines()
+        status = checker.wait(timeout=60)
+    finally:
+        resident.stop()
+        if checker.poll() is None:
+            checker.kill()
+            checker.wait(timeout=25)
+    (work / "artifact-check-readers.stdout").write_text("\n".join(lines) + "\n")
+    values = [json.loads(line.split(" ", 1)[1]) for line in lines if line.startswith("CAPACITY-READERS ")]
+    assert len(values) == 1, ("the readers check printed no record", status, lines[-3:])
+    measured.update(values[0])
+    measured["readers.manager-rss-peak-bytes"] = resident.peak()
+    meter.save()
+    assert status == 0, ("the readers check failed", status, [line for line in lines if line.startswith("FAIL")])
+    print("PASS capacity-inputs step 4: below HTTP,", measured["readers.holders-accepted"], "downloads held the artifact response",
+          "places, a third download was refused with", measured["readers.third-refusal-status"], measured["readers.third-refusal-code"],
+          "after", f"{measured['readers.third-wait-ms']:.0f} ms,", "and both held bodies matched the size and SHA-256 of the artifact;",
+          "resident peak of the check", measured["readers.manager-rss-peak-bytes"], "bytes", flush=True)
+
+    # Step 5. The record holds a measured value for each key of the part.
+    meter.finish(CAPACITY_INPUTS, 5, "the draft, capture, artifact reader and page-set workloads")
 
 
 if storage_mode:
@@ -16939,6 +17332,11 @@ if storage_mode:
 
 if capacity_admission_mode:
     capacity_admission_checks()
+    raise SystemExit(0)
+
+
+if capacity_inputs_mode:
+    capacity_inputs_checks()
     raise SystemExit(0)
 
 

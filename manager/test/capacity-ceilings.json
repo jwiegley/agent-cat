@@ -277,7 +277,7 @@
     },
     "readers.manager-rss-peak-bytes": {
       "unit": "bytes",
-      "max": 671088640
+      "max": 536870912
     },
     "pages.held-sets": {
       "unit": "count",

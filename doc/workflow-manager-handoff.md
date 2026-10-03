@@ -12,21 +12,22 @@ and the operator decisions of 2026-10-01 for the Emacs client and of
 2026-10-02 the owner chose form (b) for the PF7 lifecycle witness and kept
 the change of `withManagerSignals`.
 
-PF7 to PF17 landed in this repository as commits `da32a966` to `7cf1408b`,
+PF7 to PF18 landed in this repository as commits `da32a966` to the PF18
+commit,
 after `eb9b9a29`, the record of the PF7 stop. PF7 and PF8 have matching
 local commits `4f0f5a4` and `cc56b94` on the `emacs-native` branch of
 agent-workflows in `~/src/agent-workflows-emacs-native`, after `613d70e`.
 That branch now holds 30 local commits, `1efebf9` to `cc56b94`, and none
 of them is pushed. The run stopped at PF18 with an escalation to the
-owner, which the section "Stop at PF18" below states. PF19 to PF24 did
-not start, so the Phase F gate did not run.
+owner. The owner chose form (a), and PF18 then completed, as the section
+"PF18 under decision (a)" below states. PF19 to PF24 did not start, so the
+Phase F gate did not run.
 
 This section describes the current state. Where any section below differs,
 this section supersedes it, and the sections below remain as chronology.
 The evidence of each subtask is under `PF/<subtask>/impl-r1` in the resume
 directory, and the audits are `fess/pf-PF7-r1.md` to `fess/pf-PF17-r1.md`
-and `fess/pf-PF17-r2.md`. PF18 has evidence under `PF/PF18/impl-r1` and no
-audit. No audit blocked a commit.
+and `fess/pf-PF17-r2.md` and `fess/pf-PF18-r1.md`. No audit blocked a commit.
 
 Accepted state is unchanged at WM-001 to WM-022 and G0 and G1. This run
 closes no package and no gate. The Integrator closes tracker items.
@@ -47,53 +48,32 @@ closes no package and no gate. The Integrator closes tracker items.
 | PF16 | `2808c7ac` | None | `manager/CAPACITY.md` publishes the WM-041 workloads, the tested platform and 129 ceilings before any measurement. `manager/test/capacity-ceilings.json` holds the same ceilings, and `manager/test/capacity_summary.py` compares the two and prints PASS, FAIL or MISSING for each key. |
 | PF17 | `7cf1408b` | None | The `capacity-admission` mode: reservations at 1 and 16 with FIFO eligibility, the resource-key cohorts, a queue of 100 with the refusal of the 101st, and a cancel through the safety-control capacity with the queue full. It found a manager fault: `readDraftAt` answered a GET with 412 `stale-revision` when a concurrent commit changed the request revision. The read now repeats through `repeatChangedRead` at the busy site `drafts-request-revision`, and a new `DraftCheck` case covers it. The 36 measured keys of the mode are inside their ceilings. |
 
-### Stop at PF18
+### PF18 under decision (a)
 
-PF18 adds the `capacity-inputs` mode for the workloads "Drafts", "Page
-sets", "Captures" and "Artifact readers" of `manager/CAPACITY.md`. Its
-first three workloads pass. The fourth cannot run as the document
-describes it.
+On 2026-10-02 the owner chose form (a) for the artifact readers. Every
+verified result of a program is its receipt of about 103 bytes, so no HTTP
+client can hold an artifact download place long enough to measure it.
+WM-041 therefore measures the limit of two artifact download places below
+HTTP.
 
-The section "Artifact readers" assumes that the verified source result of
-a `prompt-source` run, whose adapter answers with 1000000 bytes, is a large
-artifact that two slow readers can hold while a third download waits and
-is refused. Every program ends in a receipt, because `B.program` takes
-`Blk '[] 'CodeAck` and `stop` is `CodeAck`. Every verified result is
-therefore the receipt of the run, about 103 bytes, and exports are built
-from the same result. In the final fixture `answers.json` holds 1000270
-bytes and `result.json` holds 103 bytes. One write answers that download,
-and `respondBytes` gives each write at most 5 seconds, so no HTTP client
-can hold a download place long enough to measure `readers.third-wait-ms`
-(5000 to 6000) or the 429 `storage-quota` refusal of a third download.
+PF18 adds the `capacity-inputs` mode to `manager/test/service_http.py`.
+It runs the workloads "Drafts", "Page sets", "Captures" and "Artifact
+readers" of `manager/CAPACITY.md`. For the readers, step 4 of the mode
+starts the executable that the `ARTIFACT_CHECK` environment variable names.
+That executable is `manager-artifact-check capacity-readers DIR`. It holds
+two places through `withArtifactDownloadWithin`, times the wait of a third
+download and its 429 `storage-quota` refusal, and compares each held body
+with the artifact metadata. The section "Artifact readers" records the
+change of workload as a correction made before any readers measurement.
+Only `readers.manager-rss-peak-bytes` changed value, from 671088640 to
+536870912. `engine/acp/test/hold_adapter.py` keeps its committed content.
 
-The owner question is how WM-041 shows the limit of two artifact download
-places:
-
-- (a) Measure it below HTTP. A Haskell manager check holds two places
-  through `withStoreArtifactResponseWithin` and
-  `withArtifactDownloadWithin`, times the 5-second wait and the
-  `storage-quota` refusal of a third download, and prints the `readers.*`
-  values. The section "Artifact readers" and `capacity-ceilings.json`
-  change to match. The implementer recommends this form.
-- (b) Allow a fixture-only way to get a large verified artifact. This needs
-  a runtime or DSL change so that a result can be more than a receipt.
-- (c) Remove the `readers.*` keys from the ceilings and list the bound of
-  the artifact places under "Bounds outside these workloads".
-
-The PF18 work is not committed. It changes `manager/test/service_http.py`
-(the `capacity-inputs` mode), `engine/acp/test/hold_adapter.py` (an
-optional second argument that sets the length of the answer in ASCII
-bytes) and `manager/CAPACITY.md` (a paragraph that describes the mode and
-the stop at the artifact readers). On these trees `py_compile` passed, the
-build passed, and `make -C doc check` passed. The `capacity-inputs` run at
-N8 printed PASS for steps 1 to 3 and then stopped at the artifact readers
-with `the verified result is smaller than the answer, so no download of it
-stays in progress`. Its three earlier attempts failed while the mode was
-being written: the first with 503 on the two captures, the second and the
-third at the artifact readers. The `capacity-admission` regression passed
-on its second attempt. `capacity_summary.py summary` gave 36 PASS, 1 FAIL
-and 92 MISSING for the keys of this mode. The FAIL is
-`pages.first-page-p50-ms`, 581 ms against a ceiling of 500 ms.
+The N8 run exited 0 in 113 seconds. `capacity_summary.py summary` gave 43
+PASS, 0 FAIL and 86 MISSING for the keys of the other parts. The third
+reader waited 5001 ms. The drafts workload keeps the PF16 bounds (drafts
+4, globalDrafts 10, four credentials). `pages.first-page-p50-ms` measured
+281 ms against 500 ms, and 581 ms in an earlier attempt. PF19 to PF24 did
+not start.
 
 ### Checks run
 
@@ -131,7 +111,11 @@ names them:
 - PF17: `py_compile`, the build, `capacity-admission`, `DraftCheck` at N1
   and N8, `AdmissionCheck`, `tui-journey`, `cross-client-lifecycle` and
   `make -C doc check`, with 36 PASS keys in the summary.
-- PF18: the checks of the section above, on the uncommitted trees.
+- PF18: `py_compile`, the build with `manager-artifact-check`,
+  `capacity-inputs` at N8 in 113 seconds, the standalone
+  `capacity-readers` check, `capacity_summary.py summary` with 43 PASS
+  keys, and `make -C doc check`. The `capacity-admission` regression did
+  not run on the final source.
 - The closeout ran `make -C doc check` after its edit.
 
 ### Checks not run
@@ -191,8 +175,8 @@ security gate for the witness with the observation-only witness of G2.
 
 No authorization is pending. The Lean and oracle builds of PF9 to PF15 ran
 under the operator decision of 2026-10-02, one at a time and never beside
-a cabal build. No dependency changed. The only pending item is the owner
-answer to the PF18 question, which is a decision and not an authorization.
+a cabal build. No dependency changed. The owner answered the PF18
+question with form (a) on 2026-10-02, and no decision is pending.
 
 ### Package status and open tracker items
 
@@ -201,25 +185,25 @@ answer to the PF18 question, which is a decision and not an authorization.
 | WM-030, WM-031, WM-032 | As in the section "Phase F part 1 of 2026-10-02". | `acat-wm-030-t2l4`, `acat-wm-031-5yxo`, `acat-wm-032-eh4r` |
 | WM-039 | Met for function as local single-machine evidence. The `cross-client`, `cross-client-lifecycle` and `cross-client-lineage` modes pass at N8, and the `cross-client-broken-answer` control fails with its literal message. The gate run of PF23 did not run. | `acat-wm-039-0vfi` open for the Integrator |
 | WM-040 | Met for function. The Lean library, the deciders with proved equalities, the oracle, the retained cases, the Haskell client and the `admission`, `cases`, `history` and `refusals` lanes exist, and the gate script with its three controls passed in PF15. The gate run of PF22 did not run. | `acat-wm-040-3olb` open for the Integrator |
-| WM-041 | Partial. The workloads and ceilings are published, and `capacity-admission` passes with 36 keys inside their ceilings. `capacity-inputs` waits for the PF18 answer, and PF19 and PF20 did not start. | `acat-wm-041-17ax` |
+| WM-041 | Partial. The workloads and ceilings are published, and `capacity-admission` passes with 36 keys inside their ceilings, and `capacity-inputs` passes with 43 keys inside their ceilings. PF19 and PF20 did not start. | `acat-wm-041-17ax` |
 | G3, G4 | Open. G4 needs the gate run of the witness and the client suites. G3 needs the rest of WM-041 and the gate. | `acat-g4-pech` and `acat-g3-v1iz` |
 
-The fess follow-up issues of PF7 to PF17 stay open:
+The fess follow-up issues of PF7 to PF18 stay open:
 `acat-pf7-fess-followup-nk1h`, `acat-pf8-fess-followup-qx8r`,
 `acat-pf9-fess-followup-f3k0`, `acat-pf10-fess-followup-0xvr`,
 `acat-pf11-fess-followup-ckg9`, `acat-pf12-fess-followup-zm25`,
 `acat-jvju` (PF13), `acat-pf14-fess-followup-zyqm`,
-`acat-pf15-fess-followup-zpyo`, `acat-pf16-fess-followup-7p0l` and
-`acat-pf17-fess-followup-3xb3`, with the follow-ups of PF2 to PF6 that the
-section below lists. This closeout changed no tracker item.
+`acat-pf15-fess-followup-zpyo`, `acat-pf16-fess-followup-7p0l`,
+`acat-pf17-fess-followup-3xb3` and `acat-pf18-fess-followup-s432`, with
+the follow-ups of PF2 to PF6 that the section below lists.
 
 ### Open findings
 
-- PF18 owner question: the artifact-reader workload cannot run through
-  HTTP, because every verified result is a receipt of about 103 bytes.
-- `pages.first-page-p50-ms` measured 581 ms against its ceiling of 500 ms
-  in the one `capacity-inputs` run. The p95 of 2031 ms is inside its
-  ceiling of 5000 ms.
+- `pages.first-page-p50-ms` measured 281 ms against its ceiling of 500 ms
+  in the final `capacity-inputs` run and 581 ms in an earlier attempt, so
+  a later run can fail on it.
+- The `capacity-admission` regression did not run after the last change
+  of `CapacityHarness.finish`.
 - After PF17 the overview-cursor site still answers 503 at once under
   churn, where the request read now repeats.
 - `capacity-admission` issues 5, 5, 1 and 14 credentials over its four
@@ -241,11 +225,9 @@ section below lists. This closeout changed no tracker item.
 
 ### Next action
 
-1. The owner answers the PF18 question with form (a), (b) or (c).
-2. The Integrator commits this closeout and the remaining-scope report.
-   Then the Integrator commits the PF18 work, or the next run revises it
-   first under the owner answer.
-3. The next run completes PF18, then runs PF19 (`capacity-streams` and the
+1. The owner answered the PF18 question with form (a). Done.
+2. The Integrator committed the PF18 work under that answer. Done.
+3. The next run runs PF19 (`capacity-streams` and the
    measurement prints of `storage` and `routes`), PF20 (the failure
    evidence and the measurement record) and the Phase F gate PF21 to PF24,
    which also runs the three journey controls and the N8 owner checks on
