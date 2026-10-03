@@ -2,6 +2,260 @@
 
 <!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
 
+## Phase F part 2 of 2026-10-02
+
+The resume workflow continued its Phase F plan of 24 subtasks after the
+owner answer to the PF7 question. The run kept the operator directions of
+2026-09-29 for fast validation and of 2026-09-30 for functionality first,
+and the operator decisions of 2026-10-01 for the Emacs client and of
+2026-10-02 for the Lean builds of WM-040 and the `ext-pi` pins. On
+2026-10-02 the owner chose form (b) for the PF7 lifecycle witness and kept
+the change of `withManagerSignals`.
+
+PF7 to PF17 landed in this repository as commits `da32a966` to `7cf1408b`,
+after `eb9b9a29`, the record of the PF7 stop. PF7 and PF8 have matching
+local commits `4f0f5a4` and `cc56b94` on the `emacs-native` branch of
+agent-workflows in `~/src/agent-workflows-emacs-native`, after `613d70e`.
+That branch now holds 30 local commits, `1efebf9` to `cc56b94`, and none
+of them is pushed. The run stopped at PF18 with an escalation to the
+owner, which the section "Stop at PF18" below states. PF19 to PF24 did
+not start, so the Phase F gate did not run.
+
+This section describes the current state. Where any section below differs,
+this section supersedes it, and the sections below remain as chronology.
+The evidence of each subtask is under `PF/<subtask>/impl-r1` in the resume
+directory, and the audits are `fess/pf-PF7-r1.md` to `fess/pf-PF17-r1.md`
+and `fess/pf-PF17-r2.md`. PF18 has evidence under `PF/PF18/impl-r1` and no
+audit. No audit blocked a commit.
+
+Accepted state is unchanged at WM-001 to WM-022 and G0 and G1. This run
+closes no package and no gate. The Integrator closes tracker items.
+
+### Delivered behavior
+
+| Subtask | agent-cat commit | `emacs-native` commit | Delivered behavior |
+| --- | --- | --- | --- |
+| PF7 | `da32a966` | `4f0f5a4` | The `cross-client-lifecycle` mode, form (b). Pi creates, enqueues and approves a `profile_1` run, and the TUI and Emacs observe it. The three clients close with no command while the run stays owned at its question. The harness rotates the emacs credential and revokes a fifth one. A restart by the termination signal releases the reservation, and the new clients show the run lost with no cancel. A SIGKILL loss of a second held run quarantines its reservation, a later request waits with `profile-busy` until `check-quarantine` and `release-quarantine` run, and the run then succeeds with the `false` answer of the rotated Emacs credential and a Pi retry. A stop of `--manager serve` by the termination signal exits with status 0 after its cleanup, and the keyboard signal still propagates the interrupt. |
+| PF8 | `2a89ef55` | `cc56b94` | The `cross-client-lineage` mode. The TUI History view, Pi `/wfm-history` and Emacs `wf-history` list two settled parents in the order of every page of `/v1/runs`. The TUI forks the first parent by keys, Pi approves the exact lineage review, and Emacs shows the parent as root and the child as a fork that succeeds with the downloaded result digest. One class, `WitnessRecord`, writes the identity record of both witness modes. `ext-pi/README.md` and `tui/README.md` name the three cross-client modes as local single-machine evidence. |
+| PF9 | `7d57a9b0` | None | The Lean library `ManagerConformance` under `bisim/manager`, a separate `lean_lib` whose import closure has no `Agentic.Core` module. It has the deciders `openDecisionExec`, `answerExec`, `resolveExec`, `releaseExec` and `verifyExec`, each proved equal to its model transition, and 13 closed witnesses. |
+| PF10 | `ab60f483` | None | The admission and approval deciders `admitExec` and `approveExec`, with the finite reductions of the guards proved as equivalences, `admitExec_eq` and `approveExec_eq`, pinned axiom footprints and 8 closed witnesses. |
+| PF11 | `7716012f` | None | The pinned JSON encoding `agent-cat-manager-conformance/1`, the `manager-oracle` executable (an NDJSON loop), and 45 retained cases under `bisim/manager/cases`: 18 accepted, 20 refused and 7 malformed. |
+| PF12 | `65d92df2` | None | The test-only Haskell client of `manager-oracle` and the executable `manager-conformance-check` with the `admission` lane, which compares `oldestEligible` with the oracle on generated situations, and the `cases` lane, which replays the retained cases byte for byte. |
+| PF13 | `bef8ee79` | None | The store projection of schema 12 and the `history` lane. It opens a private copy of a manager root through `withInspectingStore`, folds the stored history through the oracle and compares the final state with the projection on six dimensions. It passed on 40 manager roots of an N8 vertical run and on the N8 journey root. |
+| PF14 | `e541d2f7` | None | The `refusals` lane, with seven classes of refused variants. The oracle refuses each variant, and the implementation guards `decisionQueueIds`, `decisionHeadIds`, `decisionHeadRefusal`, `approvalSelectors` and `oldestEligible` agree where they can run without a worker. |
+| PF15 | `5cda60da` | None | The gate script `bisim/ci/manager.sh` with the steps closure, lean, build, cases, admission, vertical, history, refusals and corpus, and the controls `control-oracle`, `control-model` and `control-case`. `compareNativeRuns` and the vertical check give the direct-versus-managed comparison, lineage included. `bisim/README.md`, `bisim/manager/README.md` and `model/README.md` record the commands, the theorems with their axiom footprints and the boundaries of the claim. |
+| PF16 | `2808c7ac` | None | `manager/CAPACITY.md` publishes the WM-041 workloads, the tested platform and 129 ceilings before any measurement. `manager/test/capacity-ceilings.json` holds the same ceilings, and `manager/test/capacity_summary.py` compares the two and prints PASS, FAIL or MISSING for each key. |
+| PF17 | `7cf1408b` | None | The `capacity-admission` mode: reservations at 1 and 16 with FIFO eligibility, the resource-key cohorts, a queue of 100 with the refusal of the 101st, and a cancel through the safety-control capacity with the queue full. It found a manager fault: `readDraftAt` answered a GET with 412 `stale-revision` when a concurrent commit changed the request revision. The read now repeats through `repeatChangedRead` at the busy site `drafts-request-revision`, and a new `DraftCheck` case covers it. The 36 measured keys of the mode are inside their ceilings. |
+
+### Stop at PF18
+
+PF18 adds the `capacity-inputs` mode for the workloads "Drafts", "Page
+sets", "Captures" and "Artifact readers" of `manager/CAPACITY.md`. Its
+first three workloads pass. The fourth cannot run as the document
+describes it.
+
+The section "Artifact readers" assumes that the verified source result of
+a `prompt-source` run, whose adapter answers with 1000000 bytes, is a large
+artifact that two slow readers can hold while a third download waits and
+is refused. Every program ends in a receipt, because `B.program` takes
+`Blk '[] 'CodeAck` and `stop` is `CodeAck`. Every verified result is
+therefore the receipt of the run, about 103 bytes, and exports are built
+from the same result. In the final fixture `answers.json` holds 1000270
+bytes and `result.json` holds 103 bytes. One write answers that download,
+and `respondBytes` gives each write at most 5 seconds, so no HTTP client
+can hold a download place long enough to measure `readers.third-wait-ms`
+(5000 to 6000) or the 429 `storage-quota` refusal of a third download.
+
+The owner question is how WM-041 shows the limit of two artifact download
+places:
+
+- (a) Measure it below HTTP. A Haskell manager check holds two places
+  through `withStoreArtifactResponseWithin` and
+  `withArtifactDownloadWithin`, times the 5-second wait and the
+  `storage-quota` refusal of a third download, and prints the `readers.*`
+  values. The section "Artifact readers" and `capacity-ceilings.json`
+  change to match. The implementer recommends this form.
+- (b) Allow a fixture-only way to get a large verified artifact. This needs
+  a runtime or DSL change so that a result can be more than a receipt.
+- (c) Remove the `readers.*` keys from the ceilings and list the bound of
+  the artifact places under "Bounds outside these workloads".
+
+The PF18 work is not committed. It changes `manager/test/service_http.py`
+(the `capacity-inputs` mode), `engine/acp/test/hold_adapter.py` (an
+optional second argument that sets the length of the answer in ASCII
+bytes) and `manager/CAPACITY.md` (a paragraph that describes the mode and
+the stop at the artifact readers). On these trees `py_compile` passed, the
+build passed, and `make -C doc check` passed. The `capacity-inputs` run at
+N8 printed PASS for steps 1 to 3 and then stopped at the artifact readers
+with `the verified result is smaller than the answer, so no download of it
+stays in progress`. Its three earlier attempts failed while the mode was
+being written: the first with 503 on the two captures, the second and the
+third at the artifact readers. The `capacity-admission` regression passed
+on its second attempt. `capacity_summary.py summary` gave 36 PASS, 1 FAIL
+and 92 MISSING for the keys of this mode. The FAIL is
+`pages.first-page-p50-ms`, 581 ms against a ceiling of 500 ms.
+
+### Checks run
+
+Each subtask ran its own checks once, at N8 only, and its commit message
+names them:
+
+- PF7: `py_compile` on both scripts, the `-ftui-tests` build of
+  `agentic-run` and `routing-fixed-point-probe`, `cross-client-lifecycle`
+  with 12 numbered PASS lines and the final line in 159 seconds, and the
+  N8 `tui-journey` after the change of `Cli.hs`.
+- PF8: `py_compile`, the build, `cross-client-lineage` in 66 seconds, and
+  `cross-client` and `tui-history` after the refactor of the identity
+  record, with `make -C doc check`.
+- PF9 and PF10: `lake --dir bisim build --wfail ManagerConformance` (694
+  and 695 jobs), the import closure check, a copy with wrong witnesses that
+  failed, and an empty `git status` of `bisim/corpus` and `model`.
+- PF11: the build of `ManagerConformance` and `manager-oracle`, the replay
+  of each retained case, the closure check and the empty corpus status.
+- PF12: the `-Werror` build, the `admission` lane at seed 20261002 with N
+  500 (201 accepted and 299 refused situations, no mismatch), the `cases`
+  lane on 45 cases, and a wrong-slot control with the literal mismatch.
+- PF13: the `history` lane on 40 vertical roots (277 ledger commands and
+  577 accepted entries) and on the journey root, and two mismatch controls.
+- PF14: the `refusals` lane on 40 vertical roots (271 variants, 233
+  compared with a guard) and on two journey roots, a descriptor control,
+  and the `history` lane again.
+- PF15: each of the nine steps of `bisim/ci/manager.sh` with 45 cases and
+  no mismatch, `control-oracle` with `MANAGER-CONFORMANCE mismatch` and 14
+  kept counterexamples, `control-model` failing inside `answerExec_eq`,
+  `control-case` with the mismatch for `answer-head`, and an empty corpus
+  status.
+- PF16: `py_compile`, the `ceilings` subcommand with 129 keys in agreement,
+  the `summary` subcommand on an empty file with 129 MISSING lines, and
+  `make -C doc check`. No measurement ran.
+- PF17: `py_compile`, the build, `capacity-admission`, `DraftCheck` at N1
+  and N8, `AdmissionCheck`, `tui-journey`, `cross-client-lifecycle` and
+  `make -C doc check`, with 36 PASS keys in the summary.
+- PF18: the checks of the section above, on the uncommitted trees.
+- The closeout ran `make -C doc check` after its edit.
+
+### Checks not run
+
+- The Phase F gate, PF21 to PF24, did not run. No ALLBUILD, no
+  `tui-model-test`, no journey pair at N1, no journey control, no N8 owner
+  check, no contract diff, no `DataBroker` check, no Emacs or `ext-pi`
+  suite and no `bash tui/ci/tui.sh` ran on the final trees. The three
+  journey controls and the N8 owner checks have still not run on a tree
+  with the Runtime fix of PD29.
+- PF19 (`capacity-streams` and the measurement prints of the `storage` and
+  `routes` modes) and PF20 (the file-size fault, the timings of the
+  failure modes, the interrupted backup and the measurement record) did not
+  start. The keys of the streams, storage, routes, slow-consumer and
+  failure workloads stay MISSING.
+- The WM-040 `history` and `refusals` lanes did not run after the change
+  of `readDraftAt` in PF17.
+- `ci/emacs.sh` did not run, because no Emacs Lisp of the product changed.
+  `npm run test:integration` and the Pi-host modes did not run after PF3
+  and PF8.
+- The plan drops these items as functionality: the cross-machine evidence
+  and the proxy test of WM-039 (local only), an approval in Emacs of a
+  request of another client, two truly simultaneous UI answers, a restore
+  and the page and event expiry inside the witness, randomized
+  store-backed histories and the implementation-guard refusals that need a
+  live worker (WM-040), the full default build of the model with bisim
+  tier 0 and tier 1, and in WM-041 the root replacement, partial frames
+  beyond the loss of worker pipes, a separate checkpoint workload,
+  randomized schedules, SQLite busy injection, credential changes under
+  load, a true ENOSPC disk-full (replaced by a file-size limit), Linux
+  containment, repeated measurements and new capacity cases for the
+  `storage` and `routes` modes. The Emacs 29.1 minimum-version check stays
+  open.
+- The checks that the operator directions remove from routine validation
+  (`cli/ci/policies.sh`, `manager/ci/approval.sh`, `manager/ci/controls.sh`,
+  the `admission_audit.py` mutation audits, mutant suites, `-fforce-recomp`
+  builds and stability samples), and `cli/ci/routing-config.sh`,
+  `cli/ci/examples.sh`, `engine/agent-deck/ci/deck.sh`,
+  `manager/ci/supervision.sh` and `engine/acp/ci/acp.sh`, because this
+  plan changes no engine or CLI code apart from `withManagerSignals`.
+
+### Deferred security items
+
+The deferred security items of the section "Phase F part 1 of 2026-10-02"
+below stay deferred, with every deferred item of the earlier sections and
+of section 8 of the remaining-scope report. This part added none and did
+none. They are the WM-039 authorization matrices across the three client
+credentials, the revocation and rotation matrices during a POST, a
+download, a pagination and an event stream, the authority fencing after a
+restore, the identity and redaction scans and the TLS hardening of the
+witness, the hostile and slow input, malformed frames and framing-limit
+negatives of WM-041 with its root replacement, the WM-040 conformance of
+the authorization and credential transitions, and a threat model and a
+security gate for the witness with the observation-only witness of G2.
+
+### Authorizations
+
+No authorization is pending. The Lean and oracle builds of PF9 to PF15 ran
+under the operator decision of 2026-10-02, one at a time and never beside
+a cabal build. No dependency changed. The only pending item is the owner
+answer to the PF18 question, which is a decision and not an authorization.
+
+### Package status and open tracker items
+
+| Package or item | Status | Tracker |
+| --- | --- | --- |
+| WM-030, WM-031, WM-032 | As in the section "Phase F part 1 of 2026-10-02". | `acat-wm-030-t2l4`, `acat-wm-031-5yxo`, `acat-wm-032-eh4r` |
+| WM-039 | Met for function as local single-machine evidence. The `cross-client`, `cross-client-lifecycle` and `cross-client-lineage` modes pass at N8, and the `cross-client-broken-answer` control fails with its literal message. The gate run of PF23 did not run. | `acat-wm-039-0vfi` open for the Integrator |
+| WM-040 | Met for function. The Lean library, the deciders with proved equalities, the oracle, the retained cases, the Haskell client and the `admission`, `cases`, `history` and `refusals` lanes exist, and the gate script with its three controls passed in PF15. The gate run of PF22 did not run. | `acat-wm-040-3olb` open for the Integrator |
+| WM-041 | Partial. The workloads and ceilings are published, and `capacity-admission` passes with 36 keys inside their ceilings. `capacity-inputs` waits for the PF18 answer, and PF19 and PF20 did not start. | `acat-wm-041-17ax` |
+| G3, G4 | Open. G4 needs the gate run of the witness and the client suites. G3 needs the rest of WM-041 and the gate. | `acat-g4-pech` and `acat-g3-v1iz` |
+
+The fess follow-up issues of PF7 to PF17 stay open:
+`acat-pf7-fess-followup-nk1h`, `acat-pf8-fess-followup-qx8r`,
+`acat-pf9-fess-followup-f3k0`, `acat-pf10-fess-followup-0xvr`,
+`acat-pf11-fess-followup-ckg9`, `acat-pf12-fess-followup-zm25`,
+`acat-jvju` (PF13), `acat-pf14-fess-followup-zyqm`,
+`acat-pf15-fess-followup-zpyo`, `acat-pf16-fess-followup-7p0l` and
+`acat-pf17-fess-followup-3xb3`, with the follow-ups of PF2 to PF6 that the
+section below lists. This closeout changed no tracker item.
+
+### Open findings
+
+- PF18 owner question: the artifact-reader workload cannot run through
+  HTTP, because every verified result is a receipt of about 103 bytes.
+- `pages.first-page-p50-ms` measured 581 ms against its ceiling of 500 ms
+  in the one `capacity-inputs` run. The p95 of 2031 ms is inside its
+  ceiling of 5000 ms.
+- After PF17 the overview-cursor site still answers 503 at once under
+  churn, where the request read now repeats.
+- `capacity-admission` issues 5, 5, 1 and 14 credentials over its four
+  lifetimes, as `manager/CAPACITY.md` states, and the saturated
+  `GET /v1/capabilities` times have no ceiling key.
+- The controls of `bisim/ci/manager.sh` accept any nonzero exit as a
+  detection, and `control-model` names `answerExec_eq` by a map from the
+  error line to its declaration.
+- The `history` lane folds one history that agrees with the final rows,
+  not the actual order, and does not check the oldest-eligible choice.
+  `approve-consumed` is compared with the oracle only.
+- In the lifecycle witness Emacs does not show the `profile-busy` wait, and
+  the unresolved start of the lost run is printed but not asserted.
+- The `ext-pi` bridge socket path exceeds the macOS limit with a longer
+  fixture path (`acat-pf6-fess-followup-hrzg`). The lineage witness uses
+  the short host name `lineage-pi` to stay inside it.
+- The open findings of the section "Phase F part 1 of 2026-10-02" stay
+  open, apart from the PF7 question, which the owner answered.
+
+### Next action
+
+1. The owner answers the PF18 question with form (a), (b) or (c).
+2. The Integrator commits this closeout and the remaining-scope report.
+   Then the Integrator commits the PF18 work, or the next run revises it
+   first under the owner answer.
+3. The next run completes PF18, then runs PF19 (`capacity-streams` and the
+   measurement prints of `storage` and `routes`), PF20 (the failure
+   evidence and the measurement record) and the Phase F gate PF21 to PF24,
+   which also runs the three journey controls and the N8 owner checks on
+   the final tree, under the functionality-first and fast rules.
+4. Phase G (WM-042 to WM-044 and G5) follows the Phase F gate under the
+   same rules. The security stage waits for the operator to schedule it.
+5. The operator or the Integrator ends the stopped PIDs 111 and 9444,
+   which were still present at 2026-10-03T01:55Z, with `kill -CONT` and
+   then `kill -KILL`.
+
 ## Phase F part 1 of 2026-10-02
 
 The resume workflow ran the first part of its Phase F plan under the
