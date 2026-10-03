@@ -78,8 +78,8 @@ These rows are the obligations of section 12 of the implementation plan.
 | Replay, snapshot consistency, duplicates, backpressure and reconnect (section 7) | WM-015 and WM-021 accepted. WM-025, WM-026 and WM-029. PG3 `afd44d78` separates the authorization revision from the reader wakeup. | Rows A14 to A16 and A19. `events-lifecycle` and `capacity-streams` (`$R/PG/PG3/impl-r2`). `client_native.py` (`$R/PE/PE28/impl-r1/05b-client-native-N8.log`). | Deterministic native fixture | Met for function. `capacity-streams` has no run of record (row WM-041). Revocation during a stream is deferred to the security stage. |
 | Remote authentication, authorization, TLS, browser and model boundaries and redaction (section 8) | WM-008 accepted. `Agentic.Manager.Credentials` and `Authorization` (WM-023), the HTTPS boundary (WM-024), the exact model consent of `ext-pi` (PE21 `69a7e2de`, PE22 `c8dca6a2`). | `credential-lifecycle` (`$R/PG/PG3/impl-r2/credential-lifecycle-N8.log`). `boundary` (`$R/B/B19/impl-r1/11d-service-boundary-N8.log`). `pi-host-model` and its control `pi-host-model-decline` (`$R/PE/PE28/impl-r1`). | Actual UI interaction | Partial. Authentication, scopes, credential rotation and revocation and exact consent are met for function. The CORS, Host, Origin and proxy negatives, the secret-marker scans, the redaction projections and the hostile input are deferred to the security stage. |
 | Verified outputs, history, lineage and exclusive export (sections 4 to 6 and 8) | WM-017 and WM-018 accepted. WM-025 and WM-027 routes for exports and lineage requests (C14 `768de34b`, C15 `a3a8720c`). | Rows A11 to A13. `mutations-exports` and `mutations-lineage` (`$R/PE/PE28/impl-r1`). `manager-artifact-check` and `manager-history-check` (`$R/PG/PG3/impl-r2/artifact-history-N8.log`, `$R/PG/PG4/impl-r1/history-check-N8.log`). `cross-client-lineage` (`$R/PF/PF23/impl-r1`). | Actual UI interaction | Met for function |
-| Thin native clients, coexistence, compatibility and rollback (section 9) | WM-029 to WM-039 and WM-043. | The client rows WM-029 to WM-038. The three `cross-client` modes (`$R/PF/PF23/impl-r1`). `rollback` (`$R/PG/PG17/impl-r1/rollback.log`). | Actual UI interaction | Partial. Every client is met for function on one machine. Cross-machine TLS did not run, because the governing goal limits validation to local macOS. No check runs Emacs 29.1. |
-| Operational evidence and supportable release (sections 10 and 11) | WM-039 to WM-044. `manager/OPERATIONS.md`, `manager/CAPACITY.md`, the flake package and this record. | `operations` with case 7 (`$R/PG/PG13/impl-r1/operations.log`). `package` (`$R/PG/PG16/impl-r1/package.log`). The capacity modes of row WM-041. `make -C doc check` (`$R/PG/PG21/impl-r1/doc-check.log`). | Package build | Partial. The exercise by another person is pending. The capacity runs of record, the gate of Phase G and the independent closure review have not run. Linux containment did not run. The security review is deferred to the security stage. |
+| Thin native clients, coexistence, compatibility and rollback (section 9) | WM-029 to WM-039 and WM-043. | The client rows WM-029 to WM-038. The three `cross-client` modes (`$R/PF/PF23/impl-r1`). `rollback` (`$R/PG/PG28/impl-r1/07-rollback.log`). | Actual UI interaction | Partial. Every client is met for function on one machine. Cross-machine TLS did not run, because the governing goal limits validation to local macOS. No check runs Emacs 29.1. |
+| Operational evidence and supportable release (sections 10 and 11) | WM-039 to WM-044. `manager/OPERATIONS.md`, `manager/CAPACITY.md`, the flake package and this record. | `operations` with case 7 (`$R/PG/PG28/impl-r1/03-operations.log`). `package` (`$R/PG/PG28/impl-r1/06-package.log`). The capacity modes of row WM-041. `make -C doc check` (`$R/PG/PG21/impl-r1/doc-check.log`). | Package build | Partial. The exercise by another person is pending. The capacity runs of record, the gate of Phase G and the independent closure review have not run. Linux containment did not run. The security review is deferred to the security stage. |
 
 ## Package matrix
 
@@ -98,11 +98,11 @@ revalidated only where their owners changed, as the governing goal directs.
 | WM-006 Observation and restoration contract | `Agentic.Runtime.Snapshot`, `Frontend` and `Catalogue`. `acat-wm-006-bdxu`, unit `$I/restoration.NRqKwa`. | `runtime-contract-test` (`$R/PE/PE28/impl-r1/04-runtime-contract-N8.log`). | Deterministic native fixture | Met (2026-09-11) |
 | WM-007 Durable private publication | `Agentic.Runtime.PrivateRoot`, `PrivateFile`. `acat-wm-007-lfcg`, unit `$I/durability.1upgl3zs`. | The publication regressions at acceptance. The SQLite directory-replacement experiment was withdrawn by the operator and is not verified. | Deterministic native fixture | Met (2026-09-12) |
 | WM-008 Trusted profiles and composition-root configuration | `Agentic.Manager.Profile`, `Configuration`, `Root`. `acat-wm-008-rr0q`, unit `$I/profiles.EgYE9JIT`. | `manager/ci/profiles.sh` and `configuration.sh` at acceptance. Offline `reload-profiles` of the reference configuration (`$R/PG/PG20/impl-r1/reference-reload.log`). | Deterministic native fixture | Met (2026-09-12) |
-| WM-009 Private coordination database and service lock | `Agentic.Manager.Store`, `Schema`, `Lease`. `acat-wm-009-kmzw`, unit `$I/state.0wnll6Qx`. | `manager-store-check` (`$R/PG/PG11/impl-r1/store-check.log`). | Deterministic native fixture | Met (2026-09-12) |
-| WM-010 Command receipts, revisions and idempotency | `Agentic.Manager.Commands`. `acat-wm-010-hbip`, unit `$I/commands.i0YEDgvB`. | `manager-command-check` (`$R/PG/PG3/impl-r2/command-check-N8.log`). | Deterministic native fixture | Met (2026-09-12) |
+| WM-009 Private coordination database and service lock | `Agentic.Manager.Store`, `Schema`, `Lease`. `acat-wm-009-kmzw`, unit `$I/state.0wnll6Qx`. | `manager-store-check` (`$R/PG/PG28/impl-r1/08-store-main.log`). | Deterministic native fixture | Met (2026-09-12) |
+| WM-010 Command receipts, revisions and idempotency | `Agentic.Manager.Commands`. `acat-wm-010-hbip`, unit `$I/commands.i0YEDgvB`. | `manager-command-check` (`$R/PG/PG28/impl-r1/09-command-check.log`). | Deterministic native fixture | Met (2026-09-12) |
 | WM-011 Drafts, immutable captures and readiness | `Agentic.Manager.Drafts`, accepted commit `7fed36ce`. `acat-wm-011-fqny`, unit `$I/drafts.Ex2O7B5k`. | `manager-draft-check` (`$R/PG/PG3/impl-r2/draft-check-N8.log`). | Deterministic native fixture | Met (2026-09-13) |
 | WM-012 Manager-owned frontend worker adapter | `Agentic.Manager.Worker`, accepted commit `3a8340ee`. `acat-wm-012-ma5g`, unit `$I/workers.CM5pvfEh`. | `manager-worker-check` (`$R/PE/PE28/impl-r1/06g-worker-N8.log`). | Deterministic native fixture | Met (2026-09-13) |
-| WM-013 Admission and resource reservations | `Agentic.Manager.Admission`. `acat-wm-013-8oah`, unit `$I/admission.Y7LCRq4c`. | `manager-admission-check` (`$R/PG/PG3/impl-r2/admission-check-N8.log`). | Deterministic native fixture | Met (2026-09-13) |
+| WM-013 Admission and resource reservations | `Agentic.Manager.Admission`. `acat-wm-013-8oah`, unit `$I/admission.Y7LCRq4c`. | `manager-admission-check` (`$R/PG/PG28/impl-r1/10-admission-main.log`). | Deterministic native fixture | Met (2026-09-13) |
 | WM-014 Exact review, approval and start intent | `Agentic.Manager.Approval`. `acat-wm-014-5sv9`, unit `$I/approval.YHFzgIkt`. | `manager-approval-check` (`$R/PF/PF21/impl-r1/approval-check-N8.log`). | Deterministic native fixture | Met (2026-09-14) |
 | WM-015 Validated runtime ingestion and durable projections | `Agentic.Manager.State`, `Observation`, accepted commit `546d61b`. `acat-wm-015-wzl9`, unit `$I/ingestion.zid51qsu`. PG3 continues a stored projection from its next sequence. | The ingestion check (`$R/B/B19/impl-r1/09a-ingestion-N8.log`). `capacity-streams` (`$R/PG/PG3/impl-r2/capacity-streams.log`). | Deterministic native fixture | Met (2026-09-15) |
 | WM-016 Decisions and correlated runtime controls | The control owners that `manager/CONTROLS.md` names, accepted commit `430b411a`. `acat-wm-016-bsw2`, unit `$I/controls.qzldrova`. | `test/control_probe.py` and `controls` (`$R/PE/PE28/impl-r1/07-control-probe-N8.log`, `0807-controls-N8.log`). | Deterministic native fixture | Met (2026-09-19) |
@@ -112,7 +112,7 @@ revalidated only where their owners changed, as the governing goal directs.
 | WM-020 Restart reconciliation and fenced backup restoration | Store and Admission owners, accepted commit `626981a7`. `acat-wm-020-5x61`, unit `$I/restart.gQ3o7Iag`. | `manager-admission-check restart-native` (`$R/PG/PG11/impl-r1/admission-restart-native-N8.log`). | Deterministic native fixture | Met (2026-09-20) |
 | WM-021 Quotas, retention and bounded collection | Store owners at schema 11, accepted commit `248e772e`. `acat-wm-021-ez37`, unit `$I/quotas.N3qrqDWt`. | The quota lane of `manager-store-check` (`$R/PG/PG3/impl-r2/quotas-after-N8.log`). | Deterministic native fixture | Met (2026-09-21) |
 | WM-022 Complete non-network vertical slice | `manager-vertical-check` and `manager/ci/vertical.sh`, base `c6698af4`. `acat-wm-022-j655`, unit `$I/vertical.d42c7UhQ`. | The owning gate at N1 and N8 on 2026-09-21. The `vertical` step of `bisim/ci/manager.sh` (`$R/PF/PF22/impl-r1/vertical.log`). | Deterministic native fixture | Met (2026-09-22), local only |
-| WM-023 Local credential administration and authorization | `Agentic.Manager.Credentials`, `Authorization`, `LocalAdmin`. B8 `776be8e7`. | `credential-lifecycle` (`$R/PG/PG3/impl-r2/credential-lifecycle-N8.log`). `credential_cli.py` (`$R/PC/PC34/impl-r1/05b-command-main-N8.log`). | Deterministic native fixture | Met (tracker closed 2026-09-30). A scope change during a retained response is deferred to the security stage. |
+| WM-023 Local credential administration and authorization | `Agentic.Manager.Credentials`, `Authorization`, `LocalAdmin`. B8 `776be8e7`. | `credential-lifecycle` (`$R/PG/PG28/impl-r1/04-credential-lifecycle.log`). `credential_cli.py` (`$R/PG/PG28/impl-r1/09-command-check.log`). | Deterministic native fixture | Met (tracker closed 2026-09-30). A scope change during a retained response is deferred to the security stage. |
 | WM-024 Protected HTTP boundary | `Agentic.Manager.Transport`, `Application`. B9 `8c4140b7`. | `boundary` (`$R/B/B19/impl-r1/11d-service-boundary-N8.log`). | Deterministic native fixture | Met for function. The remaining negatives are deferred to the security stage. The tracker item is open. |
 | WM-025 Catalogue, history, snapshot and artifact queries | `Agentic.Manager.Pages`, `History`, `Overview`. B11 to B13 (`bea2d57b`, `d652b37f`, `87b255b9`), C5 to C7, PC5, PC6, PG4 `76da0f5c`. | `pages` and `capacity-inputs` (`$R/PG/PG4/impl-r1/pages-N8.log`, `capacity-inputs-after.log`, 43 keys inside their ceilings). | Deterministic native fixture | Met for function (tracker closed 2026-10-01) |
 | WM-026 SSE and bounded event polling | `Agentic.Manager.Events`, `Routes`. B14 `ddf3ed93`, C8 to C11 (`73a47ac6` to `e4b9e5c9`), PF19 `9e329971`, PG3 `afd44d78`. | `events-lifecycle`, `routes` and `capacity-streams` (`$R/PG/PG3/impl-r2`, 14 keys inside their ceilings). | Deterministic native fixture | Met for function (tracker closed 2026-10-01) |
@@ -131,8 +131,8 @@ revalidated only where their owners changed, as the governing goal directs.
 | WM-039 Cross-client and cross-machine operation | PF4 to PF8 (`2ccc38fd` to `2a89ef55`, with `360adc1`, `6656266`, `613d70e`, `4f0f5a4`, `cc56b94`), PF23 `870c7b8b`. | `cross-client`, `cross-client-lifecycle`, `cross-client-lineage` and the control `cross-client-broken-answer` (`$R/PF/PF23/impl-r1`). | Actual UI interaction | Met for function on one machine. Cross-machine operation did not run, because the governing goal limits validation to local macOS. The A16 and A17 matrices are deferred to the security stage. |
 | WM-040 Formal-to-implementation conformance bridge | PF9 to PF15 (`7d57a9b0` to `5cda60da`). | `bisim/ci/manager.sh` with its three controls (`$R/PF/PF22/impl-r1`). | Theorem | Met for function. The authorization transitions are deferred to the security stage. |
 | WM-041 Capacity, security and fault-injection evidence | `manager/CAPACITY.md`, `manager/test/capacity-ceilings.json`. PF16 to PF20 (`2808c7ac` to `537f1795`), PF24 `88d999b7`, PG1 `86c1e9e9`, PG2 `26e84d8d`, PG3 `afd44d78`, PG4 `76da0f5c`, PG10 `c550335c`. | `capacity-streams` (`$R/PG/PG3/impl-r2`), `capacity-inputs` (`$R/PG/PG4/impl-r1`), `capacity-admission` and `faults-io` (`$R/PG/PG1/impl-r1`), `failures-backup` (`$R/PG/PG11/impl-r1`). Every ceiling key passed in its latest run. | Deterministic native fixture | Partial. No run is a run of record under the host rule of PG1, because the PF17 manager, PID 61004, ran on the host. Root replacement and the security part are deferred to the security stage. Linux containment did not run. |
-| WM-042 Operator controls, observability and recovery procedures | `Agentic.Manager.LocalAdmin`, `Quarantine`, `Store`, `manager/OPERATIONS.md`. PG5 to PG13 (`b4b8a30d` to `eca320c9`). | `operations` with case 7, which runs the procedures of the runbook in order (`$R/PG/PG13/impl-r1/operations.log`). `failures-backup` (`$R/PG/PG11/impl-r1/failures-backup.log`). | Deterministic native fixture | Pending human operator exercise |
-| WM-043 Reproducible packages and rollback | `flake.nix` outputs `packages.<system>.agentic-run` and `default`. PG14 to PG17 (`5710785a`, `8fcb4999`, `ab186c91`, `c901a10f`). | `nix build .#agentic-run` and `test/cabal.sh sdist` (`$R/PG/PG14/impl-r1`). `package` (`$R/PG/PG16/impl-r1/package.log`). `rollback` (`$R/PG/PG17/impl-r1/rollback.log`). | Package build | Met for function. Only `aarch64-darwin` was built. |
+| WM-042 Operator controls, observability and recovery procedures | `Agentic.Manager.LocalAdmin`, `Quarantine`, `Store`, `manager/OPERATIONS.md`. PG5 to PG13 (`b4b8a30d` to `eca320c9`). | `operations` with case 7, which runs the procedures of the runbook in order (`$R/PG/PG28/impl-r1/03-operations.log`). `failures-backup` (`$R/PG/PG11/impl-r1/failures-backup.log`). | Deterministic native fixture | Pending human operator exercise |
+| WM-043 Reproducible packages and rollback | `flake.nix` outputs `packages.<system>.agentic-run` and `default`. PG14 to PG17 (`5710785a`, `8fcb4999`, `ab186c91`, `c901a10f`). | `nix build .#agentic-run` and `test/cabal.sh sdist` (`$R/PG/PG14/impl-r1`, latest `$R/PG/PG28/impl-r1/02-nix-build.log` and `12-sdist.log`). `package` (`$R/PG/PG28/impl-r1/06-package.log`). `rollback` (`$R/PG/PG28/impl-r1/07-rollback.log`). | Package build | Met for function. Only `aarch64-darwin` was built. |
 | WM-044 Documentation, independent review and release handoff | `doc/agent-cat.texi`, `doc/api/README.md`, the client and owner documents and this record. PG19 `2c56102d`, PG20 `5951ad37`, PG21 (this record). | `make -C doc check` (`$R/PG/PG21/impl-r1/doc-check.log`). | Pure model test | Partial. The gate of Phase G and the independent closure review have not run. The security review is deferred to the security stage. |
 
 ## Gate matrix
@@ -143,7 +143,7 @@ revalidated only where their owners changed, as the governing goal directs.
 | G1 Isolated manager core | WM-008 to WM-022. `acat-g1-h1wc`. | The real-worker lifecycle of WM-022 at N1 and N8 (`$I/vertical.d42c7UhQ`). | Deterministic native fixture | Met (2026-09-22) under the local-only amendment |
 | G2 Authenticated observation | WM-023 to WM-026. `acat-g2-la77`. | The rows WM-023 to WM-026. | Deterministic native fixture | Partial. Observation works with authentication and revocable credentials. The observation-only witness with mutations unavailable and the negative matrices are deferred to the security stage. |
 | G3 Remote mutation candidate | G2, WM-027, WM-028, WM-040 and WM-041. `acat-g3-v1iz`. | The rows of those packages. | Theorem | Partial. The hostile-input, replay and containment gates are deferred to the security stage. WM-028 and WM-041 are partial. Test exposure is not deployment. |
-| G4 Three-client acceptance | WM-029 to WM-039. `acat-g4-pech`. | The client rows and the three `cross-client` modes (`$R/PF/PF23/impl-r1`). Local modes: `ci/emacs-ui.py` local cases (`$R/PF/PF23/impl-r1/emacs-ui.log`) and `agentic-run --tui --local` in `rollback` (`$R/PG/PG17/impl-r1/rollback.log`). | Actual UI interaction | Partial. Met for function on one machine. Cross-machine acceptance did not run, because the governing goal limits validation to local macOS. |
+| G4 Three-client acceptance | WM-029 to WM-039. `acat-g4-pech`. | The client rows and the three `cross-client` modes (`$R/PF/PF23/impl-r1`). Local modes: `ci/emacs-ui.py` local cases (`$R/PF/PF23/impl-r1/emacs-ui.log`) and `agentic-run --tui --local` in `rollback` (`$R/PG/PG28/impl-r1/07-rollback.log`). | Actual UI interaction | Partial. Met for function on one machine. Cross-machine acceptance did not run, because the governing goal limits validation to local macOS. |
 | G5 Release candidate | G3, G4 and WM-041 to WM-044. `acat-g5-u0w2`. | The rows of WM-041 to WM-044 and the identities below. | Package build | Partial. The gate of Phase G, the exercise by another person and the independent closure review have not run. The security review is deferred to the security stage. Production activation is not authorized. |
 
 ## Acceptance scenario matrix
@@ -152,9 +152,9 @@ revalidated only where their owners changed, as the governing goal directs.
 |---|---|---|---|---|
 | A01 Missing inputs and readiness | WM-011 Drafts. WM-027 captures. | `manager-draft-check` (`$R/PG/PG3/impl-r2/draft-check-N8.log`). `tui-inputs` (`$R/PC/PC34/impl-r1/09b-tui-inputs-N8.log`). `emacs-service` and `pi-host` (`$R/PF/PF23/impl-r1`). | Actual UI interaction | Met for function |
 | A02 Exact captured bytes | WM-005 codecs, WM-011 captures, C12 `004eef20`. | Every `tui-journey` submits the exact Unicode input (`$R/PF/PF21/impl-r1/journey-pair.log`). `mutations-captures` (`$R/PE/PE28/impl-r1/0803-mutations-captures-N8.log`). The capture workload of `capacity-inputs` (`$R/PG/PG4/impl-r1`). | Actual UI interaction | Partial. The records name no check that changes the original file after capture or uses the server-owned large-file path. |
-| A03 Competing reservations | WM-013 Admission. | `capacity-admission`, with the `reservations.r1` and `reservations.r16` workloads (`$R/PG/PG1/impl-r1/capacity-admission.log`). `manager-admission-check` (`$R/PG/PG3/impl-r2/admission-check-N8.log`). | Deterministic native fixture | Met for function |
+| A03 Competing reservations | WM-013 Admission. | `capacity-admission`, with the `reservations.r1` and `reservations.r16` workloads (`$R/PG/PG1/impl-r1/capacity-admission.log`). `manager-admission-check` (`$R/PG/PG28/impl-r1/10-admission-main.log`). | Deterministic native fixture | Met for function |
 | A04 Changed or expired preparation | WM-014 Approval, WM-020 restart. | `manager-approval-check` (`$R/PF/PF21/impl-r1/approval-check-N8.log`). The control `tui-consent-control` (`$R/PF/PF21/impl-r1`). | Deterministic native fixture | Met for function |
-| A05 Lost reply around start intent | WM-010 Commands, WM-014, WM-020. C24 `de22ba49`. | `manager-command-check` (`$R/PG/PG3/impl-r2/command-check-N8.log`). `failures-manager` and `failures-launched` (`$R/PG/PG1/impl-r1`). | Deterministic native fixture | Partial. The per-route crash boundaries were dropped in Phase B part 2, and the `admission_audit.py` audits are removed by the operator direction of 2026-09-29. |
+| A05 Lost reply around start intent | WM-010 Commands, WM-014, WM-020. C24 `de22ba49`. | `manager-command-check` (`$R/PG/PG28/impl-r1/09-command-check.log`). `failures-manager` and `failures-launched` (`$R/PG/PG1/impl-r1`). | Deterministic native fixture | Partial. The per-route crash boundaries were dropped in Phase B part 2, and the `admission_audit.py` audits are removed by the operator direction of 2026-09-29. |
 | A06 Concurrent runs with decisions | WM-015, WM-016. PC24 `525c4cfa`. | `mixed` (`$R/PE/PE28/impl-r1/0801-mixed-N8.log`). `tui-decisions` (`$R/PC/PC34/impl-r1/09e-tui-decisions-N8.log`). | Actual UI interaction | Met for function |
 | A07 Answer race across clients | WM-016 FIFO reservation. PF5 `d889f241`. | Leg 2 of `cross-client`: 412 `stale-revision` for the later send and a concurrent HTTP answer race (`$R/PF/PF23/impl-r1/cross-client.log`). | Actual UI interaction | Met for function. Two truly simultaneous UI answers were dropped by the Phase F plan, and each race outcome was seen once at N8. |
 | A08 Retry, fail-over, abandon, redirect, steer and cancel | WM-016, C16 to C20, PC22, PC23. | `controls`, `controls-routing` (`$R/PE/PE28/impl-r1`). `live-redirect` and `tui-controls` with its control `tui-controls-broken-cancel` (`$R/PC/PC34/impl-r1`). `emacs-service-controls` (`$R/PF/PF23/impl-r1`). `pi-client-controls` (`$R/PD/PD29/impl-r1`). | Actual UI interaction | Met for function |
@@ -165,53 +165,66 @@ revalidated only where their owners changed, as the governing goal directs.
 | A13 Restart, resume and fork of parents | WM-018 History and Lineage. C15 `a3a8720c`, PC28 `2bc437ef`. | `mutations-lineage` (`$R/PE/PE28/impl-r1/0806-mutations-lineage-N8.log`). `cross-client-lineage` (`$R/PF/PF23/impl-r1`). `manager-history-check` (`$R/PG/PG4/impl-r1/history-check-N8.log`). | Actual UI interaction | Met for function |
 | A14 SSE at a snapshot boundary | WM-025, WM-026. B14, PC17 `174d7f5b`. | `events-lifecycle` and `capacity-streams` (`$R/PG/PG3/impl-r2`). `client_native.py` stream cases (`$R/PE/PE28/impl-r1/05b-client-native-N8.log`). | Deterministic native fixture | Met for function |
 | A15 Delayed responses and endpoint switch | WM-029 refresh coordinator, WM-033, WM-036. PE5 `e8ca40b0`, PD1 `86556364`. | `tui-failures` with the delayed-response endpoint switch (`$R/PG/PG1/impl-r1/tui-failures.log`). `manager-client-check vectors` (`$R/PE/PE28/impl-r1/05a-client-vectors.log`). | Actual UI interaction | Met for function |
-| A16 Revocation and rotation during operations | WM-023. PF7 `da32a966`. | The rotation with cutoff and the single revocation of `cross-client-lifecycle` (`$R/PF/PF23/impl-r1`) and `credential-lifecycle` (`$R/PG/PG3/impl-r2`). | Actual UI interaction | Deferred to the security stage. Only the functional rotation and revocation have evidence. |
-| A17 Restore of an older backup | WM-020, PG9 `9cf218f7`, PG11 `5c8f38de`. A restoration rotates the authority epoch and the stream and revokes every restored credential. | `failures-backup` case 3 (`$R/PG/PG11/impl-r1/failures-backup.log`). `operations` (`$R/PG/PG13/impl-r1/operations.log`). | Deterministic native fixture | Partial. The functional fencing is met. The negative matrix of old credentials, cursors and authority keys is deferred to the security stage. |
+| A16 Revocation and rotation during operations | WM-023. PF7 `da32a966`. | The rotation with cutoff and the single revocation of `cross-client-lifecycle` (`$R/PF/PF23/impl-r1`) and `credential-lifecycle` (`$R/PG/PG28/impl-r1/04-credential-lifecycle.log`). | Actual UI interaction | Deferred to the security stage. Only the functional rotation and revocation have evidence. |
+| A17 Restore of an older backup | WM-020, PG9 `9cf218f7`, PG11 `5c8f38de`. A restoration rotates the authority epoch and the stream and revokes every restored credential. | `failures-backup` case 3 (`$R/PG/PG11/impl-r1/failures-backup.log`). `operations` (`$R/PG/PG28/impl-r1/03-operations.log`). | Deterministic native fixture | Partial. The functional fencing is met. The negative matrix of old credentials, cursors and authority keys is deferred to the security stage. |
 | A18 CORS, Host, Origin and proxy headers | WM-024 Transport. B9 `8c4140b7`. | The frozen refusal codes of `boundary` (`$R/B/B19/impl-r1/11d-service-boundary-N8.log`). | Deterministic native fixture | Deferred to the security stage |
 | A19 Saturation and a full disk | WM-019, WM-021, PF17 to PF20. | `capacity-admission`, `faults-io` and `storage` (`$R/PG/PG1/impl-r1`). `capacity-inputs` (`$R/PG/PG4/impl-r1`). `capacity-streams` (`$R/PG/PG3/impl-r2`). | Deterministic native fixture | Partial. A file-size limit stands for a full disk, and no check produces a true `ENOSPC`. After the first write failure the Store refuses every request, the safety path included, until a restart, as `manager/STORAGE.md` states. |
 | A20 Death of a manager, worker or group leader | WM-019, WM-020. C23 `76e65633`, C24 `de22ba49`, PE2 `06c0c0db`. | `failures-worker`, `failures-manager` and `failures-launched` (`$R/PG/PG1/impl-r1`). | Deterministic native fixture | Partial. Worker and manager death are met for function on macOS. Escaped descendants and Linux did not run: OS containment is excluded by the scope correction of 2026-09-20, and validation is local macOS only. |
 | A21 Injected secrets and escapes in failure paths | WM-008, WM-017, WM-023. | The WM-017 acceptance of its A21 part (`$I/artifacts.Rdk65Wyh`). | Deterministic native fixture | Deferred to the security stage |
 | A22 Keyboard interaction at three sizes | WM-032, WM-035, WM-038. | `tui-sizes` and `tui-sizes-broken-draft` (`$R/PE/PE28/impl-r1`). `emacs-service-lifecycle` at 40x12, 80x24 and 140x36 (`$R/PF/PF23/impl-r1`). `pi-host` (`$R/PF/PF23/impl-r1/pi-host.log`). | Actual UI interaction | Met for function |
 | A23 Three clients across a machine boundary | WM-039. | The single-machine witness of the three `cross-client` modes (`$R/PF/PF23/impl-r1`). | Actual UI interaction | Not run. The governing goal limits validation to local macOS, and no second machine took part. |
-| A24 Upgrade and rollback | WM-020, WM-042, WM-043. PG16 `ab186c91`, PG17 `c901a10f`. | `package` with the schema 1 to 11 roots and the refused schema 13 root (`$R/PG/PG16/impl-r1/package.log`). `rollback`, which keeps the file stats of the manager root unchanged through the local run (`$R/PG/PG17/impl-r1/rollback.log`). | Package build | Met for function |
+| A24 Upgrade and rollback | WM-020, WM-042, WM-043. PG16 `ab186c91`, PG17 `c901a10f`. | `package` with the schema 1 to 11 roots and the refused schema 13 root (`$R/PG/PG28/impl-r1/06-package.log`). `rollback`, which keeps the file stats of the manager root unchanged through the local run (`$R/PG/PG17/impl-r1/rollback.log`). | Package build | Met for function |
 
 ## Package identities
 
 The flake package `agentic-run` was built with the flake reference
-`.#agentic-run` from the Git worktree. The base revision is
-`eca320c9ef1ce6838527acfcf051f5b56e73f910`, and the working copy held the
-package change to `flake.nix` without a commit. The derivation path depends
-only on `flake.nix`, `flake.lock` and the filtered source, so a commit of the
-same files keeps it.
+`.#agentic-run` from the Git worktree at commit
+`e898b8b9de4fb71bfdddc2b52a90863feffb75a3`, with a clean working copy, in
+part 5 of the G5 gate (PG28). The `package` and `rollback` modes of that part
+ran against this output path. The derivation path depends only on
+`flake.nix`, `flake.lock` and the filtered source, so a commit that changes
+no file of the filtered source keeps it.
 
 | Item | Identity |
 |---|---|
-| Derivation path | `/nix/store/6y76igrq76s9g2byl8wdjimbc4vsrn9h-agentic-run-0.1.0.0.drv` |
-| Output path | `/nix/store/lc8qfj9nwxrlm4582wswn9vk3h48zigv-agentic-run-0.1.0.0` |
-| Filtered source | `/nix/store/1m2g1kmy6m9rplv5ckn7c72pz2slml4r-source` |
-| SHA-256 of `bin/agentic-run` | `6ad55c59c69d57923b2ec929d3cd937405ada1fe430f36ef0f056dbfa995e4fc` |
-| Source distribution | `agentic-0.1.0.0.tar.gz`, 1897636 bytes |
-| SHA-256 of the source distribution | `471817ca146cfb0192b3dbcd0d0ab45c5d03799b9b549bfc686e192af1decbce` |
+| Derivation path | `/nix/store/6ir4xzj5ivfj215vkikx8vg2bwj3dnhd-agentic-run-0.1.0.0.drv` |
+| Output path | `/nix/store/yc3zvavs19s6d1ywixzhchiszhiqy2vh-agentic-run-0.1.0.0` |
+| Filtered source | `/nix/store/vqskigd3cvd184r2qf1y996nrhl0qya0-source` |
+| SHA-256 of `bin/agentic-run` | `dcc773bd56488695ac1dc0fe7cce48590cd8818501041908f2dbb72fba009991` |
+| Source distribution | `agentic-0.1.0.0.tar.gz`, 1902882 bytes |
+| SHA-256 of the source distribution | `7b0031bec8c686b34c364133b1a64d33f04e8c969ad7e116ee8850028f60be76` |
 | Compiler | GHC 9.10.3 from the GHC environment of the root shell |
 | Build tool | cabal-install 3.16.1.0 |
 | Nix | Nix 2.34.8 (Determinate Nix 3.21.7) |
 
 The build ran with `--no-update-lock-file` and `--option substitute false`.
 Nix built one derivation, the package itself, and found every other input in
-the local store. The build took 330 seconds of wall clock, of which the build
-phase took 5 minutes and 23 seconds. The one-minute load average was 6.3 at the
-start and 14.6 at the end.
+the local store. The build took 490 seconds of wall clock. The one-minute load
+average was 8.2 at the start and 15.9 at the end
+(`$R/PG/PG28/impl-r1/02-nix-build.log`). The source distribution came from
+`test/cabal.sh sdist` at the same commit (`$R/PG/PG28/impl-r1/12-sdist.log`).
 
-The built `bin/agentic-run list` printed the ten registered programs, and
-`bin/agentic-run run hello --scripted` printed the documented trace with
-`billFresh 3` and `billMemo 3`. `doc/check-manual-cli.py` passed against the
-built executable.
+The first package build (PG14) used the base revision
+`eca320c9ef1ce6838527acfcf051f5b56e73f910`. Its output path was
+`/nix/store/lc8qfj9nwxrlm4582wswn9vk3h48zigv-agentic-run-0.1.0.0`, and the
+SHA-256 of its `bin/agentic-run` was
+`6ad55c59c69d57923b2ec929d3cd937405ada1fe430f36ef0f056dbfa995e4fc`. PG15,
+PG16 and PG17 used that output. The only change to the filtered source after
+it is commit `1ac80da9`, which adds the missing manager modules to the module
+lists of the check executables `manager-admission-check` and
+`manager-artifact-check` in `agentic.cabal`. That change gives the new
+derivation path of the table.
 
-The derivation path was the same in three evaluations: from the worktree, from
-a copy of its tracked files in a temporary directory with the reference
+For the PG14 build, the built `bin/agentic-run list` printed the ten
+registered programs, and `bin/agentic-run run hello --scripted` printed the
+documented trace with `billFresh 3` and `billMemo 3`.
+`doc/check-manual-cli.py` passed against the built executable. The derivation
+path was the same in three evaluations: from the worktree, from a copy of its
+tracked files in a temporary directory with the reference
 `path:<copy>#agentic-run`, and from the worktree after an edit of `README.md`
 only. The flake fingerprint changed with that edit, so the edit reached the
-flake source. The edit was then reverted.
+flake source. The edit was then reverted. For the PG28 build,
+`bin/agentic-run list` reported ten registered programs.
 
 The listing of the source distribution from `test/cabal.sh sdist` includes
 `nix/haskell-overrides.nix`, `nix/crypton-x509-validation-san.patch` and
@@ -246,24 +259,27 @@ The mode needs both `PACKAGE_RUNNER` and `SCHEMA_FIXTURES`. The schema step
 follows the `hello` run and is described under
 [schema upgrade and refusal](#schema-upgrade-and-refusal).
 
-The run of record passed at `-N8` on 2026-10-03. The base revision was
-`5710785a3de642c166929c3dff7204a76af62fa0`, and the working copy held the
-change to `manager/test/service_http.py` and to the documentation without a
-commit. These files are outside the filtered source, so `nix build` with
-substitution disabled built nothing and printed the output path of the table
-above. The one-minute load average was 8.5 at the start and 8.3 at the end.
+The latest run passed at `-N8` on 2026-10-03 in part 5 of the G5 gate
+(PG28), at commit `e898b8b9de4fb71bfdddc2b52a90863feffb75a3` with a clean
+working copy, against the output path of
+[Package identities](#package-identities)
+(`$R/PG/PG28/impl-r1/06-package.log`). The one-minute load average was 12.3
+at the start and 13.5 at the end. The first run of record (PG15) passed on
+the PG14 output path at the base revision
+`5710785a3de642c166929c3dff7204a76af62fa0`
+(`$R/PG/PG15/impl-r1/package.log`).
 
 | Item | Identity |
 |---|---|
-| Derivation path | `/nix/store/6y76igrq76s9g2byl8wdjimbc4vsrn9h-agentic-run-0.1.0.0.drv` |
-| Output path | `/nix/store/lc8qfj9nwxrlm4582wswn9vk3h48zigv-agentic-run-0.1.0.0` |
-| SHA-256 of `bin/agentic-run` | `6ad55c59c69d57923b2ec929d3cd937405ada1fe430f36ef0f056dbfa995e4fc` |
+| Derivation path | `/nix/store/6ir4xzj5ivfj215vkikx8vg2bwj3dnhd-agentic-run-0.1.0.0.drv` |
+| Output path | `/nix/store/yc3zvavs19s6d1ywixzhchiszhiqy2vh-agentic-run-0.1.0.0` |
+| SHA-256 of `bin/agentic-run` | `dcc773bd56488695ac1dc0fe7cce48590cd8818501041908f2dbb72fba009991` |
 | Runner version in the catalogue and the supervisor manifest | `0.1.0.0` |
 | Workflow | `hello`, `workflow_117d409316e9bd8244415684a88f2d8327304e414da4a7ca078e905906abce16` |
 | Program hash in the supervisor manifest | `785260762a2848e71d20e3e522a8e477d76b13142cc18e3fe7fcdfebaf085cbb` |
-| Run | `run_60ead7e72ec2880e4439e45aa232b106808eaf05086fc063`, worker run `native-13321-1539500648564000` |
-| Verified result | `artifact_aede23c426668a33b6ae22874bdd2ec39c6a52f0e58fd8465c7e40f532cc6046`, 103 bytes |
-| SHA-256 of the downloaded result | `54b4cee307f3dc2eb37cd42f48d70e6bd01f9be94e859ed43f7bc34da31fb6c9`, equal to the published digest |
+| Run | `run_5e5997c09eb4b6cedc7859a0762ad0c5a20d98d7ab2757b4`, worker run `native-77200-1552535248083000` |
+| Verified result | `artifact_7bc6d9e8421182e9db798bf9d327980700013e7bd16e0191631e33c64967dcff`, 103 bytes |
+| SHA-256 of the downloaded result | `f4f615616e7ab1ea8c7e59ece54ebacf2ca4162468792f24d6bc3e2dc2992607`, equal to the published digest |
 
 The live `status` answered `state` `serving`, `live` and `ready` `true`, with
 0 active reservations and 0 owned workers after the run. `shutdown` answered
@@ -293,15 +309,15 @@ the manager through `shutdown` and requires exit status 0. For `schema-13`,
 offline `status` refuses with `storage-unavailable`, `RUNNER --manager serve`
 exits with status 2, and `user_version` stays 13.
 
-The run of record of the schema step passed at `-N8` on 2026-10-03 with the
-output path of the table above. The base revision was
-`8fcb49991c9b49ac0095275572f49dcf81818fc0`, and the working copy held the
-change to `manager/test/StoreCheck.hs`, `manager/test/service_http.py` and
-the documentation without a commit. These files are outside the filtered
-source, so `nix build` with substitution disabled built nothing. The one-minute
-load average was 6.2 at the start and 5.9 at the end. All eleven older roots
+The latest run of the schema step passed at `-N8` on 2026-10-03 in the
+`package` run of PG28, with the output path of the table above and the roots
+that the `schema-fixtures` lane of `manager-store-check` wrote at the same
+commit (`$R/PG/PG28/impl-r1/05-schema-fixtures.log`). All eleven older roots
 upgraded to version 12, passed `check-store` and served, and the version 13
-root was refused by offline administration and by serve.
+root was refused by offline administration and by serve. The first run of
+record (PG16) passed on the PG14 output path at the base revision
+`8fcb49991c9b49ac0095275572f49dcf81818fc0`
+(`$R/PG/PG16/impl-r1/package.log`).
 
 ## Rollback to explicit local clients
 
@@ -342,22 +358,24 @@ any command of the lifetime, and its run succeeds after the exact approval.
 The flow verb then shows one enqueue command of that request, one receipt for
 each command and one start relay for each of the three runs.
 
-The run of record passed at `-N8` on 2026-10-03. The base revision was
-`ab186c91f4691ac826504c57509b05f997e57372`, and the working copy held the
-change to `manager/test/service_http.py` and to the documentation without a
-commit. These files are outside the filtered source, so `nix build` with
-substitution disabled built nothing and printed the output path of the table
-above. The one-minute load average was 6.1 at the start and 6.4 at the end.
+The latest run passed at `-N8` on 2026-10-03 in PG28, at commit
+`e898b8b9de4fb71bfdddc2b52a90863feffb75a3` with a clean working copy, against
+the output path of [Package identities](#package-identities)
+(`$R/PG/PG28/impl-r1/07-rollback.log`). The one-minute load average was 13.5
+at the start and 13.1 at the end. The first run of record (PG17) passed on
+the PG14 output path at the base revision
+`ab186c91f4691ac826504c57509b05f997e57372`
+(`$R/PG/PG17/impl-r1/rollback.log`).
 
 | Item | Identity |
 |---|---|
-| SHA-256 of `bin/agentic-run` | `6ad55c59c69d57923b2ec929d3cd937405ada1fe430f36ef0f056dbfa995e4fc` |
-| Completed run and its verified result | `run_d00ff93021207d6623e1ea16a0b33c663862f4222473dfd2`, `artifact_e912b96acd0a2c73e9439e0b3e800c2682cf1775f9167b7a01bb25e83956db53`, 103 bytes, SHA-256 `ecac60bb91156983a4dd317d294d851870a16a4301634281c3d954818be34add` |
-| Cancelled run and its cancel command | `run_c4732ebce5ba04bd19525ce67fe1cafdec6d7ea372274803`, `command_546217f1ac1555ed8d13c045646dd17990fd882119e4510e` |
-| Offline backup | `backup_a7ea3d01100e1bbae3c095367cb800fcb52434e9e18a31c0008d6339d5c46f6e` |
+| SHA-256 of `bin/agentic-run` | `dcc773bd56488695ac1dc0fe7cce48590cd8818501041908f2dbb72fba009991` |
+| Completed run and its verified result | `run_32adb1425a409b79ec40f795b3608e636599d3bec7510bcc`, `artifact_9ff0827ae29aae89cda3b78e958b3797f48fed8a4a03943537f8457d2f335945`, 103 bytes, SHA-256 `dfc14fc8d4921b6061e307d893bfa0c8f9a0e13ad0205bffb59bcaaacf345a34` |
+| Cancelled run and its cancel command | `run_d51b7aacbe7b8cbf4f663df75e61616bd486cf69dc35ea2c`, `command_b57a84d21206378d8c910ac10f4275b6163a3809fa0f01b7` |
+| Offline backup | `backup_95b29a10dc995a5d006ea31952306362919938eb78753369dee08f9b2927077c` |
 | Recorded paths of the manager root | 37, with `coordination.sqlite3` and no write-ahead log after the checkpoint, one manager-log file and two run stores |
-| Local TUI run | `tui-97053-1541148882571000` under the private `XDG_STATE_HOME` |
-| Queued request, its new review and its run | `request_a57642f2192ac453178ac0597b84c9e2d07b96192c372c73`, `preparation_46cc8c37893e0e925e3c6374e3ea7cd5cf1730e5fe5e0558`, `run_2149b3d4c8ae3e9f2ff47554384ef3dc80f5b9ce73750327` |
+| Local TUI run | `tui-77906-1552554432376000` under the private `XDG_STATE_HOME` |
+| Queued request, its new review and its run | `request_3a5204307f8493c372f331eaae73064ea8843ad90236fb74`, `preparation_768f71b9274f18d2728ac6e9f45e3a4ff953be1eae35a0b1`, `run_b883bb0e336aabd87d713c3b42cebfe3c4fba94b2f5bdf13` |
 
 Offline `status` after the comparison changed the modification time of the
 manager root directory. The manager log of the two lifetimes held 14 commands
@@ -378,12 +396,13 @@ holds its change.
 | PG15 | `5710785a3de642c166929c3dff7204a76af62fa0` | `8fcb49991c9b49ac0095275572f49dcf81818fc0` | The `package` mode. |
 | PG16 | `8fcb49991c9b49ac0095275572f49dcf81818fc0` | `ab186c91f4691ac826504c57509b05f997e57372` | The schema fixtures and the upgrade and refusal step of `package`. |
 | PG17 | `ab186c91f4691ac826504c57509b05f997e57372` | `c901a10f95a33ebece0a3a212af71fb12417931b` | The `rollback` mode. |
+| PG28 | `e898b8b9de4fb71bfdddc2b52a90863feffb75a3` | None. The run used a clean working copy. | The rebuild of the package and the latest `package` and `rollback` runs. |
 
-No file of the filtered source changed between `5710785a` and `5951ad37`:
-the commits in that range change no `.hs`, `.c` or `.h` file under the
-source directories of the package, and no Cabal, Nix or flake file. The
-derivation path of [Package identities](#package-identities) was not
-evaluated again at `5951ad37`.
+Between `5710785a` and `e898b8b9`, the only change to the filtered source is
+the change to `agentic.cabal` in `1ac80da9`. No commit in that range changes
+a `.hs`, `.c` or `.h` file under the source directories of the package, or a
+Nix or flake file. The PG28 build therefore has a new derivation path, which
+[Package identities](#package-identities) gives.
 
 The Emacs client of the checks is commit
 `6e8eac0bc0fc9a235f9eab66bfec0f3f9cda1c15` of the `emacs-native` branch of
