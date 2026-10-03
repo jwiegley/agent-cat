@@ -505,6 +505,14 @@ CAPACITY_LITERAL = "capacity"
 # workload under the keys of the host-load rule of manager/CAPACITY.md. Each
 # manager process that these modes start ends with the mode on every exit
 # path, as CapacityHarness.reaping states.
+# Before it records the start of a workload, the harness waits at most
+# CAPACITY_LOAD_WAIT_SECONDS for the one-minute load average to fall to
+# CAPACITY_HOST_LOAD, the load of the host-load rule. It reads the load every
+# CAPACITY_LOAD_POLL_SECONDS. A load that stays above the rule does not stop
+# the workload, and its record keeps that load.
+CAPACITY_HOST_LOAD = 16
+CAPACITY_LOAD_WAIT_SECONDS = 600
+CAPACITY_LOAD_POLL_SECONDS = 15
 # When the environment variable CAPACITY_HARNESS_FAULT has the value
 # after-start, CapacityHarness.begin raises an exception after the manager of
 # the lifetime is ready. A capacity mode then fails, and the check of the
@@ -11753,16 +11761,32 @@ class CapacityHarness:
         assert listing.returncode in (0, 1), ("pgrep of the manager processes", listing.returncode, listing.stderr)
         return [line for line in listing.stdout.splitlines() if str(config) not in line.split()]
 
+    @staticmethod
+    def wait_for_load():
+        """Wait at most CAPACITY_LOAD_WAIT_SECONDS for a one-minute load
+        average of at most CAPACITY_HOST_LOAD. Prints one LOAD-WAIT line for
+        each reading above it. Returns the milliseconds of the wait."""
+        started = time.monotonic()
+        while (one := os.getloadavg()[0]) > CAPACITY_HOST_LOAD and time.monotonic() - started < CAPACITY_LOAD_WAIT_SECONDS:
+            print("LOAD-WAIT one-minute load", round(one, 2), "is above", CAPACITY_HOST_LOAD, "after",
+                  round(time.monotonic() - started), "seconds", flush=True)
+            time.sleep(CAPACITY_LOAD_POLL_SECONDS)
+        return round((time.monotonic() - started) * 1000, 1)
+
     def host_load(self, prefix, moment):
         """Record the one-minute and five-minute load averages of the host
-        at the moment start or end of the workload prefix. At the start, also
-        record the count of the other manager processes, and keep their
-        command lines in other-managers-<prefix>.txt. manager/CAPACITY.md
-        states the host-load rule of a run of record. These keys name no
-        ceiling, and the record keeps them whatever their values."""
+        at the moment start or end of the workload prefix. At the start,
+        first wait for the load of the rule with wait_for_load() and record
+        the wait, then record the count of the other manager processes, and
+        keep their command lines in other-managers-<prefix>.txt.
+        manager/CAPACITY.md states the host-load rule of a run of record.
+        These keys name no ceiling, and the record keeps them whatever their
+        values."""
+        waited = self.wait_for_load() if moment == "start" else None
         one, five, _ = os.getloadavg()
         values = {f"{prefix}.host-load-1m-{moment}": round(one, 2), f"{prefix}.host-load-5m-{moment}": round(five, 2)}
         if moment == "start":
+            values[f"{prefix}.host-load-wait-ms"] = waited
             others = self.other_managers()
             (work / f"other-managers-{prefix}.txt").write_text("".join(line + "\n" for line in others))
             values[f"{prefix}.other-managers-start"] = len(others)
@@ -19499,8 +19523,14 @@ def capacity_inputs_checks():
           f"{measured['drafts.global-refusal-ms']:.0f} ms; resident peak", measured["drafts.manager-rss-peak-bytes"], "bytes", flush=True)
 
     # Step 2. Page sets over CAPACITY_LEGACY_ENTRIES legacy runs.
+    # The setup of the legacy runs is not part of the pages lifetime. Its
+    # duration and the load around it are recorded apart from that lifetime.
     LEGACY_ROOT.mkdir(mode=0o700)
+    setup_load, setup_started = os.getloadavg()[0], time.monotonic()
     legacy_results = clone_legacy_runs(legacy_frontend_run(), CAPACITY_LEGACY_ENTRIES - 1)
+    meter.measure({"pages.legacy-setup-ms": round((time.monotonic() - setup_started) * 1000, 1),
+                   "pages.legacy-setup-load-1m-start": round(setup_load, 2),
+                   "pages.legacy-setup-load-1m-end": round(os.getloadavg()[0], 2)})
     assert len(set(legacy_results)) == CAPACITY_LEGACY_ENTRIES, ("distinct legacy results", len(set(legacy_results)))
     names = ["pages-%d" % index for index in range(1, 6)]
     process, resident, credentials = meter.begin("pages", work / "capacity-pages", ["cap_01"], {"globalPageSets": 8}, names,

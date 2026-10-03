@@ -87,7 +87,12 @@ The measurements of a workload use these rules:
   resident peak is the largest peak of its lifetimes.
 - **Host load.** A run of record starts with a one-minute load average of
   at most 16, which is half of the 32 logical processors of the tested
-  platform, and with no other manager process on the host. The harness reads
+  platform, and with no other manager process on the host. Before the start
+  of each workload, the harness waits at most 600 seconds for the one-minute
+  load average to fall to 16. It reads the load every 15 seconds and prints
+  one `LOAD-WAIT` line for each reading above 16. It keeps the duration of
+  the wait in milliseconds under the key `<workload>.host-load-wait-ms`. A
+  load that stays above 16 does not stop the workload. The harness reads
   `os.getloadavg()` at the start and at the end of each workload. It keeps
   the one-minute and five-minute load averages under the keys
   `<workload>.host-load-1m-start`, `<workload>.host-load-1m-end`,
@@ -101,9 +106,13 @@ The measurements of a workload use these rules:
   `streams`, `io-1`, `io-2` or `io-3`. In the storage, routes and failure
   modes, it is the key prefix of the mode: `storage`, `routes`,
   `failures.worker`, `failures.manager`, `failures.launched` or
-  `failures.tui`. These keys name no ceiling, so the summary lists them as
-  unchecked. A run outside the rule keeps its record with its load, and it
-  is not a run of record. The rule states the conditions of a measurement.
+  `failures.tui`. The `capacity-inputs` mode also keeps the duration of the
+  setup of its legacy runs, which comes before the `pages` lifetime, under
+  the key `pages.legacy-setup-ms`, and the one-minute load average before and
+  after that setup under the keys `pages.legacy-setup-load-1m-start` and
+  `pages.legacy-setup-load-1m-end`. These keys name no ceiling, so the
+  summary lists them as unchecked. A run outside the rule keeps its record
+  with its load, and it is not a run of record. The rule states the conditions of a measurement.
   It sets no ceiling.
 - **Cleanup.** The harness stops each manager process that it started when
   the mode ends, also when the mode fails or receives SIGTERM. It sends
@@ -980,6 +989,12 @@ key order: `PASS` or `FAIL` with the measured value, or `MISSING` when no file
 gives the key. It prints `UNCHECKED` for a measured key that names no
 ceiling, such as the events per second of the flood. It exits 1 when a key
 fails or is missing, and 2 when an input file does not have this form.
+Each option `--exclude-section NAME` before the file names removes the
+ceiling keys whose first dotted segment is `NAME`, and the measurements of
+these keys, from the comparison. A part of the measurements, such as the
+capacity modes without the failure modes, then has a summary that does not
+list the keys of the other part as missing. A name that is not the first
+segment of a ceiling key is an input error.
 
 A ceiling of the form "at most N" holds when the measured number is N or
 less, "at least N" when it is N or more, "N to M" when it lies between N and M

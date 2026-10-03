@@ -13,7 +13,10 @@ key to a number, a string or a boolean. The command prints one PASS or
 FAIL line for each key with a measurement and one MISSING line for each
 key without one, in key order, and an UNCHECKED line for each measured key
 that names no ceiling. It writes its counts to standard error. It exits 1
-when a key fails or is missing, and 2 when an input is not valid.
+when a key fails or is missing, and 2 when an input is not valid. Each
+--exclude-section NAME removes the ceiling keys whose first dotted segment is
+NAME, and their measurements, from the comparison, so that the summary of one
+part of the measurements does not list the keys of the other parts.
 """
 
 from __future__ import annotations
@@ -176,8 +179,17 @@ def holds(ceiling: dict, value) -> bool:
     return low <= value <= high
 
 
+def in_section(key: str, excluded) -> bool:
+    return key.split(".")[0] not in excluded
+
+
 def summary_command(arguments) -> int:
+    excluded = set(arguments.exclude_section)
     ceilings = load_ceilings(arguments.ceilings)
+    unknown = sorted(excluded - {key.split(".")[0] for key in ceilings})
+    if unknown:
+        raise InputError(f"--exclude-section names no section of the ceilings: {', '.join(unknown)}")
+    ceilings = {key: ceiling for key, ceiling in ceilings.items() if in_section(key, excluded)}
     measured = {}
     for path in arguments.measurements:
         values = read_json(path)
@@ -189,6 +201,7 @@ def summary_command(arguments) -> int:
             if key in measured and measured[key][0] != value:
                 raise InputError(f"{path}: measurement {key} is {value!r} here and {measured[key][0]!r} in {measured[key][1]}")
             measured[key] = (value, path)
+    measured = {key: item for key, item in measured.items() if in_section(key, excluded)}
     counts = {"PASS": 0, "FAIL": 0, "MISSING": 0}
     for key in sorted(ceilings):
         ceiling = ceilings[key]
@@ -214,6 +227,8 @@ def main() -> int:
     ceilings.add_argument("document")
     ceilings.set_defaults(action=ceilings_command)
     summary = commands.add_parser("summary", help="compare measurement files with the ceilings")
+    summary.add_argument("--exclude-section", action="append", default=[], metavar="NAME",
+                         help="leave out the ceiling keys whose first dotted segment is NAME")
     summary.add_argument("ceilings")
     summary.add_argument("measurements", nargs="+")
     summary.set_defaults(action=summary_command)
