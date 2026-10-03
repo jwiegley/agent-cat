@@ -7286,7 +7286,7 @@ Request, approval, control, export, and lineage routes pass hostile-input, repla
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 22:48]
+:MODIFIED: [2026-10-03 Sat 00:05]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G4
 :SOURCE_REPO: agent-cat
@@ -7511,6 +7511,13 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
     "author": "johnw",
     "text": "PF23 (2026-10-02), Phase F gate part 3, after the build of agentic-run and routing-fixed-point-probe with -ftui-tests (exit 0). Cross-client modes at N8 with real TUI, Emacs and Pi processes: cross-client exit 0 (15 numbered PASS lines, 82 s), cross-client-lifecycle exit 0 (171 s), cross-client-lineage exit 0 (131 s), and cross-client-broken-answer exit 1 with exactly 'CROSS-ASSERT the cross-client answer is JSON false'. Emacs client: ci/emacs.sh exit 0 (97 of 97 transport tests), the local cases of ci/emacs-ui.py passed at 40x12, 80x24 and 140x36, emacs-service, emacs-service-lifecycle and emacs-service-controls exit 0 at N8, and emacs-service-broken-answer exit 1 with exactly 'JOURNEY-ASSERT Emacs answer is JSON false'. ext-pi: npm run check exit 0, npm test exit 0, npm run test:integration exit 0 (9 of 9), and the pi-host mode at N8 exit 0. Fixes made before the failed checks were run again: the ext-pi current-session bridge moves its socket to a private mkdtemp directory when the path in the state directory is longer than 103 bytes (the cause of a Pi EADDRINUSE in cross-client-lifecycle), three supervisor restore tests set a current createdAt so that the 30-day retention does not prune them, and the Emacs witness script (emacs-native 6e8eac0) anchors the history search to the row that starts with the run id and waits 60 s for Emacs -Q to start. Evidence (private): PF/PF23/impl-r1. Fess pf-PF23-r1 is not blocking; its findings are filed as a follow-up issue. Limitation: cross-client passed before the bridge fix and did not run again after it. The package stays open for the closeout.\n",
     "created_at": "2026-10-03T05:48:46Z"
+  },
+  {
+    "id": 695,
+    "issue_id": "acat-g4-pech",
+    "author": "johnw",
+    "text": "PF24 (2026-10-03), Phase F gate part 4, each step once at N8 with a log and an exit file. Capacity and failure modes: capacity-admission, capacity-inputs, capacity-streams and faults-io exit 0. Touched existing modes with unchanged assertions: storage, routes, failures-worker, failures-manager, failures-launched and tui-failures exit 0. capacity_summary.py summary over the seven measurement files of the CAPACITY.md record against manager/test/capacity-ceilings.json: 124 PASS, 5 FAIL, 0 MISSING, each FAIL diagnosed in gate-summary.md (events.catch-up-p50-ms and p95-ms saturate during the burst round, as PF20 recorded; two load-caused FAILs in the first capacity-admission and capacity-inputs files, with pages.first-page-p50-ms at 535.6 ms even in the diagnostic rerun; failures.backup.passed needs the restore-marker boundary of the excluded admission_audit.py private copy). bash tui/ci/tui.sh exit 0, and the BUILD of agentic-run and routing-fixed-point-probe after it exit 0. One harness fix: CapacityHarness.read also counts http.client.IncompleteRead (a body cut off after a 16 KiB write by the later view check of Transport.respondBytes) as a dropped read within the 30-second bound, and manager/CAPACITY.md describes it. capacity-streams attempt 1 failed on the truncated body, attempt 2 failed under host load 47 with no truncation, and attempt 3 passed at load 13 with no further fix. gate-summary.md lists every step of PF21 to PF24 with its exit status and evidence path. Evidence (private): PF/PF24/impl-r1. Fess pf-PF24-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open for the closeout.\n",
+    "created_at": "2026-10-03T07:05:14Z"
   }
 ]
 #+end_src
@@ -12951,6 +12958,28 @@ Non-blocking findings of fess pf-PF23-r1 (fess/pf-PF23-r1.md) on subtask PF23 (P
 1. (low) PF/PF23/impl-r1/cross-client.log against ext-pi/src/current-bridge.ts: cross-client passed before the bridge change and did not run again. In that fixture the Pi state path is longer than 103 bytes, so the passing run bound a truncated socket path. cross-client-lifecycle, cross-client-lineage and pi-host passed later on the new mkdtemp path. Fix: run cross-client once at N8 on the final tree.
 2. (low) ext-pi/src/current-bridge.ts:60-79: the mkdtemp socket directory is made before the token write and before listen. If either step fails, the directory stays on disk unless close() is called, and a killed Pi also leaves $TMPDIR/acat-bridge-* behind. The old socket in the state directory had the same leak on a kill, so this is not a regression. Fix: remove the socket directory in a catch around the token write and listen in start().
 3. (low) /Users/johnw/src/agent-workflows-emacs-native/ci/emacs-ui.py:866: the run id goes into re-search-forward as a regular expression without quoting. The current run_<hex> ids contain no metacharacters, so the search works. No run covered the order in which the child row comes first. Fix: quote the run id, for example with regexp-quote or an escape in Python.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF24
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf24-fess-followup-o03v
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 00:05]
+:MODIFIED: [2026-10-03 Sat 00:05]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF24-r1 (fess/pf-PF24-r1.md) on subtask PF24 (Phase F gate, part 4).
+
+1. (medium) PF/PF24/impl-r1/capacity-streams-attempt2.log and manager/test/service_http.py:9840: the capacity-streams pass depends on host load. After the IncompleteRead fix, attempt 2 failed because GET /v1/preparations/<id> was refused (RemoteDisconnected) for more than 30 s at load 47. Attempt 3 passed with no code fix after the load fell to 13. A single read can be starved past 30 s under Store contention. Fix: record this as a known capacity limit in the WM-041 follow-ups, and either bound the mode by host load or investigate the length of read refusals during the burst round.
+2. (medium) PF/PF24/impl-r1/gate-summary.md and diagnostic/capacity-inputs.json: the diagnosis of the pages.first-page-p50-ms FAIL is not complete. The diagnostic rerun at load 11 to 15 still measured 535.6 ms against a 500 ms ceiling, and PF18 measured 281.1 ms. No idle-host measurement exists. Fix: run capacity-inputs once on a quiet host, or find the cause of the change, and correct the diagnosis.
+3. (low) PF/PF24/impl-r1/gate-summary.md (capacity-admission and capacity-inputs rows): the load figures have no evidence. The summary gives load 35-48 for capacity-admission, but the only sample reads 29.06/30.86/27.96, and capacity-inputs has no load-*.log file. Fix: state only the load samples on record, or mark the figures as not recorded.
+4. (low) manager/test/service_http.py:9840: the assertion message 'capacity read closed with no response' now also covers a truncated body. Fix: change it to 'capacity read closed with no response or a truncated body'.
+5. (low) PF/PF24/impl-r1/run-mode.sh: the diagnostic reruns overwrote the run-of-record capacity-*.json files in the stage directory, which were then put back by hand with no record. Fix: note the restore in gate-summary.md, or have diagnostic runs write to a separate directory.
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PF3
 :PROPERTIES:
@@ -23885,7 +23914,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 21:46]
+:MODIFIED: [2026-10-03 Sat 00:05]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -24069,6 +24098,13 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "PF21 (2026-10-02), Phase F gate part 1, on the final tree at 537f1795: ALLBUILD exit 0, make -C doc check exit 0, tui-model-test at +RTS -N1 and -N8 exit 0, JOURNEY-PAIR(pf-gate) at N1 and N8 exit 0 (PASS flow line on both), the three journey controls at N8 failed with their literal messages, and the six N8 owner checks with the PD28 gate arguments exited 0. One command-check attempt failed on the gate invocation (credential_cli.py requires a work directory named N1 or N8) and passed on rerun; both runs are kept. No source change. Evidence (private): PF/PF21/impl-r1. Fess pf-PF21-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open: PF22 to PF24 run the rest of the Phase F gate.\n",
     "created_at": "2026-10-03T04:46:34Z"
+  },
+  {
+    "id": 693,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PF24 (2026-10-03), Phase F gate part 4, each step once at N8 with a log and an exit file. Capacity and failure modes: capacity-admission, capacity-inputs, capacity-streams and faults-io exit 0. Touched existing modes with unchanged assertions: storage, routes, failures-worker, failures-manager, failures-launched and tui-failures exit 0. capacity_summary.py summary over the seven measurement files of the CAPACITY.md record against manager/test/capacity-ceilings.json: 124 PASS, 5 FAIL, 0 MISSING, each FAIL diagnosed in gate-summary.md (events.catch-up-p50-ms and p95-ms saturate during the burst round, as PF20 recorded; two load-caused FAILs in the first capacity-admission and capacity-inputs files, with pages.first-page-p50-ms at 535.6 ms even in the diagnostic rerun; failures.backup.passed needs the restore-marker boundary of the excluded admission_audit.py private copy). bash tui/ci/tui.sh exit 0, and the BUILD of agentic-run and routing-fixed-point-probe after it exit 0. One harness fix: CapacityHarness.read also counts http.client.IncompleteRead (a body cut off after a 16 KiB write by the later view check of Transport.respondBytes) as a dropped read within the 30-second bound, and manager/CAPACITY.md describes it. capacity-streams attempt 1 failed on the truncated body, attempt 2 failed under host load 47 with no truncation, and attempt 3 passed at load 13 with no further fix. gate-summary.md lists every step of PF21 to PF24 with its exit status and evidence path. Evidence (private): PF/PF24/impl-r1. Fess pf-PF24-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open for the closeout.\n",
+    "created_at": "2026-10-03T07:05:13Z"
   }
 ]
 #+end_src
@@ -24080,7 +24116,7 @@ workloads rather than extrapolating unmeasured capacity.
 :LABELS:   ["p9","wm-checkpoint","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 21:19]
+:MODIFIED: [2026-10-03 Sat 00:05]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041-core
 :SOURCE_REPO: agent-cat
@@ -24216,6 +24252,13 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
     "author": "johnw",
     "text": "PF20 (WM-041 failure evidence): new mode faults-io in manager/test/service_http.py runs three manager lifetimes with RLIMIT_FSIZE in lifetime 2. Under the limit, a write past the limit refused with 503 storage-unavailable and left no command row, the Store was poisoned so every later read and the safety withdraw refused with storage-unavailable, and no run or preparation was added. Lifetime 3 without the limit served the committed state with no command replayed. Timing prints in failures-worker (147.8 ms, ceiling 10000), failures-manager (1011.2 ms, ceiling 30000), failures-launched (303.2 ms, ceiling 5000) and tui-failures (1389.5 ms and 1336.0 ms, ceilings 50000 and 35000); all four passed at N8 with unchanged assertions. manager-admission-check with the PD28 gate arguments passed (146 PASS lines), but it has no interrupted-backup case, so failures.backup.passed is a diagnosed FAIL (the case needs admission_audit.py restore-interruption, which waits on operator approval). Combined capacity_summary.py summary over PF17 to PF20: 126 PASS, 3 diagnosed FAIL, 0 MISSING of 129 keys. manager/CAPACITY.md records the values; make -C doc check passed. Evidence is in the private stage directory. Follow-up findings: acat-pf20-fess-followup-nb2n.",
     "created_at": "2026-10-03T04:19:09Z"
+  },
+  {
+    "id": 694,
+    "issue_id": "acat-wm-041-core-3vvz",
+    "author": "johnw",
+    "text": "PF24 (2026-10-03), Phase F gate part 4, each step once at N8 with a log and an exit file. Capacity and failure modes: capacity-admission, capacity-inputs, capacity-streams and faults-io exit 0. Touched existing modes with unchanged assertions: storage, routes, failures-worker, failures-manager, failures-launched and tui-failures exit 0. capacity_summary.py summary over the seven measurement files of the CAPACITY.md record against manager/test/capacity-ceilings.json: 124 PASS, 5 FAIL, 0 MISSING, each FAIL diagnosed in gate-summary.md (events.catch-up-p50-ms and p95-ms saturate during the burst round, as PF20 recorded; two load-caused FAILs in the first capacity-admission and capacity-inputs files, with pages.first-page-p50-ms at 535.6 ms even in the diagnostic rerun; failures.backup.passed needs the restore-marker boundary of the excluded admission_audit.py private copy). bash tui/ci/tui.sh exit 0, and the BUILD of agentic-run and routing-fixed-point-probe after it exit 0. One harness fix: CapacityHarness.read also counts http.client.IncompleteRead (a body cut off after a 16 KiB write by the later view check of Transport.respondBytes) as a dropped read within the 30-second bound, and manager/CAPACITY.md describes it. capacity-streams attempt 1 failed on the truncated body, attempt 2 failed under host load 47 with no truncation, and attempt 3 passed at load 13 with no further fix. gate-summary.md lists every step of PF21 to PF24 with its exit status and evidence path. Evidence (private): PF/PF24/impl-r1. Fess pf-PF24-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open for the closeout.\n",
+    "created_at": "2026-10-03T07:05:14Z"
   }
 ]
 #+end_src

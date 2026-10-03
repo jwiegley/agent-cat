@@ -55,9 +55,11 @@ The measurements of a workload use these rules:
   server closes it. The latency of a command does not include the opening
   of a connection. A read that receives 503 `storage-unavailable` or 429
   `storage-quota` is sent again within five seconds. A read whose
-  connection closes with no response is sent again within 30 seconds. The
-  manager closes the connection in this way when the check of the view at
-  response entry meets the Store allowance after the response has started.
+  connection closes with no response, or closes after a part of the body,
+  is sent again within 30 seconds. The manager closes the connection in
+  this way when the check of the view at response entry, or the check
+  before a later 16 KiB write of the body, meets the Store allowance after
+  the response has started.
   The latency of a named read runs from before its first attempt to the end
   of the body of its answer. The p50 and p95 values use the nearest-rank method: for n
   sorted samples, the q percentile is the sample at position ceil(q n),
@@ -454,9 +456,10 @@ second that `E0` receives during each round
 (`events.reconnects`), the records and the transport bytes of each route
 reader (`events.route.<reader>.records` and `events.route.<reader>.bytes`),
 the reads and stream registrations whose connection closed with no response
-(`events.dropped-reads`), the refusals of reads that the harness sent again
-(`events.refused-reads`), the slowest poll of `E0` and the UTC time of its
-start (`events.poll-slowest-ms` and `events.poll-slowest-at`), the approvals
+or after a part of the body (`events.dropped-reads`), the refusals of reads
+that the harness sent again (`events.refused-reads`), the slowest poll of
+`E0` and the UTC time of its start (`events.poll-slowest-ms` and
+`events.poll-slowest-at`), the approvals
 whose connection closed with no response (`events.uncertain-approvals`), the
 largest number of ordinary mutations of one credential in one UTC minute
 (`events.mutations-per-credential-minute`), the p50 and p95 of the catch-up

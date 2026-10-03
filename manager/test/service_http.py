@@ -9824,17 +9824,18 @@ class CapacityHarness:
         five-second Store allowance or the page-set capacity is a new
         bounded read within window seconds, as in fetch, and refused counts
         each such refusal. A read whose connection closes with no
-        response is also a new bounded read within 30 seconds, and dropped
-        counts it: the manager closes the connection when the check of the
-        view at response entry meets the Store allowance after the response
-        has started. credential.read_ms times the read from before its first
-        attempt."""
+        response, or closes after a part of the body, is also a new bounded
+        read within 30 seconds, and dropped counts it: the manager closes
+        the connection when the check of the view at response entry, or the
+        check before a later 16 KiB write of the body, meets the Store
+        allowance after the response has started. credential.read_ms times
+        the read from before its first attempt."""
         started = time.monotonic()
         deadline = started + window
         while True:
             try:
                 status, value, raw, received = exchange(path, credential.headers | (extra or {}), persistent=credential.connection)
-            except ConnectionError as failure:
+            except (ConnectionError, http.client.IncompleteRead) as failure:
                 CapacityHarness.dropped += 1
                 assert time.monotonic() < started + 30, ("capacity read closed with no response", path, repr(failure))
                 time.sleep(0.05)
