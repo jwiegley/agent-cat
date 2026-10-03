@@ -90,6 +90,31 @@ Found by the live run on 2026-08-14 (workflow w5sz6gul7, live stage). SYMPTOM: i
 
 Implement approved source-aware input design: command-tail args, literal standard input, separate machine controls, multiline /wf binding, regressions, docs, and Nix integration evidence. Design approved 2026-09-02 in Pi goal mtkjiqtl-25777e.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG3
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-0rda
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 03:16]
+:MODIFIED: [2026-10-03 Sat 03:16]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG3-r2 (fess/pg-PG3-r2.md) on subtask PG3 (read-path fix).
+
+1. (medium) manager/src/Agentic/Manager/State.hs:65-66: a continued projection that does not match the stored boundary falls back to a full replay from sequence 0 and records nothing. Fix: refuse with StoreIntegrity, or write the private Store record before the replay, and add a test.
+2. (medium) manager/CAPACITY.md, 'Read path decision of 2026-10-03' table, slow.independent-terminal-ms row: the before (44841.6) and after (1777.3) values come from two definitions of the key. Fix: mark the row as a changed definition or split it, and cite the recorded_at evidence (observation-delay.py).
+3. (low) manager/CAPACITY.md 'Event flood' paragraph still justifies the 60-second retry of refused reads by read-path saturation, which no longer occurs. Fix: restate the reason under current behavior.
+4. (low) manager/test/service_http.py reset_stream (SO_LINGER 0) and the STORAGE.md change of the closed-stream detection bound to the second heartbeat (about 30 seconds) carry no recorded reason. Fix: record whether the old text was wrong or the behavior changed, with evidence.
+5. (low) Store.hs ProjectionMemo bound counts original record bytes, not the heap of SnapshotCheckpoint values (documented, RSS peak 136 MB). No change now; measure later.
+6. (low) Configuration.reloadConfiguration changes profile revisions without advanceAuthorizationRevision. PG5 must call advanceAuthorizationRevision when it installs a reload.
+
+Implementer limitations also open: burst delivery p95 about 10 s from the ingestion rate of State.ingestValidated (one write transaction per envelope, about 270 per second); the fast-path expiry and cutoff comparison uses the Haskell system clock rather than SQLite julianday('now').
+
 * DONE [#C] Update the Pi extension Vitest dependency past GHSA-82fw-gwwq-j7x9
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -7543,7 +7568,7 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-10-03 Sat 06:57]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G5
 :SOURCE_REPO: agent-cat
@@ -7666,6 +7691,45 @@ Full failure/capacity evidence, operational procedures, reproducible packages, r
   }
 ]
 #+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 714,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "PG5 (2026-10-03): the functional reload-profiles operation of WM-042 is in place with service_http.py mode operations case 1 passing at N8 (live add, revision change with stale refusal, invalid file and https change refused, offline validation). Not a capacity run. Findings in acat-g971.",
+    "created_at": "2026-10-03T13:57:49Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG5
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-g971
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 06:57]
+:MODIFIED: [2026-10-03 Sat 06:57]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG5-r1 (report fess/pg-PG5-r1.md in the private evidence directory). The Integrator corrected the serveReload sentence in manager/CONFIGURATION.md and the stale reload-profiles lines of doc/workflow-manager-handoff.md (near lines 1699 and 2087) in the PG5 commit. These stay open:
+
+1. (medium) manager/src/Agentic/Manager/Configuration.hs validateConfigurationProfiles and manager/COMMANDS.md: offline reload-profiles returns the revision of a throwaway registry with a random nonce. The value changes on every call and equals no installed revision. Fix: derive a deterministic offline revision (for example a digest of the validated profile definitions), or keep the documented behavior by an explicit decision.
+2. (low) Configuration.hs validateConfigurationProfiles hardcodes QueryLimits 4194304 30000000, which repeat the upper bounds of newRegistry (Profile.hs). Fix: use the limits of the loaded configuration, or expose a pure profile-validation function and build no registry.
+3. (low) cli/test/ManagerConfigurationProbe.hs and Configuration.hs: a relative path, a NUL path, a symbolic link and a 0644 file are now UnreadableConfiguration, so reload-profiles answers storage-unavailable for them. Under another reading a non-private file is a validation failure. Fix: confirm the classification.
+4. (low) manager/src/Agentic/Manager/LocalAdmin.hs reloadServing commits the command record before the reload. If the reload or the probe throws instead of returning Left, no receipt is appended and the reload is outcome-uncertain at the next open. Fix: wrap the reload in a try that maps an unexpected exception to a storage-unavailable receipt.
+5. (low) manager/test/service_http.py operations case 1b proves the stale refusal through the profile revision only. No test observes the effect of advanceAuthorizationRevision after a live reload. Fix: add an operations case that checks that a retained view revalidates after a live reload.
+
+Deferred as security-only under the 2026-09-30 direction: the PLAN.org B8 low finding (a page token or open stream after a reload that removes profile access should answer 403 or 410).
+Other limitations: a live reload does not change the limits that the HTTPS listener took at startup.
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PD24
 :PROPERTIES:
@@ -8995,6 +9059,28 @@ Replace the remaining /workflow command namespace in the Pi extension with /wf n
 ]
 #+end_src
 
+* TODO [#B] Run the PG4 capacity-inputs confirmation inside the PG1 rule
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-jkas
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 06:15]
+:MODIFIED: [2026-10-03 Sat 06:15]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Subtask PG4 (first page of /v1/runs within its median ceiling) stopped at an authorization gate. Every other acceptance item passed on the fixed source.
+
+Gated change: stop the stale PF17 manager PID 61004 ('routing-fixed-point-probe --manager serve --config /Users/johnw/Products/k.M0a5ItPm/tmp/pf17-capacity.ocD2VsSb/N8/configuration.json +RTS -N8 -RTS') with SIGTERM, then SIGKILL after 25 seconds, and the stopped frontends PIDs 111 and 9444, or authorize a stage to stop them. The same gate holds acat-n50o. Then run capacity-inputs once at N8 inside the PG1 rule with the evidence script PG/PG4/impl-r1/run-inputs.sh record (private evidence directory).
+
+Acceptance: pages.other-managers-start 0, every start load at most 16, pages.first-page-p50-ms at most 500, no capacity-inputs ceiling key outside its ceiling, ceilings, workload, page-set bound and window of 1024 members unchanged.
+
+Current values (not a run of record, PID 61004 present, start loads 5.66 to 12.44): first-page p50 131.2 ms, p95 968 ms, 0 of 43 keys outside their ceilings.
+
 * DONE [#D] Ordered-carrier class: resource semiring with monotone +,*,csum
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -10030,6 +10116,28 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
 :END:
+
+* TODO [#B] Run the PG3 capacity-streams confirmation inside the PG1 rule
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-n50o
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 03:16]
+:MODIFIED: [2026-10-03 Sat 03:16]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Subtask PG3 (read-path fix) stopped at an authorization gate. Every other acceptance item passed on the committed source.
+
+Gated change: stop the stale PF17 manager PID 61004 ('routing-fixed-point-probe --manager serve --config /Users/johnw/Products/k.M0a5ItPm/tmp/pf17-capacity.ocD2VsSb/N8/configuration.json +RTS -N8', running for about 9 h), and the stopped frontends PIDs 111 and 9444, or authorize a stage to stop them. Then run capacity-streams once at N8 inside the PG1 rule with the evidence script PG/PG3/impl-r2/run-streams.sh (private evidence directory).
+
+Acceptance: streams.other-managers-start 0, host load within the PG1 rule at start and end, events.catch-up-p50-ms at most 1000, events.catch-up-p95-ms at most 5000, events.reader-complete true, dropped-reads 0, no ceiling key outside its ceiling, ceilings and mode configuration unchanged.
+
+Current values (not a run of record, PID 61004 present, load 5.6 to 6.7): catch-up p50 3.4 ms, p95 128.8 ms, reader-complete true, dropped-reads 0, 0 of 14 keys outside their ceilings.
 
 * DONE [#E] Prove the classical Kleene-algebra identities now that KleeneStar makes them theorems
 :PROPERTIES:
@@ -14908,7 +15016,7 @@ Found by the haskell-question analysis (§6.3 item 8, acat-haskell-surface-ygy):
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-03 Sat 01:45]
-:MODIFIED: [2026-10-03 Sat 01:45]
+:MODIFIED: [2026-10-03 Sat 03:16]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -14922,6 +15030,20 @@ Non-blocking findings of fess pg-PG2-r1 (fess/pg-PG2-r1.md) on subtask PG2 (read
 3. (low) Record lines 90-104: the revalidations-per-write values (3.06, 1.64, 1.0) come from call-site counters, the 'Of which fresh' column is fitted to reval.fresh 3928, and the 8095 borrowed-loan revalidations are assigned to no site. Fix: state the derivation and account for the unassigned revalidations.
 4. (low) Owner items not yet in the tracker: (a) doc/api/README.md advertises at most 1048576 pending transport bytes per SSE reader, but manager/src keeps no pending-byte count, and only the five-second write deadline enforces the bound (experiment B reached 1665640 bytes); (b) the reader-admission wakeup herd in Store.withStoreReaderLoan, where every wakeup takes a new configuration loan. Fix at the owners (manager SSE writer and Store).
 5. (low) Experiments A, B and A-and-B added three builds and three capacity runs beyond the check list. They stayed temporary and the sources are restored. Experiment A ended at load 18.1, above the rule. No change needed; noted for the ledger.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 711,
+    "issue_id": "acat-sicz",
+    "author": "johnw",
+    "text": "PG3 addressed item 4b by measurement: ordered reader admission in Store.withStoreReaderLoan made the burst slower (18.1 to 18.4 s against 14.7 to 16.0 s), so admission stays unchanged. Decision and data in manager/CAPACITY.md. Item 1 (PID 61004) is gated in acat-n50o.",
+    "created_at": "2026-10-03T10:16:50Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Tooling: PAL cross-model verification unavailable — OpenAI key unexpanded, Gemini key invalid, gemini CLI absent
 :PROPERTIES:
@@ -16368,6 +16490,27 @@ Non-blocking findings of fess audit fess/pd-PD18-r1.md (2026-10-02) on subtask P
 6. (low) ci/emacs.sh:45, emacs/wf-manager-tests.el:45 and README.md (command-test and live-check paragraphs). Lines edited after the final gate run were not refilled. Fix: refill them to the surrounding fill column.
 
 7. (low, deferred) The raw-byte capture command of ext-pi (prepareCapture, POST /v1/captures) is not ported to emacs/wf-manager.el. Fix: port it in a later WM-030 part.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG4
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-uvwy
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 06:15]
+:MODIFIED: [2026-10-03 Sat 06:15]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG4-r1 (report fess/pg-PG4-r1.md in the private evidence directory). The Integrator corrected the manager/README.md cost-ranking sentence and reflowed the paragraph in the PG4 commit. These stay open:
+
+1. (low) manager/src/Agentic/Manager/History.hs observeLegacy: with mapConcurrently the refusal of whichever group fails first wins, where the serial forM raised the refusal of the first failing address. No test covers a refusal in one group while the other groups run, so the README claim that a refusal in one group cancels the other groups has no check. Fix: add a manager-history-check case with an unbound or corrupt address in a late group and assert the refusal.
+2. (low) History.hs legacyObservers and manager/README.md: one file-slot loan now holds up to 24 decode descriptors (8 groups x 3) at the same time, where it held 3. The claim that each decode holds at most three descriptors is inferred from the code. Fix: confirm the count against readRunRecordWithEnvelopesAt, or state the bound for each loan in manager/README.md.
+3. (low) PG/PG4/impl-r1/diagnosis.txt: the before run had load 9.7 to 17.4 and the after run 5.1 to 10.3, so the headline p50 change mixes in the load change. The per-window decode drop (ol-files median 135 to 30 ms) is the primary evidence. Fix: state the per-window figures and the load ranges in the run of record of the gate issue.
+4. (note) retainViews (median 44 to 47 ms per window) is now the largest part of the first page, and the first-page p95 (968 ms) comes from the one-time insertion of 4096 handles in retainLegacyHandles. Both are inside their ceilings.
 
 * TODO [#E] Handoff: cite the fix116b records for the 116-118 squash    :documentation:
 :PROPERTIES:
@@ -24069,7 +24212,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 01:45]
+:MODIFIED: [2026-10-03 Sat 06:15]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -24281,6 +24424,20 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "PG2 (2026-10-03): read-path saturation diagnosis recorded in doc/research/workflow-manager-read-path-diagnosis-2026-10.md (finding 1). Dominant cost: the full-prefix projection replay in State.ingestValidated (restoreProjectionCut, readEnvelope) inside one of the two reader places. With counters at N8: 3208 ingestions replayed 326377 envelopes, at least 652754 of 689919 SQL reads, 36.3 s of the 40.4 s of ingestion reader-place time. Revalidations per SSE write 3.06, facts-read retries about 1.7 per SSE write (secondary). Baseline (uninstrumented): catch-up p50 1713.4 ms and p95 17392.6 ms, reader-complete true, dropped 0, refused 15, terminal observed late (44841.6 ms). PG3 decision: resume replay from a checkpoint first, then split the authorization revision. No run of record: the orphan manager PID 61004 ran during every run. No product source change. Evidence: PG/PG2/impl-r1 in the private evidence directory, fess pg-PG2-r1. Finding 1 stays open until PG3.\n",
     "created_at": "2026-10-03T08:45:26Z"
+  },
+  {
+    "id": 710,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PG3 (read-path fix): an authorization revision apart from the reader wakeup cell (Store, Credentials, Authorization) and a held validated projection per run (State, Store). Evidence PG/PG3/impl-r2: build, manager-store-check N8, manager-command-check N8, credential-lifecycle, events-lifecycle, routes N8, Phase A journey N8 and make -C doc check exited 0. capacity-streams N8: catch-up p50 3.4 ms, p95 128.8 ms, reader-complete true, dropped-reads 0, 0 of 14 keys outside ceilings, but not a run of record because stale PF17 PID 61004 ran (gated, acat-n50o). Fess pg-PG3-r2 non-blocking, follow-up acat-0rda.",
+    "created_at": "2026-10-03T10:16:50Z"
+  },
+  {
+    "id": 712,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PG4 (2026-10-03): WM-041 low finding 'page-set first-page median' and report section 4 low 'Page-set paragraphs'. Dominant cost before the fix: the serial decode of the 256 legacy entries of the first window in History.observeLegacy (observeEntry, readRunRecordWithEnvelopesAt), 175 to 205 ms of a first-page build of 259 to 324 ms (median 265 ms, instrumented, load 9.7 to 17.4). Per entry: events.ndjson 214.5 us, supervisor-manifest 94.4 us, owner.json 80.7 us, program.json 63.0 us, manifest.json 59.6 us. +RTS -s: productivity 93.9 percent, GC 0.88 s of 14.35 s CPU. The four listed candidate causes were rejected (no repeated manifest reads, one window materialized, encoding 1 to 4 ms, view checks 0 to 11 us). Fix: observeLegacy decodes in at most eight contiguous groups with mapConcurrently and keeps address order; per-window decode median 135 to 30 ms. capacity-inputs at N8 (uninstrumented): first-page p50 131.2 ms, p95 968 ms, 0 of 43 keys outside their ceilings, start loads 5.66 to 12.44, but not a run of record (PID 61004 present), gated in acat-jkas. pages mode at N8 (10 cases), manager-history-check at N8 (133 PASS), JOURNEY-ONCE(pg4, 8) and make -C doc check passed. doc/api/README.md 'Pages and live delivery' now limits the one-revision statement to single-window sets. Evidence: PG/PG4/impl-r1 and PG/PG4/integrator in the private evidence directory, fess pg-PG4-r1, follow-ups acat-uvwy.\n",
+    "created_at": "2026-10-03T13:15:16Z"
   }
 ]
 #+end_src
@@ -24453,7 +24610,7 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-01 Thu 09:52]
+:MODIFIED: [2026-10-03 Sat 06:57]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-042
 :SOURCE_REPO: agent-cat
@@ -24629,6 +24786,13 @@ recipe that ignores WAL or unresolved effects.
     "author": "johnw",
     "text": "Phase C closeout: PC1 to PC3 (typed status, check-store, check-quarantine with cleanup evidence, release-quarantine) meet the quarantine finding, with gate steps 5 and 8 (failures-manager, PC/PC34/impl-r1 in the private resume-20260923 directory). WM-042 stays partial: reload-profiles, drain and shutdown still answer state-conflict, and a launched run with no terminal record cannot be released (acat-phase-c-review-findings-hwxy item 1).",
     "created_at": "2026-10-01T16:52:42Z"
+  },
+  {
+    "id": 713,
+    "issue_id": "acat-wm-042-sdg9",
+    "author": "johnw",
+    "text": "PG5 (2026-10-03): reload-profiles is implemented. Live: typed ReloadProfiles constructor, ServeHooks passed through serveManager into withLocalAdministration; reloadServing appends a command record, runs reloadManagerConfiguration, probes the profiles, advances the authorization revision, wakes admission and appends a receipt that agentic-run flow decodes (ReloadAdministration). Answers the frozen {profileIds, revision}; revision is the hex SHA-256 of the sorted (profileId, profile revision) pairs. An invalid file or a changed managerRoot, administrationRoot or https section answers state-conflict, an unreadable file storage-unavailable, and the old profiles keep serving. Offline (no administrationRoot) validates the file before the lease and the Store. manager/COMMANDS.md states the two-configuration rule. Checks passed at N8: build, manager-command-check with command_contract.py and credential_cli.py, service_http.py operations (new mode, case 1) and credential-lifecycle (rerun by fess on the final source), update-haskell-inventory and check-haskell, JOURNEY-ONCE(pg5, 8), make -C doc check. Evidence: PG/PG5 in the private evidence directory, fess pg-PG5-r1 (not blocking; findings in acat-g971). WM-042 stays open: drain and shutdown still answer state-conflict.",
+    "created_at": "2026-10-03T13:57:48Z"
   }
 ]
 #+end_src

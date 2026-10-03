@@ -6,7 +6,7 @@ module Agentic.Cli.LocalAdmin (runLocalAdmin) where
 
 import Agentic.Manager.Configuration
 import Agentic.Manager.LocalAdmin (administerLocally, callLocalAdministration)
-import Agentic.Manager.Profile (Diagnostic)
+import Agentic.Manager.Profile (Diagnostic (UnreadableConfiguration), publicId, publicRevision)
 import Agentic.Manager.Protocol.LocalAdmin
 import Agentic.Manager.Quarantine (StoreState (StoreStopped), unavailableStoreCheck)
 import Agentic.Manager.Store (CoordinationStore, StoreFailure, withCoordinationStore)
@@ -20,7 +20,9 @@ import System.IO (stdin, stdout)
 
 -- A configured channel is authoritative even when unavailable. Only omission
 -- selects offline ownership, including the normal restart reconciliation.
--- Operations without an implementation refuse before either path.
+-- Operations without an implementation refuse before either path. Offline
+-- reload-profiles validates the given file through the loader and answers
+-- before the configuration lease and the Store are acquired.
 runLocalAdmin :: (FilePath -> IO (Either Diagnostic Configuration)) -> FilePath -> IO ()
 runLocalAdmin load path = do
   input <- try @IOException (BS.hGet stdin 2097153)
@@ -36,13 +38,16 @@ runLocalAdmin load path = do
               OtherAdmin _ -> pure (adminError (Just (adminOperation request)) StateConflict)
               _ -> do
                 configuration <- load path
-                case configuration of
-                  Left _ -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
-                  Right value -> do
+                case (request, configuration) of
+                  (ReloadProfiles, Left UnreadableConfiguration) -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
+                  (ReloadProfiles, Left _) -> pure (adminError (Just (adminOperation request)) StateConflict)
+                  (_, Left _) -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
+                  (_, Right value) -> do
                     live <- callLocalAdministration value bytes
-                    case live of
-                      Just response -> pure response
-                      Nothing -> do
+                    case (live, request) of
+                      (Just response, _) -> pure response
+                      (Nothing, ReloadProfiles) -> validateOffline value
+                      (Nothing, _) -> do
                         installed <- installConfiguration value
                         case installed of
                           Left _ -> pure (adminError (Just (adminOperation request)) StorageUnavailable)
@@ -56,13 +61,23 @@ runLocalAdmin load path = do
     Right (Object fields) | KM.lookup "ok" fields == Just (Bool True) -> exitSuccess
     _ -> exitFailure
 
+-- | Offline @reload-profiles@: validate the profiles of the loaded file as an
+-- installation would and answer their identifiers and the revision of the
+-- validation registry. Nothing is installed.
+validateOffline :: Configuration -> IO BS.ByteString
+validateOffline value = do
+  validated <- validateConfigurationProfiles value
+  pure $ case validated of
+    Left _ -> adminError (Just "reload-profiles") StateConflict
+    Right profiles -> adminSuccess "reload-profiles" (reloadedProfiles [(publicId profile, publicRevision profile) | profile <- profiles])
+
 -- | Offline administration on a Store that this process opens. A Store that
 -- cannot be opened answers @check-store@ with integrity @unavailable@. Every
 -- other failure keeps its existing mapping.
 offline :: LocalAdminRequest -> ((CoordinationStore -> IO BS.ByteString) -> IO BS.ByteString) -> IO BS.ByteString
 offline request open = do
   entered <- newIORef False
-  result <- try @StoreFailure (open (\store -> writeIORef entered True >> administerLocally StoreStopped (pure ()) store request))
+  result <- try @StoreFailure (open (\store -> writeIORef entered True >> administerLocally StoreStopped (pure ()) Nothing store request))
   opened <- readIORef entered
   case (request, result) of
     (_, Right response) -> pure response

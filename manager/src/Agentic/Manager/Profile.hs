@@ -102,8 +102,11 @@ data QueryLimits = QueryLimits
   { queryBytes :: !Int, queryMicros :: !Int }
 
 -- | Fixed failure categories. No process output or exception text is retained.
+-- 'UnreadableConfiguration' is a configuration file that cannot be read as a
+-- private file of the user. 'InvalidConfiguration' is every other refusal of
+-- a configuration.
 data Diagnostic
-  = InvalidConfiguration | UnknownProfile | StaleRevision | Quarantined
+  = InvalidConfiguration | UnreadableConfiguration | UnknownProfile | StaleRevision | Quarantined
   | SupervisionUnavailable | UnsupportedOperation | OutputOverflow
   | QueryTimeout | ProcessFailure | InvalidReply | RunnerVersionMismatch
   deriving (Eq, Show)

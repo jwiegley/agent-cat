@@ -73,12 +73,26 @@ consent_control = len(sys.argv) == 6 and sys.argv[5] == "tui-consent-control"
 # protected manager with the existing local administration operations only:
 # rotation overlap and cutoff, a receipt replay across rotation, revocation
 # during retained responses with the live run completed by a second
-# credential, the scope boundary, and the absence of bearer and marker bytes
-# from every fixture file. Each numbered step prints its own PASS line. It
-# runs one manager lifetime and does not enter the restart loop.
+# credential, the scope boundary after a live profile reload, and the
+# absence of bearer and marker bytes from every fixture file. Each numbered
+# step prints its own PASS line. It runs one manager lifetime and does not
+# enter the restart loop.
 LIFECYCLE = "credential-lifecycle"
 lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
-mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-client-controls", "emacs-client", "emacs-client-controls", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline", "emacs-service", "emacs-service-broken-answer") + JOURNEYS
+# The operations mode checks the WM-042 operations of the local
+# administration channel through the running protected manager. Case 1 is
+# reload-profiles: a live reload that adds a profile, a live reload that
+# changes the profile revisions, so that a review prepared before it refuses
+# approval with stale-revision while a new request completes, an invalid file
+# and a changed https section that are refused while the old profiles keep
+# serving, the command and receipt of each live reload in the manager log,
+# and offline validation through the offline configuration, which changes no
+# Store file. Each case prints its own PASS line. It runs one manager
+# lifetime. The manager has two execution reservations, so that the stale
+# review and the new request do not wait for each other.
+OPERATIONS = "operations"
+operations_mode = len(sys.argv) == 6 and sys.argv[5] == OPERATIONS
+mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, OPERATIONS, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-client-controls", "emacs-client", "emacs-client-controls", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline", "emacs-service", "emacs-service-broken-answer") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # The boundary mode checks WM-024 through the running protected manager with
 # raw socket and ssl connections: plaintext and TLS 1.2 refusal, request
@@ -2488,6 +2502,8 @@ if (mixed and not client_controls_mode) or tui_mode in (OVERVIEW, TUI_FAILURES, 
         targetLabel="Deterministic ACP retry", targetArguments=["--engine", "acp", "--adapter", "mixed-adapter"],
         environment=[{"name": "PATH", "value": str(adapters)}]
         + ([{"name": "ACAT_PAGES_MARKER", "value": PAGES_ENVIRONMENT_MARKER}] if pages_mode else []))
+if operations_mode:
+    configuration["limits"]["executionReservations"] = 2
 # The tui-overview mode runs two mixed-controls runs at once and queues a
 # third request behind them. The manager has two execution reservations, and
 # each of its two profiles has its own resource key, so one run of each
@@ -2659,10 +2675,11 @@ config.write_text(json.dumps(configuration))
 config.chmod(0o600)
 
 
-def administration(payload, refused=None):
-    """One local administration exchange. It must succeed, or, when refused
-    names an error code, it must refuse with exactly that code."""
-    completed = subprocess.run([str(runner), "--manager", "admin", "--config", str(config)],
+def administration(payload, refused=None, path=None):
+    """One local administration exchange through the given configuration
+    file, or else the configuration of the manager. It must succeed, or, when
+    refused names an error code, it must refuse with exactly that code."""
+    completed = subprocess.run([str(runner), "--manager", "admin", "--config", str(path or config)],
                                input=json.dumps(payload).encode(), stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, timeout=20)
     value = frozen.parse_json(completed.stdout)
@@ -4199,10 +4216,12 @@ def credential_lifecycle():
                   "artifact download and new POST each returned 401 and its open stream ended; B then saw the run owned,",
                   "answered the question, and the run reached terminal success with verified bytes", flush=True)
 
-            # Step 4. The scope boundary. The administration command refuses
-            # reload-profiles, and no local operation changes the scopes or
+            # Step 4. The scope boundary. A live reload-profiles of the
+            # unchanged file installs new profile revisions and keeps the
+            # profile identifiers. No local operation changes the scopes or
             # profiles of a credential, so an observe-only credential shows it.
-            administration({"version": 1, "operation": "reload-profiles"}, refused="state-conflict")
+            reloaded = administration({"version": 1, "operation": "reload-profiles"})["result"]
+            assert reloaded["profileIds"] == ["profile_1"], ("live reload-profiles", reloaded)
             credential_o, o_auth = issue("o", ["observe"])
             for path in ("/v1/profiles", base, base + "/control", base + "/outputs"):
                 status, value = status_of(path, o_auth)
@@ -4216,7 +4235,7 @@ def credential_lifecycle():
                 status, value = status_of("/v1/requests", authorized, method="POST", payload=create,
                                           headers={"Content-Type": "application/json", "Idempotency-Key": key})
                 assert status == 403 and value["code"] == "insufficient-scope", ("submit without scope", name, status)
-            print("PASS credential-lifecycle step 4: the administration command refused reload-profiles with state-conflict; an",
+            print("PASS credential-lifecycle step 4: a live reload-profiles of the unchanged file kept profile_1; an",
                   "observe-only credential read the run with 200, and received 403 insufficient-scope for the enqueue receipt",
                   "and for POST, as did B without submit; B presenting the retained page token of A' received 410 view-expired",
                   "while A' then read that page", flush=True)
@@ -4258,6 +4277,179 @@ def credential_lifecycle():
 
 if lifecycle:
     credential_lifecycle()
+    raise SystemExit(0)
+
+
+def operations_checks():
+    """WM-042 operations through the real HTTPS manager. Case 1 is
+    reload-profiles. Store-level and channel facts stay with
+    manager/test/CommandCheck.hs and credential_cli.py."""
+    authorized = {"Authorization": "Bearer " + bearer}
+    reload = {"version": 1, "operation": "reload-profiles"}
+    served = json.loads(config.read_text())
+    # The administration command reaches the serving manager through a copy
+    # of the served file, so that a refused served file still has a client.
+    client_config = work / "admin-client.json"
+    client_config.write_text(json.dumps(served))
+    client_config.chmod(0o600)
+
+    def serve_file(value):
+        config.write_text(json.dumps(value))
+        config.chmod(0o600)
+
+    def profiles(authorized):
+        status, page, raw = request("/v1/profiles", authorized)
+        assert status == 200 and page["page"]["next"] is None, ("profiles", status)
+        validate("ProfilePage", page, raw)
+        return {item["id"]: item for item in page["items"]}
+
+    def catalogue_workflow(authorized):
+        status, catalogue, raw = request("/v1/workflows?profileId=profile_1", authorized)
+        assert status == 200, ("workflows", status)
+        validate("WorkflowPage", catalogue, raw)
+        return next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+
+    def create_request(capabilities, workflow):
+        body = json.dumps({"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                           "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]},
+                          separators=(",", ":")).encode()
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        status, created, raw = request("/v1/requests", authorized | {
+            "Content-Type": "application/json", "Idempotency-Key": key}, method="POST", payload=body)
+        assert status == 201, ("request creation", status, created.get("code"))
+        validate("Request", created, raw)
+        return created
+
+    def store_files():
+        root = Path(served["managerRoot"])
+        return {str(path): (path.stat().st_size, path.stat().st_mtime_ns) for path in root.rglob("*") if path.is_file()}
+
+    with_second = dict(served, profiles=served["profiles"] + [dict(served["profiles"][0], id="profile_2",
+                                                                   workspaceLabel="HTTPS operations fixture")])
+    with (work / "server-0.stdout").open("wb") as output, (work / "server-0.stderr").open("wb") as errors:
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        try:
+            wait_ready(process)
+            status, capabilities, raw = request("/v1/capabilities", authorized)
+            assert status == 200
+            validate("Capabilities", capabilities, raw)
+            initial = profiles(authorized)
+            assert sorted(initial) == ["profile_1"] and initial["profile_1"]["readiness"] == "ready", initial
+
+            # 1a. A live reload that adds a profile.
+            serve_file(with_second)
+            added = administration(reload, path=client_config)["result"]
+            assert added["profileIds"] == ["profile_1", "profile_2"], added
+            issued = administration({"version": 1, "operation": "issue-credential", "label": "Operations profile 2",
+                                     "scopes": ["observe"], "profileIds": ["profile_2"],
+                                     "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential-second")},
+                                    path=client_config)
+            second_auth = {"Authorization": "Bearer " + (work / "credential-second").read_bytes().decode("ascii")}
+            second = profiles(second_auth)
+            assert sorted(second) == ["profile_2"] and second["profile_2"]["readiness"] == "ready", second
+            first = profiles(authorized)
+            assert first["profile_1"]["revision"] != initial["profile_1"]["revision"], (initial, first)
+            expected = hashlib.sha256(json.dumps(sorted([["profile_1", first["profile_1"]["revision"]],
+                                                         ["profile_2", second["profile_2"]["revision"]]]),
+                                                 separators=(",", ":")).encode()).hexdigest()
+            assert added["revision"] == expected, ("the profile-set revision", added["revision"], expected)
+            print("PASS operations case 1a: a live reload-profiles added profile_2 without a restart; GET /v1/profiles showed it",
+                  "ready to credential", issued["result"]["credential"]["credentialId"], "and a new revision of profile_1, and the",
+                  "answer carried the profile identifiers and the SHA-256 revision", added["revision"], flush=True)
+
+            # 1b. A review prepared before a revision change refuses approval
+            # with stale-revision. A request created after the reload completes.
+            workflow = catalogue_workflow(authorized)
+            client = mixed_client(capabilities, authorized)
+            observed, wait_for, _, _ = client
+            stale = create_request(capabilities, workflow)
+            enqueue_mixed(stale, workflow, client)
+            current, _, _ = wait_for(stale["links"]["self"], "Request", lambda value: value["preparationId"] is not None)
+            preparation, tag, _ = observed("/v1/preparations/" + current["preparationId"], "Preparation")
+            assert preparation["state"] == "live" and preparation["profileRevision"] == workflow["profileRevision"], preparation
+            changed = administration(reload, path=client_config)["result"]
+            assert changed["profileIds"] == ["profile_1", "profile_2"] and changed["revision"] != added["revision"], (added, changed)
+            selectors = ("reviewDigest", "requestRevision", "profileRevision", "descriptorRevision", "processGeneration")
+            key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+            status, problem, _ = request("/v1/preparations/" + preparation["id"], authorized | {
+                "Content-Type": "application/json", "Idempotency-Key": key, "If-Match": tag}, method="POST",
+                payload=json.dumps({"operation": "approve", **{name: preparation[name] for name in selectors}},
+                                   separators=(",", ":")).encode())
+            assert status == 412 and problem["code"] == "stale-revision", ("the approval of the stale review", status, problem.get("code"))
+            fresh_workflow = catalogue_workflow(authorized)
+            assert fresh_workflow["profileRevision"] not in (workflow["profileRevision"], initial["profile_1"]["revision"]), fresh_workflow
+            fresh = create_request(capabilities, fresh_workflow)
+            run = run_mixed(fresh, fresh_workflow, capabilities, authorized)
+            print("PASS operations case 1b: after a second live reload the review", preparation["id"], "prepared under revision",
+                  workflow["profileRevision"], "refused approval with 412 stale-revision, and request", fresh["id"],
+                  "created under revision", fresh_workflow["profileRevision"], "completed as run", run, "with verified bytes", flush=True)
+
+            # 1c. An invalid file and a changed https section are refused, and
+            # the old profiles keep serving.
+            before = profiles(authorized), profiles(second_auth)
+            serve_file(dict(with_second, profiles=with_second["profiles"] + [with_second["profiles"][0]]))
+            administration(reload, refused="state-conflict", path=client_config)
+            serve_file(dict(with_second, https=dict(with_second["https"], allowedOrigins=["https://other.invalid"])))
+            administration(reload, refused="state-conflict", path=client_config)
+            config.chmod(0o644)
+            administration(reload, refused="storage-unavailable", path=client_config)
+            serve_file(with_second)
+            after = profiles(authorized), profiles(second_auth)
+            assert after == before, ("the profiles after refused reloads", before, after)
+            assert catalogue_workflow(authorized)["profileRevision"] == fresh_workflow["profileRevision"]
+            print("PASS operations case 1c: a served file with a duplicate profile and one with a changed https section were",
+                  "refused with state-conflict, an unreadable served file with storage-unavailable, and both profiles kept",
+                  "their revisions and readiness", flush=True)
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=25)
+            (work / "server-0.exit").write_text(str(process.returncode) + "\n")
+    assert process.returncode == 0, ("the manager exit", process.returncode)
+
+    # 1d. The manager log holds each live reload as a command and its receipt.
+    flow_dir = work / "manager" / "flow"
+    stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+    status, records, summary = read_flow("operations-flow", [flow_dir] + stores, runner)
+    assert status == 0 and summary["verified"] and not summary["problems"], ("the flow verb", status, summary["problems"])
+    commands = [record for record in records if record["schema"] == "command"
+                and record["body"].get("administration") == "reload-profiles"]
+    assert len(commands) == 5 and all(record["body"] == {"administration": "reload-profiles"} for record in commands), commands
+    outcomes = []
+    for record in commands:
+        replies = [reply for reply in records if reply["log"] == record["log"] and reply.get("replyTo") == record["position"]]
+        assert len(replies) == 1 and replies[0]["schema"] == "receipt" and replies[0]["body"]["operation"] == "reload-profiles", (
+            "the receipt of a reload command", record["position"], replies)
+        body = replies[0]["body"]
+        validate("LocalAdminResponse", body)
+        outcomes.append(body["result"]["revision"] if body["ok"] else body["error"]["code"])
+    assert outcomes == [added["revision"], changed["revision"], "state-conflict", "state-conflict", "storage-unavailable"], outcomes
+    print("PASS operations case 1d: the flow verb verified the manager log and decoded", len(commands), "reload-profiles",
+          "commands at", [record["position"] for record in commands], "each with one receipt:", outcomes, flush=True)
+
+    # 1e. The offline configuration is the served file without
+    # administrationRoot. Offline reload-profiles validates it through the
+    # loader without the configuration lease and without the Store.
+    offline_config = work / "offline.json"
+    offline = {name: value for name, value in with_second.items() if name != "administrationRoot"}
+    offline_config.write_text(json.dumps(offline))
+    offline_config.chmod(0o600)
+    before = store_files()
+    assert any(name.endswith("coordination.sqlite3") for name in before), sorted(before)
+    validated = administration(reload, path=offline_config)["result"]
+    assert validated["profileIds"] == ["profile_1", "profile_2"] and validated["revision"] not in outcomes, validated
+    offline_config.write_text(json.dumps(dict(offline, profiles=offline["profiles"] * 2)))
+    administration(reload, refused="state-conflict", path=offline_config)
+    assert store_files() == before, "offline reload-profiles changed a Store file"
+    print("PASS operations case 1e: offline reload-profiles validated the offline configuration with", validated["profileIds"],
+          "and refused a duplicate profile with state-conflict;", len(before), "Store files kept their sizes and modification times",
+          flush=True)
+    print("PASS operations: reload-profiles case 1 held through the TLS 1.3 manager", flush=True)
+
+
+if operations_mode:
+    operations_checks()
     raise SystemExit(0)
 
 

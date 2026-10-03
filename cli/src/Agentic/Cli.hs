@@ -982,7 +982,7 @@ managerServeCmd reg path legacy = do
   unless (isAbsolute path) (die reg 1 "manager --config requires an absolute file")
   withManagerSignals $ (do
     configuration <- loadManagerConfiguration reg path >>= either throwIO pure
-    Manager.serveManager configuration legacy)
+    Manager.serveManager (Manager.ServeHooks (\installed -> reloadManagerConfiguration reg installed path)) configuration legacy)
     `catches`
       [ Handler $ \(_ :: Manager.Diagnostic) ->
           die reg 1 "manager configuration or HTTPS listener is unavailable",

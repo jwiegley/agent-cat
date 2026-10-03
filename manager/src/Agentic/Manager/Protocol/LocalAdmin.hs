@@ -5,7 +5,7 @@
 -- | The frozen local stdin request and metadata-only response vocabulary.
 module Agentic.Manager.Protocol.LocalAdmin
   ( LocalAdminRequest (..), adminOperation, validAdminRequest, decodeLocalAdminRequest,
-    AdminFailure (..), adminFailureCode, adminError, adminSuccess,
+    AdminFailure (..), adminFailureCode, adminError, adminSuccess, reloadedProfiles,
     CredentialMetadata (..), validCredentialMetadata, validLocalFile
   ) where
 
@@ -14,14 +14,18 @@ import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Control.DeepSeq (NFData)
 import Control.Exception (Exception)
 import Control.Monad (unless)
+import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (Value (..), ToJSON (toJSON), object, (.:), (.=))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
 import Data.Aeson.Types (Object, Parser, parseEither)
 import qualified Data.ByteString as BS
+import Data.List (sort)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import Data.ByteArray.Encoding (Base (Base16), convertToBase)
 import GHC.Generics (Generic)
 
 -- No Show instance: selected local paths must not enter diagnostics.
@@ -36,6 +40,10 @@ data LocalAdminRequest
   | -- | The quarantine identity, the cleanup evidence identity and the
     -- cleanup evidence digest that a @check-quarantine@ answer returned.
     ReleaseQuarantine !Text !Text !Text
+  | -- | Load the configuration file again and install its profiles. A serving
+    -- manager reloads the file that it serves. Offline administration only
+    -- validates the given file.
+    ReloadProfiles
   | OtherAdmin !Text
 
 -- | Fixed refusals. Storage failure makes no assertion about publication or COMMIT.
@@ -70,11 +78,11 @@ adminOperation request = case request of
   CheckStore -> "check-store"
   CheckQuarantine _ -> "check-quarantine"
   ReleaseQuarantine {} -> "release-quarantine"
+  ReloadProfiles -> "reload-profiles"
   OtherAdmin name -> name
 
 otherOperations :: [Text]
-otherOperations = ["reload-profiles", "drain", "shutdown",
-  "backup", "restore"]
+otherOperations = ["drain", "shutdown", "backup", "restore"]
 
 validLocalFile :: FilePath -> Bool
 validLocalFile path = let value = T.pack path in T.length value >= 2 && T.length value <= 8192
@@ -103,6 +111,7 @@ validAdminRequest request = case request of
   CheckStore -> True
   CheckQuarantine ident -> validId ident
   ReleaseQuarantine ident evidence digest -> validId ident && validId evidence && validDigest digest
+  ReloadProfiles -> True
   OtherAdmin name -> name `elem` otherOperations
 
 decodeLocalAdminRequest :: BS.ByteString -> Either AdminFailure LocalAdminRequest
@@ -112,7 +121,7 @@ decodeLocalAdminRequest bytes
       value <- either (\failure -> Left (if failure == "duplicate-field" then DuplicateField else MalformedRequest)) Right (decodeStrictValue bytes)
       fields <- case value of Object fields -> Right fields; _ -> Left MalformedRequest
       operation <- case KM.lookup "operation" fields of Just (String name) -> Right name; _ -> Left MalformedRequest
-      unless (operation `elem` (["issue-credential","rotate-credential","revoke-credential","list-credentials","status","check-store","check-quarantine","release-quarantine"] <> otherOperations)) (Left UnknownOperation)
+      unless (operation `elem` (["issue-credential","rotate-credential","revoke-credential","list-credentials","status","check-store","check-quarantine","release-quarantine","reload-profiles"] <> otherOperations)) (Left UnknownOperation)
       case KM.lookup "version" fields of
         Just (Number 1) -> Right ()
         Just (Number _) -> Left UnsupportedVersion
@@ -146,6 +155,7 @@ parseRequest operation fields = case operation of
   "check-store" -> pure CheckStore
   "check-quarantine" -> CheckQuarantine <$> fields .: "quarantineId"
   "release-quarantine" -> ReleaseQuarantine <$> fields .: "quarantineId" <*> fields .: "cleanupEvidenceId" <*> fields .: "cleanupEvidenceDigest"
+  "reload-profiles" -> pure ReloadProfiles
   _ -> do
     case operation of
       "backup" -> localFile "outputFile"
@@ -190,3 +200,15 @@ adminSuccess operation result =
   let bytes = encoded $ object ["version" .= (1 :: Int), "operation" .= operation, "ok" .= True, "result" .= result]
   -- Reserve the CLI's terminating newline within the frozen response byte ceiling.
   in if BS.length bytes < 1048576 then bytes else adminError (Just operation) SizeLimit
+
+-- | The result of @reload-profiles@ from the identifier and revision of each
+-- installed profile: the identifiers in ascending order and the profile-set
+-- revision. The revision is the lowercase hexadecimal SHA-256 digest of the
+-- compact JSON array of @[profileId, profileRevision]@ pairs in ascending
+-- order. Equal revisions mean equal profile identifiers with equal profile
+-- revisions.
+reloadedProfiles :: [(Text, Text)] -> Value
+reloadedProfiles profiles = object ["profileIds" .= map fst pairs, "revision" .= digest]
+  where
+    pairs = sort profiles
+    digest = TE.decodeUtf8 (convertToBase Base16 (hash (encoded (map (\(ident, revision) -> [ident, revision]) pairs)) :: Digest SHA256))

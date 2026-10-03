@@ -50,6 +50,10 @@ await label ready = do
 refused :: String -> Either Diagnostic a -> IO ()
 refused label result = check label (case result of Left InvalidConfiguration -> True; _ -> False)
 
+-- | A configuration file that cannot be read as a private file of the user.
+unreadable :: String -> Either Diagnostic a -> IO ()
+unreadable label result = check label (case result of Left UnreadableConfiguration -> True; _ -> False)
+
 field :: Text -> Value -> Value -> Value
 field name value (Object fields) = Object (KM.insert (Key.fromText name) value fields)
 field _ _ _ = error "fixture field expects object"
@@ -256,19 +260,19 @@ checks work source fixture = do
   BS.writeFile path (encoded <> BS.replicate (2097152 - BS.length encoded) 32)
   void (Cli.loadManagerConfiguration registry path >>= right)
   BS.appendFile path " "
-  Cli.loadManagerConfiguration registry path >>= refused "file byte ceiling before decode"
+  Cli.loadManagerConfiguration registry path >>= unreadable "file byte ceiling before decode"
   writeValue valid
   setFileMode path 0o644
-  Cli.openManagerConfiguration registry path >>= refused "non-private file refused"
+  Cli.openManagerConfiguration registry path >>= unreadable "non-private file refused"
   setFileMode path 0o600
   forM_ ["relative.json", path <> "\0", work, work </> "missing.json"] $ \badPath ->
-    Cli.openManagerConfiguration registry badPath >>= refused "path or regular-file refusal"
+    Cli.openManagerConfiguration registry badPath >>= unreadable "path or regular-file refusal"
   createSymbolicLink path (work </> "link.json")
-  Cli.openManagerConfiguration registry (work </> "link.json") >>= refused "file symlink refused"
+  Cli.openManagerConfiguration registry (work </> "link.json") >>= unreadable "file symlink refused"
   createSymbolicLink work (work </> "linked-parent")
-  Cli.openManagerConfiguration registry (work </> "linked-parent" </> "operator.json") >>= refused "ancestor symlink refused"
+  Cli.openManagerConfiguration registry (work </> "linked-parent" </> "operator.json") >>= unreadable "ancestor symlink refused"
   createNamedPipe (work </> "fifo") 0o600
-  Cli.openManagerConfiguration registry (work </> "fifo") >>= refused "FIFO refused without blocking"
+  Cli.openManagerConfiguration registry (work </> "fifo") >>= unreadable "FIFO refused without blocking"
   noMarker
   forM_ [[manager], [work], [manager </> "missing-child"]] $ \overlap -> noLaunch $ do
     install (field "localRetentionRoots" (toJSON overlap) valid) >>= refused "overlap before marker"

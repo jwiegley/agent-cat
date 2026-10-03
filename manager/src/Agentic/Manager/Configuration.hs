@@ -4,7 +4,7 @@
 -- | Bounded operator authority and a retained manager-root binding.
 module Agentic.Manager.Configuration
   ( Configuration, TargetValidator, InstalledConfiguration,
-    loadConfiguration, exactPreparedTarget, installConfiguration, reloadConfiguration, closeConfiguration,
+    loadConfiguration, exactPreparedTarget, installConfiguration, reloadConfiguration, closeConfiguration, validateConfigurationProfiles,
     configurationSnapshot, selectConfiguredProfile, probeConfiguredProfile,
     configurationAdministrationRoot, withConfigurationAdministration,
     HttpsConfiguration (..), configurationHttps,
@@ -69,15 +69,26 @@ data ActiveConfiguration = ActiveConfiguration !PrivateRoot !FilePath ![FilePath
 -- nesting beyond 64 containers, unknown fields, and invalid native policy values.
 -- The CLI credential predicate checks every runner prefix without interpreting
 -- wrapper arguments as native target grammar, including unused runner definitions.
+-- A file that cannot be read as a private file of the user, such as an absent
+-- file, a file that others can read or a file above the byte ceiling, gives
+-- 'UnreadableConfiguration'. Every other refusal gives 'InvalidConfiguration'.
 loadConfiguration :: TargetValidator -> PreparedTargetValidator -> (String -> Bool) -> FilePath -> IO (Either Diagnostic Configuration)
 loadConfiguration validateTarget validatePrepared isCredentialArgument path = configurationIO $ do
-  bytes <- readPrivateConfigurationFile path 2097152
+  bytes <- try @IOException (readPrivateConfigurationFile path 2097152) >>= either (const (throwIO UnreadableConfiguration)) pure
   configuration <- requireRight $ do
     value <- either (const (Left InvalidConfiguration)) Right (decodeStrictValue bytes)
     either (const (Left InvalidConfiguration)) Right (parseEither (parseConfiguration validatePrepared isCredentialArgument) value)
   let Configuration _ _ _ profiles _ _ = configuration
   mapM_ (requireRight . validateTarget . operatorTargetArguments) profiles
   pure configuration
+
+-- | Validate the profiles of a loaded configuration as an installation would,
+-- in a validation registry of their own, and return their public projection.
+-- No root, lease or Store is opened, and the registry is discarded, so its
+-- profile revisions equal no installed revision.
+validateConfigurationProfiles :: Configuration -> IO (Either Diagnostic [PublicProfile])
+validateConfigurationProfiles (Configuration _ _ _ profiles _ _) =
+  newRegistry (QueryLimits 4194304 30000000) >>= either (pure . Left) (`reloadProfiles` profiles)
 
 -- | Initial establishment on an existing, durably provisioned private root.
 -- Exclusive service ownership and all configuration checks precede marker publication.

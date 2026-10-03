@@ -876,7 +876,18 @@ the execution slot and resource keys of the reservation, records the release
 and its receipt in the manager log, and returns `quarantineId` with `state`
 `released`. The run of the reservation keeps `lost` supervision. A request
 that waits for capacity on a serving manager is then prepared without another
-client command. The operations `reload-profiles`, `drain`, `shutdown`,
+client command. `reload-profiles` takes no field and returns `profileIds`, in
+ascending order, and `revision`, the lowercase hexadecimal SHA-256 digest of
+the compact JSON array of `[profileId, profileRevision]` pairs in ascending
+order. Through the live channel, the serving manager loads its configuration
+file again and installs the profiles without a restart. A changed
+`managerRoot`, `administrationRoot` or `https` section and every other invalid
+file receive `state-conflict`, a file that cannot be read receives
+`storage-unavailable`, and a refused reload changes nothing. A successful
+reload gives every profile a new revision, so a review prepared under an
+earlier revision refuses approval with `stale-revision`. The manager log
+records the reload and its receipt. Offline, `reload-profiles` only validates
+the given file and opens no Store. The operations `drain`, `shutdown`,
 `backup`, and `restore` receive `state-conflict`.
 Existing `RUNNER --tui` and native frontend commands remain unchanged.
 
@@ -890,7 +901,10 @@ RUNNER --tui --local
 Without `administrationRoot`, administration acquires the original Store through
 local configuration and refuses an already-owned Store. With that private
 directory configured, it reaches the existing owner's Unix socket without a
-second writer or an offline fallback. Trusted embedding hosts this channel with
+second writer or an offline fallback. The operator therefore keeps a serve
+configuration that names `administrationRoot` and an offline configuration,
+the same file without it, which administration uses only when no manager
+serves. Trusted embedding hosts this channel with
 `withLocalAdministration`. Its implementation and authority limits are described
 in [the command contract](../../manager/COMMANDS.md#local-credential-administration).
 

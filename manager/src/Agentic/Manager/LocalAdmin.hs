@@ -2,14 +2,18 @@
 {-# LANGUAGE TypeApplications #-}
 
 -- | A same-user local channel to an existing coordinator, not a second writer.
-module Agentic.Manager.LocalAdmin (withLocalAdministration, callLocalAdministration, administerLocally) where
+module Agentic.Manager.LocalAdmin (withLocalAdministration, callLocalAdministration, administerLocally, ProfileReload) where
 
+import Agentic.Manager.Administration (localAdministrator, recordAdministration, recordAdministrationReceipt)
 import Agentic.Manager.Configuration (Configuration, configurationAdministrationRoot)
 import Agentic.Manager.Credentials (administerCredentials)
+import Agentic.Manager.Flow (AdministrationBody (ReloadAdministration))
+import Agentic.Manager.Profile (Diagnostic (UnreadableConfiguration), PublicProfile, publicId, publicRevision)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Protocol.LocalAdmin
 import Agentic.Manager.Quarantine (StoreState (..), checkQuarantine, releaseQuarantine, reportStatus, reportStoreCheck)
-import Agentic.Manager.Store (CoordinationStore, withStoreAdministration)
+import Agentic.Manager.Store (CoordinationStore, StoreFailure (StoreLimit), advanceAuthorizationRevision, runTransaction,
+  withStoreAdministration, withStoreRequest)
 import Agentic.Runtime (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateRoot, privateRootPath)
 import Control.Concurrent.Async (link, withAsync)
 import Control.Exception (IOException, bracket, finally, throwIO, try)
@@ -30,12 +34,18 @@ import System.Posix.Files (FileStatus, deviceID, fileID, fileMode, fileOwner, ge
 import System.Posix.User (getEffectiveUserID)
 import System.Timeout (timeout)
 
+-- | The profile reload of a serving manager: load its configuration file
+-- again and install the profiles, or refuse and keep the installed profiles.
+type ProfileReload = IO (Either Diagnostic [PublicProfile])
+
 -- | Serve the frozen requests while retaining the original Store configuration
 -- and endpoint lease. The configuration guard is released before any request.
 -- The wake action tells the running admission controller that a committed
--- quarantine release freed its execution slot and resource keys.
-withLocalAdministration :: CoordinationStore -> IO () -> IO a -> IO a
-withLocalAdministration store wake action = do
+-- quarantine release freed its execution slot and resource keys, or that a
+-- profile reload installed new profiles. The reload action performs
+-- @reload-profiles@.
+withLocalAdministration :: CoordinationStore -> IO () -> ProfileReload -> IO a -> IO a
+withLocalAdministration store wake reload action = do
   result <- withStoreAdministration store $ \root -> do
     -- Exclusive directory ownership, not process absence, permits stale-name removal.
     previous <- try @IOException (checkedSocket root)
@@ -63,17 +73,19 @@ withLocalAdministration store wake action = do
             Left _ -> pure (adminError Nothing MalformedRequest)
             Right bytes -> case decodeLocalAdminRequest bytes of
               Left failure -> pure (adminError Nothing failure)
-              Right request -> administerLocally StoreServing wake store request
+              Right request -> administerLocally StoreServing wake (Just reload) store request
           -- Only connection IO has an outer deadline. An admitted mutation is
           -- neither interrupted by this timer nor retried after a lost reply.
           void (try @IOException (boundedIO 5000000 (Net.sendAll connection response)))
 
 -- | Dispatch one decoded request to its owner on the original Store. The live
--- channel passes 'StoreServing' and the wake of its admission controller.
--- Offline administration passes 'StoreStopped' and no wake, since no
--- controller runs.
-administerLocally :: StoreState -> IO () -> CoordinationStore -> LocalAdminRequest -> IO BS.ByteString
-administerLocally state wake store request = case request of
+-- channel passes 'StoreServing', the wake of its admission controller and its
+-- profile reload. Offline administration passes 'StoreStopped', no wake,
+-- since no controller runs, and no reload. Offline @reload-profiles@ only
+-- validates a file, before any Store opens, so without a reload this
+-- dispatch refuses it with 'StateConflict'.
+administerLocally :: StoreState -> IO () -> Maybe ProfileReload -> CoordinationStore -> LocalAdminRequest -> IO BS.ByteString
+administerLocally state wake reload store request = case request of
   Status -> reportStatus state store
   CheckStore -> reportStoreCheck store
   CheckQuarantine ident -> checkQuarantine store ident
@@ -82,7 +94,43 @@ administerLocally state wake store request = case request of
   RotateCredential {} -> administerCredentials store request
   RevokeCredential {} -> administerCredentials store request
   ListCredentials -> administerCredentials store request
+  ReloadProfiles -> maybe (pure (adminError (Just (adminOperation request)) StateConflict)) (reloadServing store wake) reload
   OtherAdmin _ -> administerCredentials store request
+
+-- | @reload-profiles@ on a serving manager. A transaction appends the command
+-- record of the reload to the manager log and commits. The reload then loads
+-- the configuration file and installs its profiles. A successful reload
+-- advances the authorization revision, so that the next revalidation of every
+-- retained view reads the authorization facts again, and wakes the admission
+-- controller. The receipt with the response follows. A file that cannot be
+-- read is refused with 'StorageUnavailable', and every other refusal of the
+-- reload, such as an invalid file or a changed manager root, administration
+-- root or @https@ section, with 'StateConflict'. A refused reload keeps the
+-- installed profiles. A command record that cannot be appended refuses the
+-- reload with 'StorageUnavailable' before it runs.
+reloadServing :: CoordinationStore -> IO () -> ProfileReload -> IO BS.ByteString
+reloadServing store wake reload = do
+  principal <- localAdministrator
+  recorded <- try @IOException (try @AdminFailure (try @StoreFailure (withStoreRequest store $ \scoped ->
+    runTransaction scoped ((\logged -> (logged, [])) <$> recordAdministration scoped principal ReloadAdministration))))
+  case recorded of
+    Right (Right (Right logged)) -> do
+      result <- reload
+      response <- case result of
+        Left UnreadableConfiguration -> pure (failure StorageUnavailable)
+        Left _ -> pure (failure StateConflict)
+        Right profiles -> do
+          advanceAuthorizationRevision store
+          pure (adminSuccess operation (reloadedProfiles [(publicId profile, publicRevision profile) | profile <- profiles]))
+      answered <- recordAdministrationReceipt store principal logged response
+      either (const (pure ())) (const wake) result
+      pure answered
+    Right (Right (Left StoreLimit)) -> pure (failure SizeLimit)
+    Right (Left refusal) -> pure (failure refusal)
+    _ -> pure (failure StorageUnavailable)
+  where
+    operation = "reload-profiles"
+    failure = adminError (Just operation)
 
 -- | Nothing selects the existing offline path. A configured channel failure
 -- never reopens the Store or retries the request through another path.

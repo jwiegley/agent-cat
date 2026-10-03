@@ -64,9 +64,10 @@ fields, unknown fields, unknown operations, malformed input, and oversized input
 refuse before dispatch with `operation: null`. Errors do not reflect input or
 parser diagnostics. The implemented operations are `issue-credential`,
 `rotate-credential`, `revoke-credential`, `list-credentials`, `status`,
-`check-store`, `check-quarantine`, and `release-quarantine`. The other
-recognized operations, `reload-profiles`, `drain`, `shutdown`, `backup`, and
-`restore`, receive `state-conflict` before the CLI reads the configuration.
+`check-store`, `check-quarantine`, `release-quarantine`, and
+`reload-profiles`. The other recognized operations, `drain`, `shutdown`,
+`backup`, and `restore`, receive `state-conflict` before the CLI reads the
+configuration.
 
 `status` and `check-store` are read-only. They change no Store row and append
 nothing to the manager log. `status` returns the authority epoch and stream
@@ -146,8 +147,11 @@ an already-owned installation and retains ordinary Store restart reconciliation.
 When that directory is configured, the CLI sends the same request to its private
 Unix socket and never opens a second Store or falls back after a channel failure.
 
-Trusted embedding uses `withLocalAdministration store action` to retain a local
-channel during the action. The original Store supplies its installed directory
+Trusted embedding uses `withLocalAdministration store wake reload action` to
+retain a local channel during the action. `wake` notifies the admission
+controller, and `reload` performs `reload-profiles`. `serveManager` builds
+`reload` from the `serveReload` member of its `ServeHooks` argument, which the
+CLI supplies. The original Store supplies its installed directory
 binding and retains the configuration lease. A separate exclusive directory
 lease prevents duplicate listeners and authorizes removal of a stale socket name.
 Regular files and symbolic links are not removed. A scoped listener removes only
@@ -271,6 +275,58 @@ block. It therefore makes one check for each such write and not one for each
 block, and at most one of those checks in each second reads the facts while
 the authorization revision is unchanged. No owner recalls bytes that it has already sent.
 
+### Two configurations for one manager root
+
+The operator keeps two configuration files for one `managerRoot`:
+
+- The serve configuration names `administrationRoot`. `RUNNER --manager serve`
+  uses it, and `RUNNER --manager admin` uses it to reach the serving manager.
+  A configured `administrationRoot` is authoritative even when no manager
+  serves. The command then refuses with `storage-unavailable` and never falls
+  back to offline administration.
+- The offline configuration is the same file without `administrationRoot`.
+  `RUNNER --manager admin` uses it only when no manager serves. Offline
+  administration acquires the configuration lease, so a serving manager
+  refuses it with `storage-unavailable`. Offline `reload-profiles` is the
+  exception: it takes no lease, as the next section states.
+
+### Profile reload
+
+`reload-profiles` has no request field. Its result is the frozen
+`profileIds` and `revision`. `profileIds` holds the identifiers of the
+profiles in ascending order. `revision` is the lowercase hexadecimal SHA-256
+digest of the compact JSON array of `[profileId, profileRevision]` pairs in
+ascending order of identifier, for example
+`[["profile_1","r1"],["profile_2","r2"]]`.
+
+Through the live channel, the serving manager loads its serve configuration
+file again with the loader of the CLI and installs it with
+`reloadConfiguration`. The reload refuses a changed `managerRoot`,
+`administrationRoot` or `https` section, and every other invalid file, with
+`state-conflict`. A file that cannot be read as a private file of the user,
+such as an absent file, a file that others can read or a file above 2 MiB,
+refuses with `storage-unavailable`. A refused reload changes nothing, and the
+installed profiles keep serving. A successful reload installs every profile
+with a new profile revision, even when its values did not change. The
+manager then probes each profile as at the start,
+advances the authorization revision of the Store, so that the next
+revalidation of each retained view reads the authorization facts again, and
+notifies its admission controller. `GET /v1/profiles` shows an added profile
+without a restart, and a credential can then be issued for it. A review that
+was prepared under an earlier profile revision refuses approval with 412
+`stale-revision`, and its preparation becomes invalid with the reason
+`profile-changed`. A request that is created under the new revision proceeds
+as usual. The manager log holds the reload as a `command` record and the
+response as its `receipt`, as the section "Manager log records" states.
+
+Offline, with the offline configuration, `reload-profiles` validates the
+given file through the same loader and validates its profiles in a
+validation registry of their own. It answers before it acquires the
+configuration lease and opens no Store, so a serving manager does not refuse
+it and no Store file changes. Its `revision` comes from that discarded
+registry and equals no installed revision. An invalid file refuses with
+`state-conflict` and an unreadable file with `storage-unavailable`.
+
 ## Credential lifecycle through the serving manager
 
 A serving manager applies credential administration to live HTTPS traffic as
@@ -304,9 +360,9 @@ listener, with a live mixed-controls run.
 - Scopes limit each operation. A credential with only `observe` reads runs,
   controls, and outputs, and receives 403 `insufficient-scope` for a POST and
   for the receipt of a command whose operation needs another scope. No local
-  operation changes the scopes or profiles of an existing credential. The
-  administration command refuses `reload-profiles` with `state-conflict`
-  before it reaches any manager, offline or serving.
+  operation changes the scopes or profiles of an existing credential. A live
+  `reload-profiles` gives each profile a new revision and keeps these
+  scopes.
 - The manager does not write a bearer to its output, its manager log, a run
   store, or the database. The database keeps only the SHA-256 verifier. A
   worker receives only the explicit environment of its profile, not the
@@ -503,8 +559,8 @@ a request ending or a review ending, and `recordReceipt` appends them after the
 receipt or after the gap entry of a failed receipt. A replay appends none.
 
 The local administration channel of a serving manager records its credential
-operations and its quarantine releases in the same log, through the shared
-helper `Agentic.Manager.Administration`. `administerCredentials` appends the
+operations, its quarantine releases and its profile reloads in the same log,
+through the shared helper `Agentic.Manager.Administration`. `administerCredentials` appends the
 `command` record of `issue-credential`, `rotate-credential` and
 `revoke-credential`, and `releaseQuarantine` appends the `command` record of
 `release-quarantine`, as the last step of the operation transaction, after its
@@ -516,7 +572,12 @@ rotates to or revokes, the credential that a rotation supersedes, and the label,
 scopes, profiles and expiry of that credential. The bearer, its verifier and the
 output file never enter a record. The body of a release names the
 reservation, its request, and the cleanup evidence identity and digest that
-the release verified. The appends use the ceiling with which the
+the release verified. The body of a profile reload holds only the
+operation. Its transaction appends only the `command` record and commits
+before the reload runs, because the reload changes no Store row. The
+`receipt` then carries the result or the refusal. A lifetime that ends
+between the two leaves the reload `outcome-uncertain` at the next open. The
+appends use the ceiling with which the
 lifetime opened its log, so a revocation still takes no configuration lock. The
 writer synchronizes the record. A failed append, or a decoded record that
 differs from the operation, refuses the operation with `storage-unavailable`,

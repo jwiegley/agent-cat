@@ -28,9 +28,9 @@ config.write_text(json.dumps(configuration))
 config.chmod(0o600)
 
 
-def call(request):
+def call(request, path=None):
     payload = request if isinstance(request, bytes) else json.dumps(request).encode()
-    result = subprocess.run([str(runner), "--manager", "admin", "--config", str(config)],
+    result = subprocess.run([str(runner), "--manager", "admin", "--config", str(path or config)],
                             input=payload, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
     assert not result.stderr, "admin diagnostics must not contain private input or paths"
     assert len(result.stdout) <= 1048576, "bounded JSON including terminating newline"
@@ -53,9 +53,34 @@ for payload, code in [
     assert value["operation"] is None and value["error"]["code"] == code
     assert value["error"]["message"] == ""
 
-for operation in ["reload-profiles", "drain", "shutdown"]:
+for operation in ["drain", "shutdown"]:
     value = call({"version": 1, "operation": operation})
     assert not value["ok"] and value["error"]["code"] == "state-conflict"
+
+
+def store_files():
+    root = Path(configuration["managerRoot"])
+    return {str(path): (path.stat().st_size, path.stat().st_mtime_ns) for path in root.rglob("*") if path.is_file()}
+
+
+# Offline reload-profiles validates the file through the loader. It takes no
+# configuration lease and opens no Store, so no Store file changes.
+RELOAD = {"version": 1, "operation": "reload-profiles"}
+profile_ids = sorted(profile["id"] for profile in configuration["profiles"])
+before = store_files()
+assert before, "the offline configuration names no Store files"
+validated = call(RELOAD)
+assert validated["ok"] and validated["result"]["profileIds"] == profile_ids, validated
+assert len(validated["result"]["revision"]) == 64, validated
+invalid = work / "credential-cli-invalid.json"
+invalid.write_text(json.dumps(dict(configuration, profiles=configuration["profiles"] * 2)))
+invalid.chmod(0o600)
+refused_file = call(RELOAD, invalid)
+assert not refused_file["ok"] and refused_file["error"]["code"] == "state-conflict", refused_file
+invalid.chmod(0o644)
+unreadable = call(RELOAD, invalid)
+assert not unreadable["ok"] and unreadable["error"]["code"] == "storage-unavailable", unreadable
+assert store_files() == before, "offline reload-profiles changed a Store file"
 
 # Offline status and check-store answer from the Store that the CLI opens.
 status = call({"version": 1, "operation": "status"})
@@ -79,6 +104,8 @@ try:
     assert holding.stdout.readline().strip() == "ready", "original Store owner did not acquire lease"
     value = call({"version": 1, "operation": "list-credentials"})
     assert not value["ok"] and value["error"]["code"] == "storage-unavailable"
+    # Offline reload-profiles takes no lease, so a Store owner does not refuse it.
+    assert call(RELOAD)["ok"], "offline reload-profiles waited for the configuration lease"
 finally:
     holding.terminate()
     holding.communicate(timeout=10)
@@ -101,7 +128,7 @@ assert rotated["ok"] and rotated["result"]["credential"]["clientId"] == issued["
 revoked = call({"version": 1, "operation": "revoke-credential",
                 "credentialId": rotated["result"]["credential"]["credentialId"]})
 assert revoked["ok"]
-print("PASS frozen stdin CLI, offline status, check-store, check-quarantine and release-quarantine, exclusive offline ownership, private issuance and revocation")
+print("PASS frozen stdin CLI, offline status, check-store, check-quarantine and release-quarantine, offline reload-profiles validation without the lease or the Store, exclusive offline ownership, private issuance and revocation")
 
 # A separate, short private namespace avoids Unix socket path limits on the data root.
 admin_root = Path(tempfile.mkdtemp(prefix="admin.", dir=os.environ["TMPDIR"]))
@@ -149,6 +176,11 @@ try:
     assert live_status["ok"] and live_status["result"]["state"] == "serving", live_status
     assert live_status["result"]["authorityEpoch"] == status["result"]["authorityEpoch"], live_status
     assert live_status["result"]["processGeneration"] != status["result"]["processGeneration"], live_status
+    # The live channel reloads the served file and installs fresh profile revisions.
+    live_reload = call(RELOAD)
+    assert live_reload["ok"] and live_reload["result"]["profileIds"] == profile_ids, live_reload
+    again = call(RELOAD)
+    assert again["ok"] and again["result"]["revision"] not in (live_reload["result"]["revision"], validated["result"]["revision"]), again
     live_checked = call({"version": 1, "operation": "check-store"})
     assert live_checked["ok"] and live_checked["result"] == {"integrity": "valid", "quarantineIds": []}, live_checked
     live_unknown = call({"version": 1, "operation": "check-quarantine", "quarantineId": "reservation_unknown"})
@@ -264,6 +296,8 @@ unavailable_file = work / "cli-no-offline-fallback.credential"
 unavailable = call({**issue, "outputFile": str(unavailable_file)})
 assert not unavailable["ok"] and unavailable["error"]["code"] == "storage-unavailable"
 assert not unavailable_file.exists()
+unavailable_reload = call(RELOAD)
+assert not unavailable_reload["ok"] and unavailable_reload["error"]["code"] == "storage-unavailable", unavailable_reload
 
 # A stale private socket name is disposable only after acquiring its exclusive directory lease.
 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stale:
@@ -288,4 +322,4 @@ for symbolic in [False, True]:
     assert sentinel.read_bytes() == b"keep"
     assert address.is_symlink() if symbolic else address.read_bytes() == b"keep"
     address.unlink()
-print("PASS live original-Store administration, live status and check-store, retained-response revocation, endpoint ownership and no offline fallback")
+print("PASS live original-Store administration, live status, check-store and reload-profiles, retained-response revocation, endpoint ownership and no offline fallback")

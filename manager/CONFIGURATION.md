@@ -33,8 +33,17 @@ Installation and reload validate its privacy and separation before publishing
 changes. Reload cannot add, remove or transfer this binding. Omitting the field
 selects the offline CLI, while a configured channel never falls back to offline
 Store acquisition when connection or delivery fails. The directory is not
-implicitly created. See [local administration](COMMANDS.md#local-credential-administration)
-for the channel lifetime and authority boundary.
+implicitly created. The operator therefore keeps two files for one
+`managerRoot`: the serve configuration, which names `administrationRoot`, and
+the offline configuration, which is the same file without it and which the
+administration command uses only when no manager serves. See
+[local administration](COMMANDS.md#two-configurations-for-one-manager-root)
+for this rule, the channel lifetime and the authority boundary.
+
+The loader reports a file that it cannot read as a private file of the user,
+such as an absent file, a file that others can read, a symbolic link or a file
+above 2 MiB, as `UnreadableConfiguration`. It reports every other refusal as
+`InvalidConfiguration`.
 
 A runner has exactly `alias`, `executable`, and `prefix`. The executable is
 absolute, and the prefix is an ordered array of argument strings. The native
@@ -216,6 +225,18 @@ when those policy inputs change, and the coordinator must validate effective
 prepared policy and ownership before approval. The existing routing fingerprint
 is not a credential-version token. Arbitrary trusted executable code is not
 sandboxed.
+
+A serving manager performs this reload for the local administration operation
+`reload-profiles`. The `serveReload` member of the `ServeHooks` argument of
+`serveManager` calls `reloadManagerConfiguration`, which loads the serve
+configuration file again with `loadManagerConfiguration` and installs it with
+`reloadConfiguration`.
+After a successful reload, the manager probes each profile, advances the
+authorization revision of the Store and notifies its admission controller.
+Offline `reload-profiles` calls `validateConfigurationProfiles`, which checks
+the profiles of a loaded file in a validation registry of their own and
+installs nothing. [The command contract](COMMANDS.md#profile-reload) states the
+result and the refusals.
 
 ## Retained native prepared association
 

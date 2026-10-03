@@ -585,8 +585,8 @@ commandFromFlowBody value = do
 -- ---------------------------------------------------------------------------
 
 -- | A recorded operation of the local administration channel: a credential
--- operation, or the release of a quarantined reservation.
-data AdministrationOperation = AdministerIssue | AdministerRotate | AdministerRevoke | AdministerRelease
+-- operation, the release of a quarantined reservation, or a profile reload.
+data AdministrationOperation = AdministerIssue | AdministerRotate | AdministerRevoke | AdministerRelease | AdministerReload
   deriving (Eq, Show, Enum, Bounded)
 
 administrationOperationName :: AdministrationOperation -> Text
@@ -595,18 +595,23 @@ administrationOperationName = \case
   AdministerRotate -> "rotate-credential"
   AdministerRevoke -> "revoke-credential"
   AdministerRelease -> "release-quarantine"
+  AdministerReload -> "reload-profiles"
 
 -- | An admitted operation of the local administration channel.
 --
 -- 'AdministrationBody' is a credential operation: the client, the credential
 -- that the operation issues, rotates to or revokes, the credential that a
 -- rotation supersedes, and the label, scopes, profiles and expiry of the
--- credential. Its operation is never 'AdministerRelease'. The bearer, its
--- verifier and the output file never appear.
+-- credential. Its operation is never 'AdministerRelease' or
+-- 'AdministerReload'. The bearer, its verifier and the output file never
+-- appear.
 --
 -- 'ReleaseAdministration' is the release of a quarantined reservation: the
 -- reservation, its request, and the cleanup evidence identity and digest that
 -- the release verified.
+--
+-- 'ReloadAdministration' is a profile reload of the serving manager. The
+-- request has no field, and the receipt carries the result.
 data AdministrationBody
   = AdministrationBody
       { administrationOperation :: !AdministrationOperation,
@@ -619,6 +624,7 @@ data AdministrationBody
         administrationExpires :: !Text
       }
   | ReleaseAdministration !Text !Text !Text !Text
+  | ReloadAdministration
   deriving (Eq, Show)
 
 administrationFlowBody :: AdministrationBody -> Value
@@ -642,6 +648,8 @@ administrationFlowBody = \case
         "cleanupEvidenceId" .= evidence,
         "cleanupEvidenceDigest" .= digest
       ]
+  ReloadAdministration ->
+    object ["administration" .= administrationOperationName AdministerReload]
 
 administrationFromFlowBody :: Value -> Either Text AdministrationBody
 administrationFromFlowBody value = do
@@ -649,6 +657,9 @@ administrationFromFlowBody value = do
   operation <- flowTextField "administration body" fields "administration" >>= named "administration operation" administrationOperationName
   case operation of
     AdministerRelease -> releaseFromFlowBody fields
+    AdministerReload -> do
+      flowExactKeys "administration body" ["administration"] fields
+      pure ReloadAdministration
     _ -> credentialFromFlowBody operation fields
   where
     releaseFromFlowBody fields = do
