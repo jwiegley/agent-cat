@@ -168,6 +168,7 @@ rotationTarget ident = do
 
 insertCredential :: Text -> Text -> BS.ByteString -> Text -> Text -> Transaction ()
 insertCredential ident client verifier expiry label = do
+  markAuthorizationChange
   execute "INSERT INTO credentials(id,client_id,verifier,expires_at,revoked) VALUES (?,?,?,?,0)"
     [text ident,text client,SQL.SQLBlob verifier,text expiry]
   execute "INSERT INTO credential_administration(credential_id,label) VALUES (?,?)" [text ident,text label]
@@ -175,8 +176,13 @@ insertCredential ident client verifier expiry label = do
 insertProfiles :: Text -> [Text] -> Transaction ()
 insertProfiles ident profiles = execute "INSERT INTO credential_profiles SELECT ?,value FROM json_each(?)" [text ident,jsonText profiles]
 
+-- | Every revocation and rotation revises the client. The mark advances the
+-- authorization revision, so the next revalidation of an open view reads the
+-- facts again.
 reviseClient :: Text -> Text -> Transaction ()
-reviseClient client revision = execute "UPDATE clients SET revision=?,authorization_revision=? WHERE id=?" [text revision,text revision,text client]
+reviseClient client revision = do
+  markAuthorizationChange
+  execute "UPDATE clients SET revision=?,authorization_revision=? WHERE id=?" [text revision,text revision,text client]
 
 changed :: Text -> [Invalidation]
 changed revision = [Invalidation "service.changed" "/v1/service" revision]

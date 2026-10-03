@@ -232,6 +232,25 @@ Closed scopes stay invalid, and worker stop cells remain separate from revocatio
 A one-second wakeup bounds quiet expiry checks, which revalidate trusted SQLite
 time rather than treating the timer or view token as authority.
 
+A revalidation first compares the earlier of the credential expiry and the
+rotation cutoff of the bound facts with the current time, and it refuses at or
+after that time with no facts read. It then reads the facts again unless no
+commit changed authorization facts since the last full check of the view and
+that check started less than one second ago. The Store advances a separate
+authorization revision for that purpose. Every commit that changes credential
+rows and their state, scopes and profile grants, client authorization
+revisions or retirement, rotation cutoffs or the authority epoch marks its
+transaction with `markAuthorizationChange`, and the revision advances before
+its COMMIT. The issue, rotation and revocation of `Credentials.hs` mark their
+transactions. The manager has no configuration reload in its process. An
+owner that adds a change without a Store commit, such as a configuration
+reload that changes profile revisions, must call `advanceAuthorizationRevision`
+when it installs that change. An
+ingestion commit advances only the reader cell, so it wakes readers and leaves
+the revision unchanged. A revocation, a cutoff, a scope change or a retirement
+therefore stops the next write, and an ingestion burst does not make every
+write read the facts again.
+
 `withAuthorizedView` observes configuration afresh between independently acquired
 scopes. `withAuthorizedResponse` keeps one reader charge and the current
 configuration loan through its callback. Its view rechecks transactional
@@ -249,7 +268,8 @@ release protected data. An SSE response revalidates its view before each write
 and ends when the check fails. An event stream packs the complete blocks of one
 batch into writes of at most 16384 bytes, the bound of one block, and splits no
 block. It therefore makes one check for each such write and not one for each
-block. No owner recalls bytes that it has already sent.
+block, and at most one of those checks in each second reads the facts while
+the authorization revision is unchanged. No owner recalls bytes that it has already sent.
 
 ## Credential lifecycle through the serving manager
 

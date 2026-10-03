@@ -203,13 +203,15 @@ faultClassificationChecks work = do
     start <- Events.withBoundary store proof (\_ cursor _ -> pure cursor) (\_ _ cursor -> pure cursor)
     (sites, siteRecord) <- withPrivateStderr (work </> "sites-stderr.log") $ do
       -- One holder keeps the configuration guard past the allowance of three
-      -- waiters, which wait together and expire together.
+      -- waiters, which wait together and expire together. The advanced
+      -- authorization revision makes the revalidation a full check, which
+      -- reads the facts under the configuration guard.
       (reader, viewFacts, preparationRead) <-
         fmap (either (error . show) id) $ withAuthorizedView store proof "profile_1" [Command.Observe] $ \view ->
-          withHeldConfiguration store $ \_ -> runConcurrently $ (,,)
+          advanceAuthorizationRevision store >> withHeldConfiguration store (\_ -> runConcurrently $ (,,)
             <$> Concurrently (faultOf (withStoreReader store (pure ())))
             <*> Concurrently (revalidateAuthorizedView view)
-            <*> Concurrently (fmap (const ()) <$> readPreparation store proof "preparation_1")
+            <*> Concurrently (fmap (const ()) <$> readPreparation store proof "preparation_1"))
       observed <- withStoreAuthorizationWatch store $ \watch ->
         faultOf (withAuthorizationObservation watch (mutate store (execute "UPDATE clients SET retired=0 WHERE id='client_1'" [])))
       callback <- withStoreConfiguration store (\_ _ -> ioError (userError marker) :: IO ())
@@ -339,7 +341,10 @@ faultClassificationChecks work = do
       (length (T.lines (TE.decodeUtf8 contendedRecord)) == 1)
     ((viewStore, revalidatedStore, preparationStore, overviewDeadline), storeRecord) <- withPrivateStderr (work </> "store-erasure-stderr.log") $ do
       viewStore <- withHiddenAdministration (withAuthorizedView store proof "profile_1" [Command.Observe] (\_ -> pure ()))
-      revalidatedStore <- withAuthorizedView store proof "profile_1" [Command.Observe] (\view -> withHiddenAdministration (revalidateAuthorizedView view))
+      -- The advanced revision makes each revalidation below a full check,
+      -- which reads the facts.
+      revalidatedStore <- withAuthorizedView store proof "profile_1" [Command.Observe]
+        (\view -> advanceAuthorizationRevision store >> withHiddenAdministration (revalidateAuthorizedView view))
       preparationStore <- withHiddenAdministration (fmap (const ()) <$> readPreparation store proof "preparation_ok")
       overviewDeadline <- faultOf (Overview.withOverviewSourceWithin 0 store proof Nothing (\_ _ materialize -> fmap (const ()) materialize))
       pure (viewStore, revalidatedStore, preparationStore, overviewDeadline)
@@ -566,7 +571,7 @@ responseIngestionChecks work = do
       writes <- newTVarIO (0 :: Int)
       withAsync (held store proof association writes) $ \response -> do
         reached [writes] >>= check "the response to revoke reaches its first write" . (== Just ())
-        mutate store (execute "UPDATE clients SET authorization_revision='revoked' WHERE id='client_1'" [])
+        mutate store (markAuthorizationChange >> execute "UPDATE clients SET authorization_revision='revoked' WHERE id='client_1'" [])
         outcome <- wait response
         check "a revocation during the hold refuses the next write" (outcome == Left (CommandRefusal Command.Unauthenticated))
         atomically (readTVar writes) >>= check "a revocation during the hold stops the response before its next write" . (== 1)
@@ -709,7 +714,7 @@ streamIngestionChecks work = do
       writes <- newTVarIO 0
       withAsync (stream readers store proof start 3000000 writes) $ \open -> do
         reached [writes] >>= check "the stream to revoke stalls in its first write" . (== Just ())
-        mutate store (execute "UPDATE credentials SET revoked=1 WHERE id='credential_1'" [])
+        mutate store (markAuthorizationChange >> execute "UPDATE credentials SET revoked=1 WHERE id='credential_1'" [])
         (ingested, _) <- timedIngestAt store association 0 ingestionStart
         check "ingestion completes during the stalled write" (ingested == Right True)
         outcome <- timeout 12000000 (wait open)
@@ -810,6 +815,7 @@ responseOrderChecks work = do
           (withStoreConfiguration store (\_ _ -> pure ()))
         check "overview file loan spans the response callback" (files == Left StoreBusy)
         check "overview configuration spans response callback" (configuration == Left SupervisionUnavailable)
+        advanceAuthorizationRevision store
         revalidateAuthorizedView view >>= check "overview view revalidates under its original loans" . (==Right ())
         writeIORef escaped (Just materialize)
       readIORef escaped >>= maybe (error "missing overview materializer") (\materialize -> do
@@ -986,7 +992,7 @@ eventChecks work = do
           check label (outcome == Left expected)
     refused "future event cursor requires resnapshot" Command.CursorExpired (alias current <> ".18446744073709551615")
     refused "noncanonical event cursor refuses" Command.InvalidRequest (alias current <> ".00")
-    mutate store (execute "DELETE FROM credential_scopes WHERE credential_id='credential_1' AND scope='export'" [])
+    mutate store (markAuthorizationChange >> execute "DELETE FROM credential_scopes WHERE credential_id='credential_1' AND scope='export'" [])
     refused "permission change invalidates the old event cursor" Command.ViewExpired current
     forM_ [1::Int ..25] $ \_ -> runTransaction store (pure ((), replicate 32
       (Invalidation "service.changed" "/v1/capabilities" "aged_fixture")))
@@ -1041,6 +1047,7 @@ observationChecks work = do
     withStoreReader store $ withAuthorizedCatalogues store proof [Command.Observe] $ \view _ profiles catalogues -> do
       check "catalogue observation uses one reader and filters current grants"
         (map (publicId . fst) profiles == ["profile_1"] && all ((=="profile_1") . fst) catalogues)
+      advanceAuthorizationRevision store
       revalidateAuthorizedView view >>= check "catalogue view revalidates without reacquiring configuration" . (==Right ())
       held <- withStoreConfiguration store (\_ _ -> pure ())
       check "catalogue response retains original configuration" (held == Left SupervisionUnavailable)
@@ -1083,7 +1090,7 @@ observationChecks work = do
       (Envelope 3 (RunId "protocol3") (SeqNo 0) "2026-09-03T00:00:00Z" (RunStartedV2 "fixture" "scripted" PersonAnswerLocalControl)))
     summary <- right (Observation.runtimeSummary (Just native3))
     check "public runtime summary reports actual protocol3 without downgrade" (field "protocolVersion" summary==Number 3)
-    mutate store (execute "DELETE FROM credential_scopes WHERE credential_id='credential_1'" [])
+    mutate store (markAuthorizationChange >> execute "DELETE FROM credential_scopes WHERE credential_id='credential_1'" [])
     withAuthorizedCatalogues store proof [Command.Observe] $ \_ _ profiles catalogues ->
       check "catalogue observation uses current scope removal" (null profiles && null catalogues)
 
@@ -1121,6 +1128,7 @@ compositionChecks work = do
     escaped <- newIORef Nothing
     outputs $ \view _ -> do
       writeIORef escaped (Just view)
+      advanceAuthorizationRevision store
       revalidateAuthorizedView view >>= check "output view revalidates with sole reader capacity" . (==Right ())
       (locked, (outcome, files)) <- concurrently
         (withStoreConfiguration store (\_ _ -> pure ()))
@@ -1153,7 +1161,7 @@ compositionChecks work = do
     absent <- try @Command.CommandFailure (withRunOutputs store proof (association {associationProfile="profile_missing"}) (\_ _ -> error "absent profile response"))
     check "current profile membership still required" (absent == Left Command.Forbidden)
     verified
-    mutate store (execute "DELETE FROM credential_scopes WHERE credential_id='credential_1'" [])
+    mutate store (markAuthorizationChange >> execute "DELETE FROM credential_scopes WHERE credential_id='credential_1'" [])
     denied <- try @Command.CommandFailure (outputs (\_ _ -> error "unauthorized output response"))
     check "current client authorization still required" (denied == Left Command.Forbidden)
     withStoreReader store (check "authorization failure releases sole reader capacity" True)
@@ -1304,10 +1312,10 @@ artifactChecks work source = do
       check "failed verification leaves witnessed publication unresolved" (field "state" observed == String "unresolved")
       BS.writeFile witnessedPath exportFixture
       epoch <- storeAuthorityEpoch <$> storeIdentity store
-      mutate store $ execute "UPDATE service_metadata SET authority_epoch='authority_changed'" []
+      mutate store $ markAuthorizationChange >> execute "UPDATE service_metadata SET authority_epoch='authority_changed'" []
       changedAuthority <- try @Command.CommandFailure (reconcileExport store proof witness)
       check "reopen evidence cannot cross authority epoch" (changedAuthority == Left Command.OwnershipUnavailable)
-      mutate store $ execute "UPDATE service_metadata SET authority_epoch=?" [SQL.SQLText epoch]
+      mutate store $ markAuthorizationChange >> execute "UPDATE service_metadata SET authority_epoch=?" [SQL.SQLText epoch]
       recovered <- reconcileExport store proof witness
       check "reopen completes only witnessed verified publication" (field "state" recovered == String "published")
       state <- scalar store "SELECT state FROM commands WHERE id=(SELECT command_id FROM exports WHERE name='witness.json')"
@@ -1319,6 +1327,7 @@ artifactChecks work source = do
       check "reconciliation never changes existing bytes" =<< ((== exportFixture) <$> BS.readFile (root </> "runs/exports/unwitnessed.json"))
       withArtifactDownload store proof handle (\_ _ bytes -> check "trusted handle survives reopen without journal" (bytes == sourceFixture))
       withRunExports store proof association $ \view items -> do
+        advanceAuthorizationRevision store
         revalidateAuthorizedView view >>= check "export collection view revalidates under its configuration guard" . (==Right ())
         check "run export collection exposes published and unresolved receipts separately"
           (length items == 5 && length [() | item <- items,field "state" item == String "published"] == 2
@@ -1789,20 +1798,20 @@ submitNamed store proof association name = do
 
 authChecks :: CoordinationStore -> CredentialProof -> RunAssociation -> Text -> Text -> Text -> IO ()
 authChecks store proof association source exported exportId = do
-  mutate store $ execute "DELETE FROM credential_scopes WHERE scope='export'" []
+  mutate store $ markAuthorizationChange >> execute "DELETE FROM credential_scopes WHERE scope='export'" []
   withArtifactDownload store proof exported (\_ _ _ -> check "observe alone may download published content" True)
   unauthorized <- request store association "unauthorized" "unauthorized.json" >>= submitExport store proof association
   check "publication needs export scope" (case unauthorized of Left Command.Forbidden -> True; _ -> False)
   reconciliation <- try @Command.CommandFailure (reconcileExport store proof exportId)
   check "reconciliation needs export scope" (reconciliation == Left Command.Forbidden)
-  mutate store $ execute "DELETE FROM credential_scopes WHERE scope='observe'" []
+  mutate store $ markAuthorizationChange >> execute "DELETE FROM credential_scopes WHERE scope='observe'" []
   denied <- try @Command.CommandFailure (withArtifactDownload store proof source (\_ _ _ -> error "unauthorized response" :: IO ()))
   check "current observe scope checked before content" (denied == Left Command.Forbidden)
-  mutate store $ forM_ ["observe","export"] $ \scope -> execute "INSERT INTO credential_scopes VALUES ('credential_1','profile_1',?)" [SQL.SQLText scope]
-  mutate store $ execute "UPDATE credentials SET revoked=1" []
+  mutate store $ markAuthorizationChange >> forM_ ["observe","export"] (\scope -> execute "INSERT INTO credential_scopes VALUES ('credential_1','profile_1',?)" [SQL.SQLText scope])
+  mutate store $ markAuthorizationChange >> execute "UPDATE credentials SET revoked=1" []
   revoked <- try @Command.CommandFailure (withArtifactDownload store proof source (\_ _ _ -> error "revoked response" :: IO ()))
   check "credential revoked before download call is refused" (revoked == Left Command.Unauthenticated)
-  mutate store $ execute "UPDATE credentials SET revoked=0" []
+  mutate store $ markAuthorizationChange >> execute "UPDATE credentials SET revoked=0" []
 
 runtimeRaces :: CoordinationStore -> RunAssociation -> ResultRef -> IO ()
 runtimeRaces store association reference = withStoreFiles store $ \root ->

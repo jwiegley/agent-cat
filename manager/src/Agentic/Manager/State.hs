@@ -32,7 +32,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Map.Strict as Map
 import Data.List (nub)
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, isNothing)
 import Data.Scientific (floatingOrInteger)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -108,7 +108,8 @@ ingestValidated store association bytes envelope = withStoreReader store $ do
 -- | Restore one immutable, fixed sequence-zero prefix using bounded reads.
 -- No read transaction spans the prefix or an observer's lifetime. Concurrent
 -- appends cannot change an earlier prefix. The shared checkpoint enforces 64MiB.
--- ponytail: full prefix replay per ingestion, cache validated checkpoints if throughput requires it.
+-- The restore continues the projection that this Store lifetime last
+-- validated for the run, as 'restoreProjectionCut' describes.
 restoreRunProjection :: CoordinationStore -> RunAssociation -> IO (Maybe SnapshotCheckpoint)
 restoreRunProjection store association = withStoreReader store (restoreProjection store association)
 
@@ -184,6 +185,17 @@ restoreProjection :: CoordinationStore -> RunAssociation -> IO (Maybe SnapshotCh
 restoreProjection store association =
   runRead store (captureProjectionCut association) >>= restoreProjectionCut store
 
+-- | Restore the projection at the cut. The ingestion rows of a run are
+-- immutable and only appended, so a projection that this Store lifetime
+-- validated for the run at a sequence not after the cut is a valid prefix.
+-- The restore continues such a projection from the next sequence. Otherwise
+-- it replays from sequence zero. In both cases it compares the result with
+-- the stored boundary of the cut, which holds the last sequence and the
+-- digest of the whole projection, and it then holds the result for the next
+-- restore of the run. Thus an ingestion reads one new record, not the whole
+-- run log. A continued projection that does not match the boundary is
+-- replaced by a replay from sequence zero, and only a replay that does not
+-- match refuses with 'StoreIntegrity'.
 restoreProjectionCut :: CoordinationStore -> ProjectionCut -> IO (Maybe SnapshotCheckpoint)
 restoreProjectionCut store (ProjectionCut association boundary lastRow) = do
   empty <- valid (captureSnapshotCheckpoint (associationNative association) [])
@@ -192,19 +204,38 @@ restoreProjectionCut store (ProjectionCut association boundary lastRow) = do
       unless (boundary == BS.empty) (throwIO StoreIntegrity)
       pure Nothing
     Just lastKey -> do
-      checkpoint <- loop empty "0" lastKey
-      unless (projectionBoundary (checkpointSnapshot checkpoint) == boundary) (throwIO StoreIntegrity)
-      pure (Just checkpoint)
+      recalled <- recallProjection store (associationRun association)
+      let final = [number | [(number, "")] <- [reads (T.unpack lastKey)], T.pack (show number) == lastKey]
+          resumable = do
+            (bytes, held) <- recalled
+            let snapshot = checkpointSnapshot held
+            reached <- sequenceNumber . envelopeSequence <$> snapshotLastEnvelope snapshot
+            if snapshotRunId snapshot == associationNative association && any (reached <=) final
+              then Just (bytes, held, reached) else Nothing
+      (bytes, checkpoint) <- case resumable of
+        Just (held, start, reached)
+          | [reached] == final -> pure (held, start)
+          | otherwise -> loop held start (T.pack (show (reached + 1))) lastKey
+        Nothing -> loop 0 empty "0" lastKey
+      let matches = (== boundary) . projectionBoundary . checkpointSnapshot
+      -- A continued projection that does not match the boundary is replaced
+      -- by a replay from sequence zero, which alone decides the result.
+      (charged, restored) <- if matches checkpoint || isNothing resumable then pure (bytes, checkpoint)
+        else loop 0 empty "0" lastKey
+      unless (matches restored) (throwIO StoreIntegrity)
+      retainProjection store (associationRun association) charged restored
+      pure (Just restored)
   where
-    loop checkpoint key lastKey = do
+    loop total checkpoint key lastKey = do
       bytes <- readEnvelope store association key
       envelope <- decodeEvidence bytes
       unless (sequenceText envelope == key) (throwIO StoreIntegrity)
       next <- valid (appendSnapshotCheckpoint checkpoint [envelope])
-      if key == lastKey then pure next else do
+      let charged = total + toInteger (BS.length bytes)
+      if key == lastKey then pure (charged, next) else do
         let number = sequenceNumber (envelopeSequence envelope)
         when (number == maxBound) (throwIO StoreIntegrity)
-        loop next (T.pack (show (number + 1))) lastKey
+        loop charged next (T.pack (show (number + 1))) lastKey
 
 -- Original records can reach 1MiB plus LF. Read slices, not a row exceeding Store's
 -- aggregate 1MiB result budget. Schema immutability fences the separate reads.

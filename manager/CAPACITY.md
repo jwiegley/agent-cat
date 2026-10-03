@@ -507,6 +507,14 @@ every sample.
 | `events.catch-up-p95-ms` | at most 5000 | ms | From the first arrival of an event at any reader to its arrival at each event reader. The five-second write deadline. |
 | `events.manager-rss-peak-bytes` | at most 348127232 | bytes | B + 2 H, where H is 16 supervised workers of 2097152 bytes each and six readers of 1048576 pending bytes each. |
 
+The owner of the read path decided on 2026-10-03 to change the manager and
+to keep the workload, the configuration of the mode and every ceiling. An
+ingestion continues the projection of its run that the Store holds, and a
+revalidation reads the authorization facts again only after a commit that
+changed them, or after one second. The section
+[Read path decision of 2026-10-03](#read-path-decision-of-2026-10-03) gives
+the cause, the change and the values before and after it.
+
 ## Slow consumer
 
 This workload runs inside the event flood. The event reader of `E1` opens its
@@ -540,10 +548,16 @@ it reads again (`slow.reconnects-after-stop`), the length of the stop
 (`slow.stopped-ms`), the bytes that the stopped reader had received before it
 stopped (`slow.stopped-bytes-before`), the largest run log of the burst runs
 (`slow.burst-run-log-bytes-max`), the time from the accepted answer to the
-terminal status of the independent run (`slow.independent-terminal-ms`), and
-the time from the accepted answer to the `at` field of the terminal event of
-its run log (`slow.independent-runtime-terminal-ms`). The independent answer
-is the latency of its command, and the independent run must end succeeded.
+first status read that shows the terminal status of the independent run
+(`slow.independent-terminal-ms`), whether a status read of the burst round
+showed it (`slow.independent-terminal-in-round`), and the time from the
+accepted answer to the `at` field of the terminal event of its run log
+(`slow.independent-runtime-terminal-ms`). The status reads of the burst round
+come twice a second and also watch the independent run, so the terminal key
+has a resolution of about 500 ms. When no read of the round shows the
+terminal status, the reads after the round give the key. The independent
+answer is the latency of its command, and the independent run must end
+succeeded.
 
 | Key | Ceiling | Unit | Basis |
 | --- | --- | --- | --- |
@@ -762,6 +776,122 @@ because the SIGKILL of the worker process groups closes them.
 | `failures.tui.manager-rss-peak-bytes` | at most 272629760 | bytes | B + 2 H, where H is one supervised worker of 2097152 bytes. |
 | `failures.backup.passed` | equals `true` | flag | The restart-interruption case of manager-admission-check passes. |
 
+## Read path decision of 2026-10-03
+
+The Phase F review reported that the event read path saturates in the burst
+round of the event flood, and the measurement of 2026-10-02 gave two keys
+outside their ceilings. The record
+`doc/research/workflow-manager-read-path-diagnosis-2026-10.md` names the
+cause. Each runtime envelope held one of the two reader places
+(`globalDatabaseReaders` 2) for a replay of the whole run log from sequence
+zero, which made 95 percent of the SQL reads. In addition, every commit,
+ingestion included, advanced the authorization cell, so a revalidation read
+the facts again before each write and repeated that read after about one
+commit in two.
+
+The owner kept the workload, the configuration of `capacity-streams`, every
+ceiling, `globalDatabaseReaders` 2, the lock order file slot, configuration,
+database, the five-second allowance, the 16 KiB write packing and the reader
+admission of `Store.withStoreReaderLoan`. It changed two owners:
+
+- `State.restoreProjectionCut` continues the projection of a run that the
+  Store holds from its next sequence, and it keeps the comparison with the
+  stored boundary. The section "Validated ingestion projections" of
+  `manager/STORAGE.md` states the rule and its memory bound.
+- `Store` keeps an authorization revision apart from the authorization cell.
+  The cell still wakes the readers for new data. The revision advances only
+  for a commit that changes authorization facts, which its owner marks.
+  `Authorization.revalidateAuthorizedView` reads the facts again only when
+  the revision changed or the last full check of the view started one second
+  ago or earlier. It compares the expiry and the rotation cutoff with the
+  current time before each write. `manager/STORAGE.md` and
+  `manager/COMMANDS.md` state the rule.
+
+`capacity-streams` ran once at N8 before the change (the uninstrumented
+baseline of the record, on `86c1e9e9`) and once after it, on the final
+source of this change. Neither run is a run of record, because one other
+manager process ran on the host during both runs. The host load was 8.52 at
+the start of the first run, and 5.6 at the start and 6.7 at the end of the
+second.
+
+| Key | Before | After | Ceiling |
+| --- | --- | --- | --- |
+| `events.catch-up-p50-ms` | 1713.4 | 3.4 | at most 1000 |
+| `events.catch-up-p95-ms` | 17392.6 | 128.8 | at most 5000 |
+| `events.reader-complete` | true | true | equals `true` |
+| `events.burst.catch-up-p95-ms` | 17698.4 | 132.4 | none |
+| `events.delivery-p95-ms` | 30762.4 | 9123.8 | none |
+| `events.burst.delivery-p95-ms` | 38418.2 | 9967.5 | none |
+| `events.dropped-reads` | 0 | 0 | none |
+| `events.refused-reads` | 15 | 1 | none |
+| `slow.independent-terminal-ms` | 44841.6 | 1777.3 | none |
+| `slow.pending-bytes-max` | not recorded | 419174 | at most 1048576 |
+| Ceiling keys outside their ceilings | 2 of 14 | 0 of 14 | |
+
+After the change, no started response closed with no bytes. The one refused
+read was a page of `/v1/runs` whose event cursor changed during its
+materialization (`overview-cursor`), which the harness read again. The
+stopped reader of the slow consumer ended at its five-second write deadline,
+as designed.
+
+### Terminal status of the independent run
+
+Before this change, the harness read the status of the independent run only
+after every run of the burst round had ended. So `slow.independent-terminal-ms`
+held the rest of the burst round and not the time at which the manager
+reported the terminal status. The value of the baseline, 44.8 seconds,
+follows the length of its burst round, 48.9 seconds. The manager log of each
+run shows the actual time. The `recorded_at` second of the last `run.changed`
+invalidation of a run is the commit of its terminal ingestion, and the last
+record of its run log is the terminal event of the runtime. For the
+independent run, the manager committed the terminal status in the same
+second as the terminal event in the baseline, in the run of the record with
+both temporary changes A and B, and in every run of this change. So the late
+terminal status of the record came from the harness and not from the
+manager. The harness now times the terminal status with the status reads of
+the burst round (see [Slow consumer](#slow-consumer)). With this timing, the
+key after the change is 1.8 seconds.
+
+### Burst delivery time
+
+The delivery time of the burst runs, from the terminal event of a run log to
+the last `run.changed` invalidation of the run at a reader, stays at about
+ten seconds. The readers are not the cause: the catch-up of the burst round
+is 132.4 ms at the 95th percentile. The cause is the rate of ingestion. In
+the final run the runtime wrote the 2955 envelopes of the 15 burst runs in
+about 2.5 seconds. The manager commits each envelope in one write
+transaction while it holds a reader place, and it committed the terminal
+ingestion of the burst runs 8.7 to 11.2 seconds after their terminal events,
+about 270 envelopes each second. This backlog
+has no ceiling. It ends when the burst ends, and it stays open for the
+owner of `State.ingestValidated`.
+
+### Reader admission
+
+The record also names the reader admission of `Store.withStoreReaderLoan`:
+when a place returns, every waiting reader admits again through the
+configuration guard. The owner measured an ordered admission, in which a
+returned place admits only the first waiting reader again, in two variants.
+Each variant made the burst slower.
+
+| Admission | Burst round | `events.burst.delivery-p95-ms` |
+| --- | --- | --- |
+| Every waiting reader admits again (kept) | 14.7, 15.6 and 16.0 s | 9209.0, 9708.4 and 9967.5 |
+| Only the first waiting reader admits again | 18.1 s | 12409.7 |
+| The same, and a new reader takes a free place | 18.4 s | 13531.8 |
+
+The waiting readers that admit again wait together on the configuration
+guard, which admits its waiters in order. So a returned place goes to the
+next reader that holds the guard. With an ordered admission, the first
+waiting reader starts its wait for the guard only after the place returns,
+and the place stays empty for that wait. The owner therefore kept the
+existing admission. The evidence of these runs is in the private evidence
+directory of PG3.
+
+The pending transport bytes of a stream have no count at the writer. Their
+ceiling held in each run because the write deadline ended the stopped reader
+first.
+
 ## Bounds outside these workloads
 
 These workloads measure the queue, the execution reservations, the drafts,
@@ -828,7 +958,9 @@ The three FAIL results have these causes:
   workload. The two rounds without the burst give 14.2 and 842.9
   milliseconds (`events.rounds.catch-up-p50-ms` and
   `events.rounds.catch-up-p95-ms`), and the burst round alone gives 1553.6
-  and 19873.7 milliseconds. This record does not change the manager.
+  and 19873.7 milliseconds. This record does not change the manager. The
+  section [Read path decision of 2026-10-03](#read-path-decision-of-2026-10-03)
+  gives the change of the manager and the values after it.
 - `failures.backup.passed` is `false`. The `restart-interruption` case did
   not run to its assertions. Its direct run stopped with the message "actual
   currentReview boundary was not reached", because the boundary

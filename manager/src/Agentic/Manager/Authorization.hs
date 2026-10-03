@@ -14,17 +14,22 @@ import Agentic.Manager.Store
 import Agentic.Runtime (FrontendInvocation)
 import Control.DeepSeq (NFData (rnf))
 import Control.Exception (mask_, try, throwIO)
-import Control.Monad (unless)
+import Control.Monad (unless, when)
 import Crypto.Hash (Digest, SHA256, hash)
 import Data.ByteArray (constEq, convert)
 import Data.Aeson (eitherDecodeStrict')
-import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
+import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.Map.Strict as Map
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString as BS
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Database.SQLite3 as SQL
+import Data.Time.Clock (UTCTime, getCurrentTime)
+import Data.Time.Format.ISO8601 (iso8601ParseM)
+import Data.Time.LocalTime (ZonedTime, zonedTimeToUTC)
+import Data.Word (Word64)
+import GHC.Clock (getMonotonicTimeNSec)
 
 -- | Possession evidence bound to one live store, not a credential or client ID API.
 -- No Show or JSON instance may disclose the verifier.
@@ -84,16 +89,19 @@ authorizeProfile proof@(CredentialProof credential _ _ _) profile scopes = do
 -- | A scoped binding to current authority, credential, client authorization revision,
 -- profile revision, scope facts and effective deadline. Neither Show nor Generic is safe.
 -- Future page/cursor/transport owners must revalidate before releasing protected data.
-data AuthorizedView = AuthorizedView !AuthorizationWatch !ViewObservation !ViewFacts
+-- The last field holds the authorization revision and the monotonic start
+-- time of the last full check of the view.
+data AuthorizedView = AuthorizedView !AuthorizationWatch !ViewObservation !ViewFacts !(IORef (Maybe (Word64, Word64)))
 
 -- | How revalidation reads current facts. A borrowed observation reads under
 -- the loans of the scope that owns the view. A response observation reads
 -- under its materialization loans while they are held. After
 -- 'releaseResponseLoans' returns them, it acquires a reader charge, the
--- configuration guard and one SQL read for each check alone, in the lock
--- order configuration, then database, and returns them before the check
--- ends. The file slot is not part of any check. A response observation also
--- holds the checks that its owner attached with 'attachResponseCheck'.
+-- configuration guard and one SQL read for each full check alone, in the
+-- lock order configuration, then database, and returns them before the check
+-- ends. 'revalidateAuthorizedView' states when a check reads no facts. The
+-- file slot is not part of any check. A response observation also holds the
+-- checks that its owner attached with 'attachResponseCheck'.
 data ViewObservation
   = BorrowedObservation !(CoordinationStore -> IO ViewFacts)
   | ResponseObservation !(CoordinationStore -> IO ViewFacts) !(CoordinationStore -> IO ViewFacts) !(IORef (Maybe (IO ()))) !(IORef (IO ()))
@@ -101,7 +109,24 @@ data ViewObservation
 -- Process and execution-profile lifetimes are distinct from the permission view.
 -- Page bindings retain profile revisions. Event cursors retain current grants
 -- and configured profile membership across an otherwise equivalent restart.
-type ViewFacts = ((Text, [Text]), [Text])
+-- The last field is the earlier of the credential expiry and its rotation
+-- cutoff, which the facts also hold as text. It is 'Nothing' when either
+-- value does not parse, and then every revalidation reads the facts.
+data ViewFacts = ViewFacts !(Text, [Text]) ![Text] !(Maybe UTCTime)
+  deriving Eq
+
+instance NFData ViewFacts where
+  rnf (ViewFacts binding facts expires) = rnf (binding, facts, expires)
+
+-- | The earlier of the expiry and the cutoff. An empty cutoff is no cutoff.
+validUntil :: Text -> Text -> Maybe UTCTime
+validUntil expiry cutoff = do
+  expires <- trustedTime expiry
+  if T.null cutoff then pure expires else min expires <$> trustedTime cutoff
+  where
+    trustedTime value = case iso8601ParseM (T.unpack value) of
+      Just utc -> Just utc
+      Nothing -> zonedTimeToUTC <$> (iso8601ParseM (T.unpack value) :: Maybe ZonedTime)
 
 withAuthorizedView :: CoordinationStore -> CredentialProof -> Text -> [Scope]
   -> (AuthorizedView -> IO a) -> IO (Either CommandFailure a)
@@ -116,10 +141,14 @@ withAuthorizedView store proof profile scopes action = authorizationIO "authoriz
 -- 'releaseResponseLoans' before its first network write, together with any
 -- file slot that its owner joined with 'attachResponseLoan'. No SQL
 -- transaction spans a write. The watch stays alive until the callback returns, as an
--- authorization token only. Each later revalidation acquires a reader charge
+-- authorization token only. A revalidation precedes each 16 KiB write. When
+-- the authorization revision is unchanged and the last full check of the
+-- view started less than one second ago, it compares only the expiry and the
+-- rotation cutoff with the current time, as 'revalidateAuthorizedView'
+-- describes. Otherwise it is a full check, which acquires a reader charge
 -- and the configuration guard for its check alone, so a revocation or scope
--- change still stops the next write. One such check precedes each 16 KiB
--- write, and it contends with ingestion only for its own duration. One check
+-- change still stops the next write. A full check contends with ingestion
+-- only for its own duration. One check
 -- has one five-second admission deadline: the observation retries only while
 -- it lasts, and every attempt waits for a reader place, the configuration
 -- guard and the Store gate within the rest of it, as does the final
@@ -149,9 +178,9 @@ withAuthorizedResponseLimits store proof profile scopes action = withStoreReques
 -- check alone. A second call, or a call on a view that borrows the loans of
 -- its owner, does nothing.
 releaseResponseLoans :: AuthorizedView -> IO ()
-releaseResponseLoans (AuthorizedView _ (ResponseObservation _ _ loans _) _) = mask_ $
+releaseResponseLoans (AuthorizedView _ (ResponseObservation _ _ loans _) _ _) = mask_ $
   atomicModifyIORef' loans (\pending -> (Nothing, pending)) >>= sequence_
-releaseResponseLoans (AuthorizedView _ (BorrowedObservation _) _) = pure ()
+releaseResponseLoans (AuthorizedView _ (BorrowedObservation _) _ _) = pure ()
 
 -- | Join an outer materialization loan, such as the file slot of the response
 -- owner, to the loans that 'releaseResponseLoans' returns. The outer loan is
@@ -159,11 +188,11 @@ releaseResponseLoans (AuthorizedView _ (BorrowedObservation _) _) = pure ()
 -- has already returned its loans, the outer loan is returned at once. A view
 -- that borrows the loans of its owner leaves the outer loan to its own scope.
 attachResponseLoan :: AuthorizedView -> IO () -> IO ()
-attachResponseLoan (AuthorizedView _ (ResponseObservation _ _ loans _) _) release = mask_ $
+attachResponseLoan (AuthorizedView _ (ResponseObservation _ _ loans _) _ _) release = mask_ $
   atomicModifyIORef' loans (\pending -> case pending of
     Just held -> (Just (held >> release), pure ())
     Nothing -> (Nothing, release)) >>= id
-attachResponseLoan (AuthorizedView _ (BorrowedObservation _) _) _ = pure ()
+attachResponseLoan (AuthorizedView _ (BorrowedObservation _) _ _) _ = pure ()
 
 -- | Join a check of the response owner, such as the total deadline of an
 -- artifact response, to every later revalidation of a response view. The
@@ -172,9 +201,9 @@ attachResponseLoan (AuthorizedView _ (BorrowedObservation _) _) _ = pure ()
 -- stops before its next write. A view that borrows the loans of its owner
 -- leaves such checks to its own scope.
 attachResponseCheck :: AuthorizedView -> IO () -> IO ()
-attachResponseCheck (AuthorizedView _ (ResponseObservation _ _ _ checks) _) extra =
+attachResponseCheck (AuthorizedView _ (ResponseObservation _ _ _ checks) _ _) extra =
   atomicModifyIORef' checks (\held -> (held >> extra, ()))
-attachResponseCheck (AuthorizedView _ (BorrowedObservation _) _) _ = pure ()
+attachResponseCheck (AuthorizedView _ (BorrowedObservation _) _ _) _ = pure ()
 
 withView :: AuthorizationWatch -> ((CoordinationStore -> IO ViewFacts) -> ViewObservation) -> (CoordinationStore -> IO ViewFacts)
   -> (AuthorizedView -> IO a) -> IO a
@@ -186,13 +215,17 @@ withView watch observation observe action =
 -- Both are reads, so a concurrent commit starts a fresh read of both within
 -- the observation allowance. This first observation is part of the request
 -- that registered the watch, so its waits share the admission deadline of
--- that request.
+-- that request. It is the first full check of the view, under the
+-- authorization revision read before it.
 withViewResult :: NFData a => AuthorizationWatch -> ((CoordinationStore -> IO ViewFacts) -> ViewObservation)
   -> (CoordinationStore -> IO (ViewFacts, a)) -> (AuthorizedView -> a -> IO b) -> IO b
 withViewResult watch observation observe action = do
+  started <- getMonotonicTimeNSec
+  revision <- authorizationRevision watch
   observed <- withAuthorizationRequestReadObservation watch observe
   (facts, value) <- maybe (throwIO Unauthenticated) pure observed
-  action (AuthorizedView watch (observation (fmap fst . observe)) facts) value
+  checked <- newIORef ((\current -> (current, started)) <$> revision)
+  action (AuthorizedView watch (observation (fmap fst . observe)) facts checked) value
 
 -- | A filtered catalogue loan and its live authorization view. One reader charge
 -- and one original configuration loan cover materialization. A response returns
@@ -235,7 +268,7 @@ catalogueView proof scopes observation action watch limits profiles catalogues =
 -- | A page-view fingerprint, including the installed execution-profile revisions.
 -- It is an equality token, not a credential or live capability.
 authorizedViewRevision :: AuthorizedView -> IO Text
-authorizedViewRevision view@(AuthorizedView _ _ ((_, profiles), facts)) = do
+authorizedViewRevision view@(AuthorizedView _ _ (ViewFacts (_, profiles) facts _) _) = do
   revalidateAuthorizedView view >>= either throwIO pure
   pure (viewFingerprint (profiles, facts))
 
@@ -243,12 +276,12 @@ authorizedViewRevision view@(AuthorizedView _ _ ((_, profiles), facts)) = do
 -- still fence open responses and pages, but fresh installation tokens alone do
 -- not change permission to observe retained invalidations.
 authorizedCursorRevision :: AuthorizedView -> IO Text
-authorizedCursorRevision view@(AuthorizedView _ _ facts) = do
+authorizedCursorRevision view@(AuthorizedView _ _ facts _) = do
   revalidateAuthorizedView view >>= either throwIO pure
   pure (cursorRevision facts)
 
 cursorRevision :: ViewFacts -> Text
-cursorRevision (_, facts) = viewFingerprint ([], facts)
+cursorRevision (ViewFacts _ facts _) = viewFingerprint ([], facts)
 
 viewFingerprint :: ([Text], [Text]) -> Text
 viewFingerprint facts = "view_" <> T.pack (show (hash (encoded ((1 :: Int), facts)) :: Digest SHA256))
@@ -260,21 +293,40 @@ catalogueAuthorization proof profiles = do
   (facts, grants) <- catalogueFacts proof [Observe] profiles
   pure (cursorRevision facts, grants)
 
--- | The bound facts must still hold at the current generation. The facts read
--- is repeated after a concurrent commit within the observation allowance.
--- The checks that a response owner attached with 'attachResponseCheck' run
--- before the facts read.
+-- | The bound facts must still hold at the current generation. The checks
+-- that a response owner attached with 'attachResponseCheck' run first. Then
+-- the earlier of the credential expiry and its rotation cutoff, from the
+-- bound facts, is compared with the current time, and a view at or after it
+-- is refused without a facts read. A full check reads the facts again. Its
+-- facts read is repeated after a concurrent commit within the observation
+-- allowance. The revalidation skips the full check only when the
+-- authorization revision equals the revision of the last full check of the
+-- view and that check started less than one second ago. Every commit that
+-- changes authorization facts advances that revision before its COMMIT, so a
+-- revocation, a rotation cutoff, a scope change or a retirement still stops
+-- the next write. The one-second bound also limits how long a change of
+-- facts that no owner marked can go unnoticed.
 revalidateAuthorizedView :: AuthorizedView -> IO (Either CommandFailure ())
-revalidateAuthorizedView (AuthorizedView watch observation bound) = authorizationIO "authorization revalidation" $ do
+revalidateAuthorizedView (AuthorizedView watch observation bound@(ViewFacts _ _ expires) checked) = authorizationIO "authorization revalidation" $ do
   observe <- case observation of
     BorrowedObservation borrowed -> pure borrowed
     ResponseObservation borrowed fresh loans checks -> do
       readIORef checks >>= id
       maybe fresh (const borrowed) <$> readIORef loans
-  observed <- withAuthorizationReadObservation watch $ \request -> do
-    facts <- observe request
-    unless (facts == bound) (throwIO Unauthenticated)
-  unless (observed == Just ()) (throwIO Unauthenticated)
+  now <- getCurrentTime
+  when (maybe False (now >=) expires) (throwIO Unauthenticated)
+  started <- getMonotonicTimeNSec
+  revision <- authorizationRevision watch
+  previous <- readIORef checked
+  let recent = case (revision, previous, expires) of
+        (Just current, Just (seen, at), Just _) -> current == seen && started - at < 1000000000
+        _ -> False
+  unless recent $ do
+    observed <- withAuthorizationReadObservation watch $ \request -> do
+      facts <- observe request
+      unless (facts == bound) (throwIO Unauthenticated)
+    unless (observed == Just ()) (throwIO Unauthenticated)
+    writeIORef checked ((\current -> (current, started)) <$> revision)
 
 -- A wakeup is not current authority. Every timer expiry rechecks SQLite time.
 awaitAuthorizedView :: AuthorizedView -> IO (Either CommandFailure ())
@@ -284,7 +336,7 @@ awaitAuthorizedView view = awaitAuthorizationWakeup view >> revalidateAuthorized
 -- the view, with no Store loan held. The wakeup carries no authority. The
 -- caller authorizes its next read again.
 awaitAuthorizationWakeup :: AuthorizedView -> IO ()
-awaitAuthorizationWakeup (AuthorizedView watch _ _) = awaitAuthorizationChange watch
+awaitAuthorizationWakeup (AuthorizedView watch _ _ _) = awaitAuthorizationChange watch
 
 currentViewFacts :: CoordinationStore -> CredentialProof -> Text -> [Scope] -> IO ViewFacts
 currentViewFacts store proof profile scopes = do
@@ -312,7 +364,7 @@ profileViewFacts store proof@(CredentialProof credential client _ generation) pr
       [SQL.SQLText profile,SQL.SQLText credential]
     case rows of
       [[SQL.SQLText epoch,SQL.SQLText authorization,SQL.SQLText expiry,SQL.SQLText cutoff,SQL.SQLText actualScopes]] ->
-        pure ((generation,[profile,revision]),["profile",epoch,credential,client,authorization,profile,actualScopes,expiry,cutoff])
+        pure (ViewFacts (generation,[profile,revision]) ["profile",epoch,credential,client,authorization,profile,actualScopes,expiry,cutoff] (validUntil expiry cutoff))
       _ -> refuseTransaction Unauthenticated
 
 catalogueViewFacts :: CoordinationStore -> CredentialProof -> [Scope] -> [PublicProfile]
@@ -337,7 +389,7 @@ catalogueFacts proof@(CredentialProof credential client _ generation) required p
             facts = ["catalogues",epoch,credential,client,authorization,expiry,cutoff,scopeRows]
               <> [publicId profile | (profile, _) <- selected]
             revisions = concat [[publicId profile, publicRevision profile] | (profile, _) <- selected]
-        pure (((generation, revisions), facts), [(publicId profile, actual) | (profile, actual) <- selected])
+        pure (ViewFacts (generation, revisions) facts (validUntil expiry cutoff), [(publicId profile, actual) | (profile, actual) <- selected])
       _ -> refuseTransaction Unauthenticated
   where
     grant (ident, name) = case lookup name [(scopeName scope, scope) | scope <- [Observe,Submit,Control,ExportScope]] of

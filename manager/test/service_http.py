@@ -3924,13 +3924,27 @@ def process_environment(pid):
     return completed.stdout if completed.returncode == 0 and completed.stdout.strip() else None
 
 
+def reset_stream(connection, response):
+    """Close an SSE response with a TCP reset (SO_LINGER with a zero time),
+    as a client that drops its connection. After an orderly close the next
+    write of the manager can still succeed, and only the write after it
+    fails. After a reset the next write fails, so the subscription returns
+    at the latest at the next heartbeat."""
+    sock = connection.sock if connection.sock is not None else response.fp.raw._sock
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, (1).to_bytes(4, sys.byteorder) + (0).to_bytes(4, sys.byteorder))
+    response.close()
+    connection.close()
+
+
 def open_stream(path, authorized):
     """Open one SSE response and read its first complete block, which the
     manager writes at once as an event batch or a heartbeat. A registration
     refused with 429 storage-quota is tried again within 30 seconds, as in
     route_open: a stream whose client closed its connection keeps its
-    subscription until its next write fails, at the latest at its next
-    heartbeat, as manager/STORAGE.md states."""
+    subscription until its next write fails, as manager/STORAGE.md states.
+    A caller that opens a new stream of the same client after it closed one
+    closes the old one with reset_stream, so that write fails at the latest
+    at the next heartbeat."""
     deadline = time.monotonic() + 30
     while True:
         connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=7)
@@ -5276,8 +5290,7 @@ def event_checks():
             blocks += more
             (work / "events-attached.sse").write_bytes(b"".join(blocks))
         finally:
-            response.close()
-            connection.close()
+            reset_stream(connection, response)
         polled += live
         high = latest
         print(f"PASS events case 1: SSE and polling attached at snapshot cursor {number(start)} delivered the same",
@@ -5317,14 +5330,12 @@ def event_checks():
             partial = response.readline(16385)
             assert partial == ("id: " + polled[2]["id"] + "\n").encode(), ("partial block start", partial)
         finally:
-            response.close()
-            connection.close()
+            reset_stream(connection, response)
         connection, response, first = attach(authorized, complete[-1]["id"])
         try:
             _, resumed = streamed(response, first, number(high))
         finally:
-            response.close()
-            connection.close()
+            reset_stream(connection, response)
         assert resumed == polled[2:], ("reconnection repeated or lost a block", resources(resumed)[:3])
         for accept in ("text/event-stream", "application/json"):
             status, problem, _ = request("/v1/events?after=" + start, authorized | {"Accept": accept, "Last-Event-ID": start})
@@ -18051,11 +18062,14 @@ def capacity_streams_checks():
                 and isinstance(body.get("bytes"), (int, decimal.Decimal)) and body["bytes"] > 0
                 and rest == {key: value for key, value in polled.items() if key != "body"})
 
-    def flood_round(label, workflow, after_submit=None):
+    def flood_round(label, workflow, after_submit=None, watched=None):
         """One round of CAPACITY_FLOOD_REQUESTS requests of the workflow on
         cap_01 to cap_15. Each submitter creates, supplies and enqueues three
         requests and approves their reviews. Returns the runs and the
-        monotonic start and end of the round."""
+        monotonic start and end of the round. Each status read of the round
+        also records in the dictionary watched the monotonic time of the
+        first read that shows a run of its keys in a terminal status, so the
+        round itself measures when the manager reports that status."""
         started = time.monotonic()
         order, owner, runs, approved = [], {}, {}, set()
         for index, profile in enumerate(CAPACITY_STREAM_PROFILES[:CAPACITY_FLOOD_REQUESTS]):
@@ -18084,6 +18098,9 @@ def capacity_streams_checks():
                         uncertain.append((ident, repr(failure)))
             statuses = {run["id"]: run["runtime"]["status"] if run["runtime"] is not None else None
                         for run in one_page(harness, "/v1/runs", "RunPage", STATUS_WINDOW)["items"]}
+            for run in watched or {}:
+                if watched[run] is None and statuses.get(run) in terminal:
+                    watched[run] = time.monotonic()
             if all(ident in runs and statuses.get(runs[ident]) in terminal for ident in order):
                 break
             assert time.monotonic() < deadline, (label + " deadline", len(approved), len(runs), uncertain)
@@ -18205,19 +18222,25 @@ def capacity_streams_checks():
             answered["ms"] = answer(independent, question)
             answered["at"], answered["wall"] = time.monotonic(), time.time()
 
-        burst_runs, burst_start, burst_end = flood_round("burst round", CAPACITY_BURST_WORKFLOW, answer_independent)
+        # The status reads of the burst round watch the independent run, so
+        # its terminal status is timed while the burst runs and not only
+        # after the round ends. The status reads of the round come twice a
+        # second, which bounds the resolution of the measure.
+        watched = {independent_run: None}
+        burst_runs, burst_start, burst_end = flood_round("burst round", CAPACITY_BURST_WORKFLOW, answer_independent, watched)
         deadline = time.monotonic() + 60
         while True:
             snapshot, _, _ = read(harness, "/v1/runs/" + independent_run + "/snapshot", "RunSnapshot", window=STATUS_WINDOW)
             if snapshot["runtime"] is not None and snapshot["runtime"]["status"] in terminal:
-                independent_done = time.monotonic()
+                independent_done = watched[independent_run] if watched[independent_run] is not None else time.monotonic()
                 break
             assert time.monotonic() < deadline, "the independent run did not end"
             time.sleep(0.05)
         burst_rate, burst_count = per_second(burst_start, burst_end)
         independent_succeeded = snapshot["runtime"]["status"] == "succeeded"
         measured.update({"slow.independent-answer-ms": round(answered["ms"], 1), "slow.independent-run-succeeded": independent_succeeded,
-                         "slow.independent-terminal-ms": round((independent_done - answered["at"]) * 1000, 1)})
+                         "slow.independent-terminal-ms": round((independent_done - answered["at"]) * 1000, 1),
+                         "slow.independent-terminal-in-round": watched[independent_run] is not None})
         meter.save()
         assert independent_succeeded, ("the independent run", snapshot["runtime"]["status"])
         caught_up([reader for reader in events_readers if reader is not slow], "the reading readers did not catch up after the burst round")

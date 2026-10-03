@@ -168,10 +168,10 @@ main = do
           BS.writeFile(work </> "history.json") (encoded views)
           stable <- history store proof [binding]
           check "opaque handle stable across corruption" (any ((==String ident) . field "id") stable)
-          mutate store (execute "DELETE FROM credential_scopes WHERE profile_id='profile_1' AND scope='observe'" [])
+          mutate store (markAuthorizationChange >> execute "DELETE FROM credential_scopes WHERE profile_id='profile_1' AND scope='observe'" [])
           hidden <- history store proof [binding]
           check "out-of-scope profiles disclose no history" (null hidden)
-          mutate store (execute "INSERT INTO credential_scopes VALUES ('credential_1','profile_1','observe')" [])
+          mutate store (markAuthorizationChange >> execute "INSERT INTO credential_scopes VALUES ('credential_1','profile_1','observe')" [])
           staleViews <- history store proof [binding]
           let sampled = case [v | v<-staleViews,field "id" v==String "run_1"] of [v]->v;_->error "sampled parent"
           mutate store $ execute "UPDATE runs SET revision='concurrent-transition',supervision='lost' WHERE id='run_1'" []

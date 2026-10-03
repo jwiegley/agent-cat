@@ -46,7 +46,7 @@ import Data.IORef (writeIORef, modifyIORef', newIORef, readIORef)
 import Data.Int (Int64)
 import Data.List (sort)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (isNothing)
+import Data.Maybe (isJust, isNothing)
 import Data.Word (Word64)
 import Data.Text (Text)
 import Data.Time.Clock (UTCTime, getCurrentTime)
@@ -87,6 +87,7 @@ main = do
       credentialAdministrationChecks work
       credentialRepresentationChecks work
       credentialFailureChecks work
+      authorizationRevisionChecks work
       credentialMigrationChecks work
       credentialBoundsChecks work
       publicComposition work
@@ -339,7 +340,7 @@ preflightRetentionChecks work = withFixture work "preflight-retention" 8388608 1
   expect "matching tombstone refuses before preflight callback" ReceiptExpired (preflight req)
   expect "operation conflict precedes tombstone expiry" IdempotencyConflict (preflight (req {commandOperation=RemoveInput}))
   expect "wrong epoch precedes tombstone lookup" AuthorityChanged (preflight (req {commandKey="old_authority."<>T.replicate 22 "n"}))
-  mutate store(execute "UPDATE credentials SET revoked=1 WHERE id='credential_a'" [])
+  mutate store(markAuthorizationChange >> execute "UPDATE credentials SET revoked=1 WHERE id='credential_a'" [])
   expect "current authorization precedes tombstone lookup" Unauthenticated (preflight req)
   mutate store(execute "INSERT INTO clients VALUES ('retired_client','revision','authorization',1)" [])
   forM_ ["DELETE FROM clients WHERE id='retired_client'",
@@ -384,15 +385,15 @@ replayChecks work = do
     expect "fresh lifecycle refusal records no intent" StateConflict $
       submitCommand store proof (req {commandKey = commandKey req <> "phase", commandPrecondition = Just "\"r2\""}) (edit profile (commandResource req) "never")
     rotated <- authenticateCredential store bearerRotated >>= right
-    mutate store (execute "UPDATE credentials SET revoked=1 WHERE id='credential_a'" [])
+    mutate store (markAuthorizationChange >> execute "UPDATE credentials SET revoked=1 WHERE id='credential_a'" [])
     expect "revocation checked before receipt retry" Unauthenticated (submitCommand store proof req (edit profile (commandResource req) "never"))
     expect "revocation checked before receipt GET" Unauthenticated (readCommand store proof (receiptId receipt))
     replacement <- submitCommand store rotated req (edit profile (commandResource req) "never") >>= right
     check "credential rotation keeps registered-client deduplication" (submissionReceipt replacement == receipt)
-    mutate store (execute "DELETE FROM credential_scopes WHERE credential_id='credential_rotated' AND scope='submit'" [])
+    mutate store (markAuthorizationChange >> execute "DELETE FROM credential_scopes WHERE credential_id='credential_rotated' AND scope='submit'" [])
     expect "current original-operation scopes required for GET" Forbidden (readCommand store rotated (receiptId receipt))
     expect "current scopes required before retry lookup" Forbidden (submitCommand store rotated req (edit profile (commandResource req) "never"))
-    mutate store (execute "INSERT INTO credential_scopes VALUES ('credential_rotated','profile_1','submit')" [])
+    mutate store (markAuthorizationChange >> execute "INSERT INTO credential_scopes VALUES ('credential_rotated','profile_1','submit')" [])
     configuration <- load path
     void (reloadConfiguration installed configuration >>= right)
     void (submitCommand store rotated req (edit profile (commandResource req) "never") >>= right)
@@ -423,7 +424,7 @@ replayChecks work = do
     rowsEqual store "SELECT body,body_sha256,body_bytes,receipt,media_type,precondition FROM commands WHERE retired=1"
       [[SQL.SQLNull,SQL.SQLNull,SQL.SQLNull,SQL.SQLNull,SQL.SQLNull,SQL.SQLNull]] >>= check "retirement removes content-bearing bindings"
     scalarInt store "SELECT bytes FROM command_ledger_usage" >>= check "tombstone remains charged" . (== commandCapacity + tombstoneCapacity)
-    mutate store (execute "UPDATE service_metadata SET authority_epoch='restored_authority'" [])
+    mutate store (markAuthorizationChange >> execute "UPDATE service_metadata SET authority_epoch='restored_authority'" [])
     expect "current authority fences retired pre-restore keys first" AuthorityChanged (submitCommand store proof originalRequest (edit profile (commandResource originalRequest) "never"))
   check "replay fixture uses ordinary local database" (not (null root))
 
@@ -491,7 +492,7 @@ dispatchChecks work = withFixture work "dispatch" (64 * commandCapacity) 20 $ \_
   readIORef calls >>= check "callback count unchanged after failed attempted marker" . (== 1)
   withRaw root $ \db -> SQL.exec db "DROP TRIGGER fail_attempt"
   expect "failed attempted marker never restores dispatch permission" OwnershipUnavailable (attemptDispatch markerTicket (modifyIORef' calls (+1)))
-  mutate store (execute "UPDATE credentials SET revoked=1 WHERE id='credential_a'" [])
+  mutate store (markAuthorizationChange >> execute "UPDATE credentials SET revoked=1 WHERE id='credential_a'" [])
   expect "revoked credential cannot read accepted work" Unauthenticated (readCommand store proof (dispatchCommandId failedTicket))
   void (recordEffect failedTicket effect >>= right)
   check "revocation does not reinterpret already accepted ownership" True
@@ -833,7 +834,7 @@ bindingBounds work = withFixture work "binding-bounds" (64 * commandCapacity) 20
   check "full capture ceiling uses bounded cryptographic binding" (receiptOperation (submissionReceipt large) == Capture)
   expect "capture creation requires the frozen requestId target" InvalidRequest $
     submitCommand store proof (capture {commandResource="/v1/captures"}) captureMutation
-  mutate store (execute "UPDATE credentials SET expires_at='2000-01-01T00:00:00Z' WHERE id='credential_a'" [])
+  mutate store (markAuthorizationChange >> execute "UPDATE credentials SET expires_at='2000-01-01T00:00:00Z' WHERE id='credential_a'" [])
   expect "expiry fences an otherwise matching receipt" Unauthenticated $
     submitCommand store proof capture captureMutation
 
@@ -1581,6 +1582,54 @@ credentialCommitGapChecks work = withFixture work "credential-commit-gap" (64*co
           authorizationWatchCurrent watch >>= check "committed revocation notification is not consumed" . not
           runRead store (currentClient proof) >>= check "original revocation completed before owner join" . (==Left Unauthenticated)
 
+-- | The authorization revision advances only for a marked change of
+-- authorization facts, while every commit wakes the readers. A revalidation
+-- of a response view reads no facts while that revision is unchanged and its
+-- last full check started less than one second ago. A held Store gate shows
+-- which revalidations read the facts: a revalidation that reads no facts
+-- returns at once, and one that reads the facts waits for the gate.
+authorizationRevisionChecks :: FilePath -> IO ()
+authorizationRevisionChecks work = withFixture work "authorization-revision" (64*commandCapacity) 20 $ \_ _ _ store _ proof -> do
+  withStoreAuthorizationWatch store $ \watch -> do
+    before <- authorizationRevision watch
+    mutate store (execute "UPDATE requests SET revision='data_only' WHERE id='request_1'" [])
+    authorizationWatchCurrent watch >>= check "a data commit wakes the readers of the watch" . not
+    authorizationRevision watch >>= check "a data commit leaves the authorization revision unchanged" . (== before)
+    mutate store (markAuthorizationChange >> execute "UPDATE clients SET authorization_revision='marked' WHERE id='client_2'" [])
+    authorizationRevision watch >>= check "a marked commit advances the authorization revision" . (\after -> isJust before && after /= before)
+    marked <- authorizationRevision watch
+    void (adminOK store (Admin.IssueCredential "revision" [Observe] ["profile_1"] "2999-01-01T00:00:00Z" (work </> "revision.credential")))
+    authorizationRevision watch >>= check "a credential issue advances the authorization revision" . (/= marked)
+  withAuthorizedResponse store proof "profile_1" [Observe] $ \view -> do
+    releaseResponseLoans view
+    threadDelay 1100000
+    revalidateAuthorizedView view >>= check "a full check of a response view holds" . (== Right ())
+    mutate store (execute "UPDATE requests SET revision='during_view' WHERE id='request_1'" [])
+    skipped <- withHeldStore store $ \_ -> timeout 500000 (revalidateAuthorizedView view)
+    check "after a data commit, a revalidation within one second of a full check reads no facts" (skipped == Just (Right ()))
+    void (adminOK store (Admin.RevokeCredential "credential_b"))
+    reread <- withHeldStore store $ \release -> withAsync (revalidateAuthorizedView view) $ \waiter -> do
+      blocked waiter
+      release
+      wait waiter
+    check "after a revocation of another client, the next revalidation reads the facts again and holds" (reread == Right ())
+    void (adminOK store (Admin.RevokeCredential "credential_a"))
+    revalidateAuthorizedView view >>= check "a revocation stops the next write at once" . (== Left Unauthenticated)
+  expiry <- scalarText store "SELECT strftime('%Y-%m-%dT%H:%M:%fZ','now','+2 seconds')"
+  void (adminOK store (Admin.IssueCredential "expiring" [Observe] ["profile_1"] expiry (work </> "expiring.credential")))
+  expiring <- BS.readFile (work </> "expiring.credential") >>= authenticateCredential store >>= right
+  rotatedProof <- authenticateCredential store bearerRotated >>= right
+  mutate store (markAuthorizationChange >> execute "INSERT INTO credential_administration(credential_id,label,rotation_cutoff) VALUES ('credential_rotated','rotated',strftime('%Y-%m-%dT%H:%M:%fZ','now','+2 seconds'))" [])
+  withAuthorizedResponse store expiring "profile_1" [Observe] $ \expiringView -> do
+    releaseResponseLoans expiringView
+    withAuthorizedResponse store rotatedProof "profile_1" [Observe] $ \cutoffView -> do
+      releaseResponseLoans cutoffView
+      revalidateAuthorizedView expiringView >>= check "a view before its credential expiry holds" . (== Right ())
+      revalidateAuthorizedView cutoffView >>= check "a view before its rotation cutoff holds" . (== Right ())
+      threadDelay 2200000
+      ended <- withHeldStore store $ \_ -> timeout 500000 (mapM revalidateAuthorizedView [expiringView, cutoffView])
+      check "expiry and rotation cutoff stop the next write without a facts read" (ended == Just [Left Unauthenticated, Left Unauthenticated])
+
 credentialFailureChecks :: FilePath -> IO ()
 credentialFailureChecks work = do
   withFixture work "credential-observation" (64*commandCapacity) 20 $ \_ _ _ store _ _ ->
@@ -1602,7 +1651,7 @@ credentialFailureChecks work = do
           authorizationWatchCurrent watch >>= check "failed observation does not consume invalidation" . not
   withFixture work "credential-cutoff" (64*commandCapacity) 20 $ \_ _ _ store _ proof -> do
     void (adminOK store (Admin.RotateCredential "credential_a" "2999-01-01T00:00:00Z" (work </> "cutoff.credential")))
-    mutate store (execute "UPDATE credential_administration SET rotation_cutoff='2000-01-01T00:00:00Z' WHERE credential_id='credential_a'" [])
+    mutate store (markAuthorizationChange >> execute "UPDATE credential_administration SET rotation_cutoff='2000-01-01T00:00:00Z' WHERE credential_id='credential_a'" [])
     expect "effective rotation cutoff rejects fresh possession" Unauthenticated (authenticateCredential store bearerA)
     runRead store (currentClient proof) >>= check "effective cutoff rejects retained proof" . (==Left Unauthenticated)
     scalarText store "SELECT expires_at FROM credentials WHERE id='credential_a'" >>= check "rotation never rewrites declared expiry" . (=="2999-01-01T00:00:00Z")

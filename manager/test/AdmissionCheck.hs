@@ -958,9 +958,9 @@ acceptedAuthorityChecks :: FilePath -> FilePath -> IO ()
 acceptedAuthorityChecks work native=withFixture work native "accepted-authority" 1 [("a",[])] $ \fixture@(Fixture _ _ owner _ proofs)->do
   withAdmission owner $ \controller->do
     draft<-newDraft fixture 0 "a" "authority"
-    mutate owner(execute "DELETE FROM credential_scopes WHERE credential_id='credential_1' AND scope='observe'" [])
+    mutate owner(markAuthorizationChange >> execute "DELETE FROM credential_scopes WHERE credential_id='credential_1' AND scope='observe'" [])
     _<-enqueue controller fixture 0 draft "submit_only"
-    mutate owner(execute "UPDATE credentials SET revoked=1 WHERE id='credential_1'" [])
+    mutate owner(markAuthorizationChange >> execute "UPDATE credentials SET revoked=1 WHERE id='credential_1'" [])
     live<-admit controller
     review<-await(awaitReview live)>>=right
     assertion "accepted submit-only enqueue remains eligible after credential revocation" (reviewRequest review==draftId draft)
@@ -985,7 +985,7 @@ cleanupPublicationChecks work native=withFixture work native "cleanup-publicatio
   number owner "SELECT count(*) FROM reservation_resources" >>=assertion "SQL release failure preserves all resource claims" . (==1)
   number owner "SELECT count(*) FROM requests WHERE phase='review' AND queue_origin_revision IS NULL AND queue_generation IS NULL" >>=assertion "accepted withdrawal invalidates enqueue materialization while retaining live phase" . (==1)
   number owner "SELECT count(*) FROM commands WHERE effect_evidence IS NOT NULL AND operation='withdraw'" >>=assertion "SQL release failure rolls back effect evidence too" . (==0)
-  mutate owner(execute "UPDATE credentials SET revoked=1 WHERE id='credential_1'" [])
+  mutate owner(markAuthorizationChange >> execute "UPDATE credentials SET revoked=1 WHERE id='credential_1'" [])
   bracket (SQL.open(T.pack(root </> "coordination.sqlite3"))) SQL.close $ \database ->SQL.exec database "DROP TRIGGER fail_release"
   retryAdmissionCleanup live>>=right
   number owner "SELECT count(*) FROM reservations WHERE state!='released'" >>=assertion "explicit retry publishes only original owner's confirmed cleanup" . (==0)

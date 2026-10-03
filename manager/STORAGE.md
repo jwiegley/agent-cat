@@ -252,16 +252,49 @@ transaction is held across a network write. The authorization watch of the
 view stays registered until the owner callback returns. It spans every write
 as an authorization token only.
 
-Before each 16 KiB write, `revalidateAuthorizedView` reads the bound
-authorization facts again. It acquires one reader charge, the configuration
-guard and one SQL read for that check alone, in the lock order configuration,
-then database, and returns them before the write. The cost is one brief reader
-and guard acquisition for each write. It contends with ingestion and other Store
-work only for the duration of the check. A revocation, a scope change or a
-configuration change between two writes makes the check refuse, and the
-response stops before the next write. A write that does not complete within
-five seconds is the internal `ResponseWriteTimeout` cause. Ingestion therefore
-waits for a response only during such a brief check and never during a send.
+Before each 16 KiB write, `revalidateAuthorizedView` checks the view. It
+first runs the checks that the response owner attached. It then compares the
+earlier of the credential expiry and the rotation cutoff, which the bound
+facts hold, with the current time, and a view at or after that time refuses
+with no facts read. Then it decides whether the bound authorization facts
+must be read again.
+
+The Store keeps two counters. The authorization cell advances after every
+commit that changed rows, and it wakes the readers that wait for new data. The
+authorization revision advances only when a commit changes authorization
+facts: credential rows and their state, scopes and profile grants, client
+authorization revisions and retirement, rotation cutoffs and the authority
+epoch. The owner of such a write marks its transaction with
+`markAuthorizationChange`, and the revision then advances before the COMMIT,
+while the transaction holds the Store gate. The credential administration of
+`Credentials.hs` marks every issue, rotation and revocation. A restoration
+writes the authority epoch and revokes credentials through an offline Store
+of the copying mode, while no serving manager holds the root. No view
+observes that Store, so the restoration has no mark. A view of the restored
+Store starts with a full check. The manager has no configuration reload in its
+process. An owner that adds a change of authorization facts without a Store
+commit, such as a configuration reload that changes profile revisions, must
+call `advanceAuthorizationRevision` when it installs that change. An
+ingestion commit or another data commit advances the cell but not the
+revision.
+
+A check reads the facts again, a full check, unless the authorization revision
+equals the revision of the last full check of the view and that check started
+less than one second ago. A full check acquires one reader charge, the
+configuration guard and one SQL read for that check alone, in the lock order
+configuration, then database, and returns them before the write. It contends
+with ingestion and other Store work only for the duration of the check. A
+check that reads no facts acquires no loan. The first observation of the view
+is its first full check. So a stream or a response reads the facts at most
+once a second while no commit changes authorization facts. A revocation, a
+rotation cutoff, a scope change, a retirement or an authority change between
+two writes advances the revision, the next check is a full check, and it
+refuses. The response then stops before the next write. A closed, poisoned or
+unavailable Store also requires a full check. A change of authorization facts
+that no owner marks is noticed at the first full check, at most one second
+later. A write that does not complete within five seconds is the internal
+`ResponseWriteTimeout` cause. Ingestion therefore waits for a response only
+during a full check and never during a send.
 
 One check is one request with one five-second admission deadline. The
 observation starts it. Every attempt of the check waits for a reader place,
@@ -292,7 +325,8 @@ for the batch read.
 It reads and encodes the batch under these loans and then returns both with
 `releaseResponseLoans`. The stream packs the complete blocks of one batch
 into writes of at most 16384 bytes and splits no block. It revalidates its
-view immediately before each such write and each heartbeat. A write therefore
+view immediately before each such write and each heartbeat, under the rule
+above. A write therefore
 holds no configuration guard, reader charge, file slot or SQL transaction. A
 stream with nothing more to read waits on the authorization watch of its last
 batch view. The watch is an authorization token only, so the wait holds no
@@ -303,7 +337,9 @@ stall in a write, up to the Store reader capacity, therefore leave the
 reader places and the configuration guard free for ingestion. The limit of two
 subscriptions for each client is a separate count and not a Store reader
 charge. A stream whose client closed the connection keeps its subscription
-until its next write fails, which is at the latest its next heartbeat. When
+until a write fails. After an orderly close the first write can still
+succeed, so that write fails at the latest at the second heartbeat after
+the last write, about 30 seconds later. When
 the listener stops, it closes its socket and runs `closeStreams` before it
 joins its connection workers. A new stream then refuses with
 storage-unavailable. An open stream ends its response after its current
@@ -1110,9 +1146,25 @@ Runtime differential fixtures remain supported without normalizing other whitesp
 The resulting digest and boundary must match. Both the canonical Runtime checkpoint
 and original-wire evidence have a 64MiB bound per run. Store statement, input, row,
 result and time limits remain unchanged. Exceeding a bound refuses without truncating
-the prefix. The initial implementation replays the full prefix per append and has
-quadratic total replay cost. No mutable projection cache can acknowledge an input
-that failed to commit. A later cache must preserve this reconciliation boundary.
+the prefix.
+
+The Store holds the projection of a run that a restoration validated against
+the stored boundary, for the lifetime of the Store. The ingestion rows of a run
+are immutable and only appended, so a held projection at a sequence not after a
+new cut is a valid prefix of that cut. A restoration continues the held
+projection from its next sequence and reads only the newer records. It replays
+from sequence zero when no projection is held, when the held one is after the
+cut, or when the last sequence of the cut is not canonical. Each result must
+still match the digest and boundary of the cut before the Store holds it, so
+an ingestion reads one new record and not the whole run log. A projection is
+held only after that match, so no held projection acknowledges an input that
+failed to commit. A continued projection that does not match the boundary is
+replaced by a replay from sequence zero, and only a replay that does not match
+refuses with `StoreIntegrity`. The held projections of all runs keep at most
+64MiB of original records, the bound of one run, and the least recently used
+one leaves first. A projection above that bound is not held. The bound counts
+the bytes of the original records and not the memory of the projections, which
+the resident-memory ceilings of `manager/CAPACITY.md` measure.
 
 Admission loans the original AcceptedStart association and Worker queue head to
 State. Physical cleanup need not wait for the database, and buffered evidence remains
@@ -1141,7 +1193,7 @@ that deadline ends is `StoreLimit`. The waits of reader admission for the
 configuration guard, the Store gate and a place share that deadline. Reloaded limits apply to
 new readers even while older readers finish. Acquisition releases configuration and
 SQL ownership before the callback, and completion or an exception returns capacity.
-State uses this scope for complete prefix replay and ingestion. Its profile projection
+State uses this scope for projection restoration and ingestion. Its profile projection
 scope acquires reader capacity before entering the current configuration guard,
 validates profile and client authority before replay, and retains both reader capacity
 and configuration while it materializes. A response returns both, and the file
@@ -1181,7 +1233,7 @@ decision, capture or artifact is deleted by event retention.
 State records terminal_observed only from the shared validated Runtime terminal fold.
 Physical cleanup, supervision loss and reservation release cannot substitute for that
 fact. Historical schema-ten runs initially lack it. `observeRetainedTerminal` explicitly
-replays their original immutable prefix under the reader cap, then rechecks the same
+restores their original immutable prefix under the reader cap, then rechecks the same
 association and projection boundary before recording a terminal observation. Ordinary
 projection reads remain observational. Missing or nonterminal evidence records nothing,
 while corrupt, changed or over-budget evidence refuses. A new historical proof resets

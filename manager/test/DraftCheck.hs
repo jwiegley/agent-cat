@@ -387,12 +387,12 @@ draftChecks work source=withFixture work source "drafts" 5 8 134217728 $ \fixtur
   BS.writeFile(work </> "actual-ready.json")(encoded ready)
   (setup,frame)<-assembleDraft store proof(draftId view)>>=right
   check "actual shared frontend codec round-trip and declaration order" (decodeFrontendSetupRequest frame==Right setup && case setup of RootSetup request->setupInputs request==[("first",Literal ""),("second",Literal "雪\r\n"),("third",Literal "last\n")];_->False)
-  mutate store(execute "DELETE FROM credential_scopes WHERE credential_id='credential_1' AND scope='observe'" [])
+  mutate store(markAuthorizationChange >> execute "DELETE FROM credential_scopes WHERE credential_id='credential_1' AND scope='observe'" [])
   nonce<-key store "create"
   original<-createDraft store proof nonce(createBody profile discovery)>>=right
   check "Submit-only create retry returns immutable original view, not later inputs" (original==view)
   expect "Submit-only cannot read current Observe-only inputs" Forbidden(readDraft store proof(draftId view))
-  mutate store(execute "INSERT INTO credential_scopes VALUES ('credential_1','profile_1','observe')" [])
+  mutate store(markAuthorizationChange >> execute "INSERT INTO credential_scopes VALUES ('credential_1','profile_1','observe')" [])
   duplicate<-key store "duplicate"
   expect "duplicate fields reject before object-map loss" InvalidRequest(createDraft store proof duplicate "{\"workflowId\":\"x\",\"workflowId\":\"y\"}")
   forM_ [("unknown",LiteralValue "unknown" "x")] $ \(suffix,input)->do

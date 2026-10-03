@@ -10,7 +10,7 @@ module Agentic.Manager.Store
   ( CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
     withCoordinationStore, withInspectingStore, withServingStore, withServingStoreWith, storeManagerFlow, pruneManagerLog, storeIdentity, checkpointStore, withStoreConfiguration, withStoreCatalogues, withStoreRetentionRoot, withStoreRetentionRootLoan, withStoreRetentionRootsLoan, withStoreArtifactResponse, withStoreArtifactResponseWithin, artifactResponsePlaces, artifactResponseWait, artifactResponseDeadline, validateStoreHistoryBindings, revalidateStoreRetentionRoot, storeInvocations, withStoreRequest, outsideRequest, withStoreFiles, withStoreFileLoan, withRecordedRunRoot, withStoreReader, withStoreAdmission, withStoreWorker, StoreWorker, createStoreWorkerGroup, storeWorkerCleanupConfirmed, requestStoreWorkersStop, awaitStoreWorkersStop, retryStoreCleanup, probeStoreCapabilities,
     withStoreAdministration, tryWithStoreCatalogues, tryWithStoreFiles,
-    AuthorizationWatch, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, withAuthorizationRequestReadObservation, awaitAuthorizationChange,
+    AuthorizationWatch, authorizationRevision, advanceAuthorizationRevision, markAuthorizationChange, recallProjection, retainProjection, withStoreAuthorizationWatch, withStoreConfigurationWatch, withStoreCataloguesWatch, withStoreCatalogueContextWatch, authorizationWatchCurrent, withAuthorizationObservation, withAuthorizationReadObservation, withAuthorizationRequestReadObservation, awaitAuthorizationChange,
     CommitDeadline, withCommitDeadline, withPreparedCommitDeadline, enforceCommitDeadline, enforceAdmissionFence, managerFlowRoom, appendCommandRecord, appendReviewRecord, noticeAfterCommit, PostCommit, noPostCommit, takePostCommit, appendPostCommit, Transaction, execute, query, refuseTransaction, refuseBusy, refuseBusyAt, refuseBusyTransaction, repeatChangedRead, runTransaction, runRead, StoreAdmission (..), runTransactionWithAdmission, runReadWithAdmission, transactionGeneration,
     commandReceiptColumns, commandRowReceipt,
     Invalidation (..), EventReadFailure (..), RetainedEvents (..), readRetainedEvents, readRetainedEventsWith, retainEvents, backupCoordinationStore, restoreCoordinationStore, reservationOccupancy
@@ -34,7 +34,7 @@ import Agentic.Runtime
   (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPrivateSubroot, privateRootPath,
    openPrivateRoot, privateRootIdentity, readPrivateFileAt, ensurePrivateDirectoryAt, removePrivateFileAt,
    publishPrivateCaptureAt, CapturePublication (..), privateCaptureBytes, privateCaptureSha256,
-   withPrivateDirectoryAt, writePrivateExclusiveAt, strictFlowCodec, FlowCodec, Actor (Manager), Address (To, Approvers), About (..), Position, Record (..), Schema (FlowCommand, FlowFailure, FlowReceipt, FlowReview, FlowNotice), FlowSegment (..), FailureKind (Refused), failureBody, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, FrontendInvocation, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
+   withPrivateDirectoryAt, writePrivateExclusiveAt, SnapshotCheckpoint, maxArtifactBytes, strictFlowCodec, FlowCodec, Actor (Manager), Address (To, Approvers), About (..), Position, Record (..), Schema (FlowCommand, FlowFailure, FlowReceipt, FlowReview, FlowNotice), FlowSegment (..), FailureKind (Refused), failureBody, WorkflowInputDescriptor (..), frontendLiteralBytes, FrontendCapabilities, FrontendInvocation, ProcessGroup, createProcessGroup, terminateProcessGroup, groupOutcome, processGroupLive)
 import Control.Concurrent (rtsSupportsBoundThreads)
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (race, withAsync, asyncWithUnmask, cancel, wait)
@@ -105,12 +105,17 @@ data Checkpoint = Checkpoint
 
 -- | One connection and admission cell. Every Store action can spend its
 -- existing five-second operation allowance waiting for the cell. The slot
--- tuple holds the file slot, the reader count, the authorization cell and the
--- count of charged artifact response places. The last field is the admission
+-- tuple holds the file slot, the reader count, the authorization cell, the
+-- count of charged artifact response places, the authorization revision and
+-- the validated run projections of this lifetime. The authorization cell
+-- advances after every commit that changed rows, and it wakes the readers
+-- that wait for new data. The authorization revision advances only when a
+-- commit changes authorization facts, or when 'advanceAuthorizationRevision'
+-- is called. The last field is the admission
 -- deadline of the request that this store value serves, which
 -- 'withStoreRequest' sets. Without it, each admission starts a fresh deadline.
 data CoordinationStore = CoordinationStore !InstalledConfiguration !PrivateRoot !SQL.Database !StoreIdentity
-  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar (), TVar Int, TVar (Maybe Word64), TVar Int) !(TVar WorkerRegistry) !(MVar ()) !(IORef Bool) !(TVar (Bool, Maybe (TMVar (), MVar ())))
+  !(MVar ()) !(IORef Bool) !(IORef Bool) !Fd !(MVar (), TVar Int, TVar (Maybe Word64), TVar Int, TVar Word64, IORef ProjectionMemo) !(TVar WorkerRegistry) !(MVar ()) !(IORef Bool) !(TVar (Bool, Maybe (TMVar (), MVar ())))
   !(Maybe ManagerFlow) !(Maybe Admission.Deadline)
 
 -- | Original registrations and their first stop batch. A scoped fence is not permanent quarantine.
@@ -123,9 +128,10 @@ data StoreWorker = StoreWorker !(TMVar ()) !(MVar ()) !(MVar [ProcessGroup]) !(M
 
 -- | A manager-only transaction program. No IO lift, connection or cursor is exported.
 newtype Transaction a = Transaction (Context -> IO a)
--- The last field is the start of the allowance of the transaction, which a
--- busy record measures its elapsed wait from.
-data Context = Context !SQL.Database !Text !Bool !(IORef Budget) !(IORef Bool) !(IORef (Maybe CommitDeadline)) !(IORef (Maybe (TVar Bool))) !(Maybe FlowSlot) !Admission.Deadline
+-- The ninth field is the start of the allowance of the transaction, which a
+-- busy record measures its elapsed wait from. The last field is set by
+-- 'markAuthorizationChange' when the transaction changes authorization facts.
+data Context = Context !SQL.Database !Text !Bool !(IORef Budget) !(IORef Bool) !(IORef (Maybe CommitDeadline)) !(IORef (Maybe (TVar Bool))) !(Maybe FlowSlot) !Admission.Deadline !(IORef Bool)
 
 -- | The manager log of a transaction: the writer, the command record that the
 -- transaction appended, and the notices that follow its COMMIT, newest first.
@@ -390,7 +396,7 @@ openStore mode installed root lease = storageErrors $ do
         when (isNothing (managerFlowOpenFailure manager)) (answerOrphanedAsks db manager total)
         pure manager
     CoordinationStore installed root db (StoreIdentity schemaVersion epoch stream generation)
-      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> ((,,,) <$> newMVar () <*> newTVarIO 0 <*> newTVarIO (Just 0) <*> newTVarIO 0) <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing) <*> pure flow <*> pure Nothing
+      <$> newMVar () <*> newIORef False <*> newIORef False <*> pure lease <*> ((,,,,,) <$> newMVar () <*> newTVarIO 0 <*> newTVarIO (Just 0) <*> newTVarIO 0 <*> newTVarIO 0 <*> newIORef emptyProjectionMemo) <*> newTVarIO (WorkerRegistry False False Nothing []) <*> newMVar () <*> newIORef False <*> newTVarIO (False, Nothing) <*> pure flow <*> pure Nothing
   where
     databaseName = "coordination.sqlite3"
     checkCompanion name = do
@@ -926,7 +932,7 @@ closeStore = closeStoreWith False
 -- that the operator stopped it. Only such a close of a Store that is not
 -- poisoned writes the shutdown notice of the manager log.
 closeStoreWith :: Bool -> CoordinationStore -> IO ()
-closeStoreWith returned store@(CoordinationStore installed root db identity gate closed poisoned lease (files,_,_,_) workers closing retired admission flow _) =
+closeStoreWith returned store@(CoordinationStore installed root db identity gate closed poisoned lease (files,_,_,_,_,_) workers closing retired admission flow _) =
   uninterruptibleMask_ $ withMVar closing $ \_ -> do
     already <- readIORef retired
     unless already $ do
@@ -990,7 +996,7 @@ stopWorkers workers = do
 
 -- No callback, SQL acquisition or join runs in this notification transaction.
 notifyStoreFailure :: CoordinationStore -> Bool -> IO ()
-notifyStoreFailure (CoordinationStore _ _ _ _ _ _ _ _ (_,_,authorization,_) workers _ _ admission _ _) unavailable = atomically $ do
+notifyStoreFailure (CoordinationStore _ _ _ _ _ _ _ _ (_,_,authorization,_,_,_) workers _ _ admission _ _) unavailable = atomically $ do
   writeTVar authorization Nothing
   modifyTVar' workers (\state -> state {registryClosed=True, registryUnavailable=registryUnavailable state || unavailable})
   (_, owner) <- readTVar admission
@@ -1145,7 +1151,7 @@ withStoreArtifactResponse = withStoreArtifactResponseWithin artifactResponseDead
 -- microseconds. Only the tests use a deadline other than
 -- 'artifactResponseDeadline'.
 withStoreArtifactResponseWithin :: Int -> CoordinationStore -> (IO () -> IO a) -> IO (Maybe a)
-withStoreArtifactResponseWithin deadline (CoordinationStore _ _ _ _ _ closed _ _ (_,_,_,places) _ _ _ _ _ _) action = mask $ \restore -> do
+withStoreArtifactResponseWithin deadline (CoordinationStore _ _ _ _ _ closed _ _ (_,_,_,places,_,_) _ _ _ _ _ _) action = mask $ \restore -> do
   readIORef closed >>= \done -> when done (throwIO StoreClosed)
   expired <- registerDelay artifactResponseWait
   charged <- atomically $
@@ -1195,7 +1201,7 @@ tryWithStoreFiles store action = acquireStoreFiles FailFast store (const action)
 -- | Take the file slot under the admission policy. Nothing proves that the
 -- slot was not taken, so the action did not run.
 acquireStoreFiles :: StoreAdmission -> CoordinationStore -> (IO () -> PrivateRoot -> IO a) -> IO (Maybe a)
-acquireStoreFiles policy store@(CoordinationStore _ root _ _ _ closed _ lease (files,_,_,_) _ _ _ _ _ _) action = mask $ \restore -> do
+acquireStoreFiles policy store@(CoordinationStore _ root _ _ _ closed _ lease (files,_,_,_,_,_) _ _ _ _ _ _) action = mask $ \restore -> do
   readIORef closed >>= \done -> when done (throwIO StoreClosed)
   acquired <- case policy of
     FailFast -> tryTakeMVar files >>= traverse (const (admissionDeadline store))
@@ -1234,7 +1240,7 @@ withStoreReader store action = withStoreReaderLoan store (const action)
 -- the release after materialization and before its first network write, so
 -- a slow send never holds a reader place.
 withStoreReaderLoan :: CoordinationStore -> (IO () -> IO a) -> IO a
-withStoreReaderLoan store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers,_,_) _ _ _ _ _ _) action = mask $ \restore -> do
+withStoreReaderLoan store@(CoordinationStore _ _ _ _ _ _ _ _ (_,readers,_,_,_,_) _ _ _ _ _ _) action = mask $ \restore -> do
   end <- admissionDeadline store
   let request = scopedTo end store
       admit = do
@@ -1301,7 +1307,7 @@ repeatChangedRead store site attempt = admissionDeadline store >>= \end ->
 -- a revision that the caller observed. The record names the site and
 -- measures the elapsed time from the start of the transaction allowance.
 refuseBusyTransaction :: Text -> Transaction a
-refuseBusyTransaction site = Transaction $ \(Context _ _ _ _ _ _ _ _ started) -> refuseBusy site (Just started)
+refuseBusyTransaction site = Transaction $ \(Context _ _ _ _ _ _ _ _ started _) -> refuseBusy site (Just started)
 
 -- | Refuse with a declared Store failure after one private record of the
 -- distinct internal cause that it replaces.
@@ -1321,9 +1327,10 @@ withStoreAuthorizationWatch store action = withStoreRequest store $ \request -> 
 -- loans, configuration first, and a response calls it before its first
 -- network write. The watch stays registered until the callback returns, so it
 -- spans every write as an authorization token only. After the release, each
--- revalidation acquires a new reader charge and configuration loan for the
--- duration of its check alone. The scope end returns any loan that the
--- callback did not release.
+-- full check of a revalidation acquires a new reader charge and configuration
+-- loan for the duration of that check alone. A revalidation that reads no
+-- facts, as 'authorizationRevision' permits, acquires neither. The scope end
+-- returns any loan that the callback did not release.
 withStoreConfigurationWatch :: CoordinationStore
   -> (IO () -> AuthorizationWatch -> ConfigurationLimits -> [PublicProfile] -> IO a) -> IO (Either Diagnostic a)
 withStoreConfigurationWatch store@(CoordinationStore installed _ _ _ _ _ _ _ _ _ _ _ _ _ _) action =
@@ -1354,7 +1361,7 @@ withStoreCatalogueContextWatch store@(CoordinationStore installed _ _ _ _ _ _ _ 
 -- 'withAuthorizationRequestReadObservation' uses that deadline. Every other
 -- observation starts a fresh deadline.
 withAuthorizationWatch :: CoordinationStore -> (AuthorizationWatch -> IO a) -> IO a
-withAuthorizationWatch store@(CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell,_) _ _ _ _ _ _) action =
+withAuthorizationWatch store@(CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell,_,_,_) _ _ _ _ _ _) action =
   bracket acquire release action
   where
     acquire = atomically (readTVar cell) >>= maybe (throwIO StoreClosed)
@@ -1446,12 +1453,85 @@ awaitAuthorizationChange (AuthorizationWatch _ cell revision active) = do
     expected <- readTVar revision
     check (not live || current /= Just expected)) `orElse` (readTVar timer >>= check)
 
+-- | The authorization revision while the watch is live and the Store is open,
+-- not poisoned and available. A revalidation reads it before its facts read
+-- and compares it with the revision of its last full check. Equal revisions
+-- mean that no commit changed authorization facts in between. The revision
+-- carries no authority, and 'Nothing' requires a full check.
+authorizationRevision :: AuthorizationWatch -> IO (Maybe Word64)
+authorizationRevision (AuthorizationWatch (CoordinationStore _ _ _ _ _ closed poisoned _ (_,_,_,_,revision,_) workers _ _ _ _ _) cell _ active) = do
+  stopped <- (||) <$> readIORef closed <*> readIORef poisoned
+  if stopped then pure Nothing else atomically $ do
+    live <- readTVar active
+    current <- readTVar cell
+    unavailable <- registryUnavailable <$> readTVar workers
+    if live && not unavailable && current /= Nothing then Just <$> readTVar revision else pure Nothing
+
+-- | Advance the authorization revision outside a transaction, for a change of
+-- authorization facts that has no Store commit. The manager has no such
+-- change today. An owner that adds one, such as a configuration reload that
+-- changes profile revisions, must call this function when it installs the
+-- change. Each later revalidation then reads the facts again. It wakes no
+-- reader.
+advanceAuthorizationRevision :: CoordinationStore -> IO ()
+advanceAuthorizationRevision (CoordinationStore _ _ _ _ _ _ _ _ (_,_,_,_,revision,_) _ _ _ _ _ _) =
+  atomically (modifyTVar' revision (+ 1))
+
+-- | Mark the current transaction as one that changes authorization facts:
+-- credential rows and their state, scopes and profile grants, client
+-- authorization revisions and retirement, rotation cutoffs and the authority
+-- epoch. The authorization revision advances before its COMMIT. The owner of
+-- each such write marks it, and a write that is not marked leaves a
+-- revalidation of the last second on its earlier facts.
+markAuthorizationChange :: Transaction ()
+markAuthorizationChange = Transaction $ \(Context _ _ writable _ _ _ _ _ _ authority) -> do
+  unless writable (throwIO StoreIntegrity)
+  writeIORef authority True
+
+-- | Validated run projections of this Store lifetime, by run, with a use
+-- stamp and the bytes of the original records that each one holds. The held
+-- bytes stay at most 'maxArtifactBytes', the bound of one projection, in
+-- total. The least recently used projection leaves first.
+data ProjectionMemo = ProjectionMemo !Word64 !Integer !(Map.Map Text (Word64, Integer, SnapshotCheckpoint))
+
+emptyProjectionMemo :: ProjectionMemo
+emptyProjectionMemo = ProjectionMemo 0 0 Map.empty
+
+-- | The validated projection of a run that this lifetime holds, with the
+-- bytes of its original records. It grants nothing. The caller continues it
+-- only from immutable ingestion rows and compares the result with the stored
+-- boundary, as for a replay from sequence zero.
+recallProjection :: CoordinationStore -> Text -> IO (Maybe (Integer, SnapshotCheckpoint))
+recallProjection (CoordinationStore _ _ _ _ _ _ _ _ (_,_,_,_,_,memo) _ _ _ _ _ _) runKey =
+  atomicModifyIORef' memo $ \held@(ProjectionMemo clock total entries) -> case Map.lookup runKey entries of
+    Nothing -> (held, Nothing)
+    Just (_, bytes, checkpoint) -> (ProjectionMemo (clock + 1) total (Map.insert runKey (clock, bytes, checkpoint) entries), Just (bytes, checkpoint))
+
+-- | Hold a projection that the caller validated against the stored boundary
+-- of its run. A held projection of the same run with more bytes, which is a
+-- longer prefix, stays. A projection above the total bound is not held.
+retainProjection :: CoordinationStore -> Text -> Integer -> SnapshotCheckpoint -> IO ()
+retainProjection (CoordinationStore _ _ _ _ _ _ _ _ (_,_,_,_,_,memo) _ _ _ _ _ _) runKey bytes checkpoint =
+  atomicModifyIORef' memo $ \held@(ProjectionMemo clock total entries) -> case Map.lookup runKey entries of
+    Just (_, longer, _) | longer >= bytes -> (held, ())
+    previous | bytes > maxArtifactBytes -> (held, ())
+             | otherwise ->
+      let replaced = total - maybe 0 (\(_, old, _) -> old) previous + bytes
+      in (evict (ProjectionMemo (clock + 1) replaced (Map.insert runKey (clock, bytes, checkpoint) entries)), ())
+  where
+    evict current@(ProjectionMemo clock total entries)
+      | total <= maxArtifactBytes = current
+      | otherwise = case [(stamp, key, size) | (key, (stamp, size, _)) <- Map.toList entries, key /= runKey] of
+          [] -> current
+          others -> let (_, oldest, size) = minimum others
+                    in evict (ProjectionMemo clock (total - size) (Map.delete oldest entries))
+
 advanceAuthorization :: CoordinationStore -> IO ()
-advanceAuthorization (CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell,_) _ _ _ _ _ _) = atomically $
+advanceAuthorization (CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell,_,_,_) _ _ _ _ _ _) = atomically $
   modifyTVar' cell (>>= \revision -> if revision == maxBound then Nothing else Just (revision + 1))
 
 invalidateAuthorization :: CoordinationStore -> IO ()
-invalidateAuthorization (CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell,_) _ _ _ _ _ _) =
+invalidateAuthorization (CoordinationStore _ _ _ _ _ _ _ _ (_,_,cell,_,_,_) _ _ _ _ _ _) =
   atomically (writeTVar cell Nothing)
 
 -- | One admission owner, separate from the physical worker registration ceiling.
@@ -1573,7 +1653,7 @@ admittedWith policy (CoordinationStore _ root _ _ gate closed poisoned _ _ worke
 -- | Internal callers supply source-owned SQL, never SQL obtained from a client.
 -- Statement count, binding bytes and strict result bytes share one transaction budget.
 execute :: Text -> [SQL.SQLData] -> Transaction ()
-execute sql parameters = Transaction $ \context@(Context db _ writable _ changed _ _ _ _) -> do
+execute sql parameters = Transaction $ \context@(Context db _ writable _ changed _ _ _ _ _) -> do
   unless writable (throwIO StoreIntegrity)
   unless (T.toUpper (T.takeWhile (not . isSpace) (T.stripStart sql)) `elem` ["INSERT", "UPDATE", "DELETE"]) $
     throwIO StoreIntegrity
@@ -1582,7 +1662,7 @@ execute sql parameters = Transaction $ \context@(Context db _ writable _ changed
   writeIORef changed True
 
 query :: Text -> [SQL.SQLData] -> Transaction [[SQL.SQLData]]
-query sql parameters = Transaction $ \context@(Context db _ _ budget _ _ _ _ _) -> do
+query sql parameters = Transaction $ \context@(Context db _ _ budget _ _ _ _ _ _) -> do
   unless (T.toUpper (T.takeWhile (not . isSpace) (T.stripStart sql)) `elem` ["SELECT", "WITH"]) $
     throwIO StoreIntegrity
   chargeInput context sql parameters
@@ -1632,7 +1712,7 @@ checkPreparedCommit (PreparedCommit registry (StoreWorker stop done groups _) gr
 -- | Arm one fixed final check after transactional work and invalidations, before COMMIT.
 -- This adds no general IO lift or caller-supplied acceptance predicate.
 enforceCommitDeadline :: CommitDeadline -> Transaction ()
-enforceCommitDeadline guard@(CommitDeadline owner _ _ _ _) = Transaction $ \(Context _ generation writable _ _ pending _ _ _) -> do
+enforceCommitDeadline guard@(CommitDeadline owner _ _ _ _) = Transaction $ \(Context _ generation writable _ _ pending _ _ _ _) -> do
   unless(writable && owner==generation)(throwIO StoreIntegrity)
   existing <- readIORef pending
   case existing of
@@ -1650,7 +1730,7 @@ checkCommitDeadline (CommitDeadline _ now deadline active prepared) = do
 -- | A fixed refusal-only admission check at the logical pre-COMMIT boundary.
 -- The flag grants no authority and does not make SQLite COMMIT atomic with STM.
 enforceAdmissionFence :: TVar Bool -> Transaction ()
-enforceAdmissionFence fence = Transaction $ \(Context _ _ writable _ _ _ pending _ _) -> do
+enforceAdmissionFence fence = Transaction $ \(Context _ _ writable _ _ _ pending _ _ _) -> do
   unless writable (throwIO StoreIntegrity)
   existing <- readIORef pending
   case existing of
@@ -1663,7 +1743,7 @@ enforceAdmissionFence fence = Transaction $ \(Context _ _ writable _ _ _ pending
 -- append fails instead. The leaf writer lock is taken inside the held
 -- database lock.
 managerFlowRoom :: Int64 -> FlowRecordClass -> Transaction (Maybe Bool)
-managerFlowRoom total recordClass = Transaction $ \(Context _ _ _ _ _ _ _ slot _) -> forM slot $ \(FlowSlot manager _ _) ->
+managerFlowRoom total recordClass = Transaction $ \(Context _ _ _ _ _ _ _ slot _ _) -> forM slot $ \(FlowSlot manager _ _) ->
   maybe True (< managerFlowAllowance total recordClass) <$> managerFlowBytes manager
 
 -- | Append the synchronized @command@ record of an admitted command, from the
@@ -1675,7 +1755,7 @@ managerFlowRoom total recordClass = Transaction $ \(Context _ _ _ _ _ _ _ slot _
 -- body value, each decoded from the appended bytes. After it, a definite
 -- rollback of the transaction answers the record with a @failure@ record.
 appendCommandRecord :: Int64 -> FlowRecordClass -> Actor -> About -> Value -> Transaction (Maybe (Either ManagerFlowFailure (Position, Record, Either Text Value)))
-appendCommandRecord total recordClass principal about body = Transaction $ \(Context _ _ writable _ _ _ _ slot _) -> do
+appendCommandRecord total recordClass principal about body = Transaction $ \(Context _ _ writable _ _ _ _ slot _ _) -> do
   unless writable (throwIO StoreIntegrity)
   forM slot $ \(FlowSlot manager pending _) -> do
     existing <- readIORef pending
@@ -1692,7 +1772,7 @@ appendCommandRecord total recordClass principal about body = Transaction $ \(Con
 -- result is 'Nothing' for a lifetime without a manager log. A successful append
 -- returns the record and its body value, each decoded from the appended bytes.
 appendReviewRecord :: Int64 -> Text -> About -> Value -> Transaction (Maybe (Either ManagerFlowFailure (Record, Either Text Value)))
-appendReviewRecord total profile about body = Transaction $ \(Context _ _ writable _ _ _ _ slot _) -> do
+appendReviewRecord total profile about body = Transaction $ \(Context _ _ writable _ _ _ _ slot _ _) -> do
   unless writable (throwIO StoreIntegrity)
   forM slot $ \(FlowSlot manager _ _) -> do
     appended <- appendManagerTell manager total Refusing FlowReview Manager (Approvers profile) about body
@@ -1705,14 +1785,14 @@ appendReviewRecord total profile about body = Transaction $ \(Context _ _ writab
 -- queues nothing. A failed append leaves a gap entry, because a notice is
 -- never a 'Refusing' record.
 noticeAfterCommit :: FlowRecordClass -> Address -> About -> Notice -> Transaction ()
-noticeAfterCommit recordClass to about notice = Transaction $ \(Context _ _ _ _ _ _ _ slot _) ->
+noticeAfterCommit recordClass to about notice = Transaction $ \(Context _ _ _ _ _ _ _ slot _ _) ->
   forM_ slot $ \(FlowSlot _ _ queue) -> modifyIORef' queue (QueuedNotice recordClass to about (noticeFlowBody notice) :)
 
 -- | Take the notices that this transaction queued, so that its caller appends
 -- them after a record that must precede them. The admission transaction of a
 -- command takes them, and they follow the receipt.
 takePostCommit :: Transaction PostCommit
-takePostCommit = Transaction $ \(Context _ _ _ _ _ _ _ slot _) -> case slot of
+takePostCommit = Transaction $ \(Context _ _ _ _ _ _ _ slot _ _) -> case slot of
   Nothing -> pure noPostCommit
   Just (FlowSlot _ _ queue) -> PostCommit . reverse <$> atomicModifyIORef' queue (\queued -> ([], queued))
 
@@ -1729,7 +1809,7 @@ appendQueued manager = mapM_ $ \(QueuedNotice recordClass to about body) ->
 
 -- | The current in-memory lifetime, never reconstructed from a database row.
 transactionGeneration :: Transaction Text
-transactionGeneration = Transaction $ \(Context _ generation _ _ _ _ _ _ _) -> pure generation
+transactionGeneration = Transaction $ \(Context _ generation _ _ _ _ _ _ _ _) -> pure generation
 
 refuseTransaction :: Exception e => e -> Transaction a
 refuseTransaction failure = Transaction (const (throwIO failure))
@@ -1757,6 +1837,7 @@ runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ 
   pending <- newIORef Nothing
   queued <- newIORef []
   changed <- newIORef False
+  authority <- newIORef False
   budget <- newIORef (Budget 256 8388608 1000 1048576)
   deadline <- newIORef Nothing
   admissionFence <- newIORef Nothing
@@ -1765,7 +1846,7 @@ runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ 
     result <- try @SomeException $ restore $ boundedWith db (maybe (pure 5000000) Admission.remainingMicros end) $ do
       mapM_ (void . Admission.remainingMicros) end
       SQL.exec db (if writable then "BEGIN IMMEDIATE" else "BEGIN")
-      (resultValue, events) <- action (Context db (storeProcessGeneration identity) writable budget changed deadline admissionFence ((\manager -> FlowSlot manager pending queued) <$> flow) started)
+      (resultValue, events) <- action (Context db (storeProcessGeneration identity) writable budget changed deadline admissionFence ((\manager -> FlowSlot manager pending queued) <$> flow) started authority)
       validateEvents events
       value <- evaluate (force resultValue)
       didChange <- readIORef changed
@@ -1773,6 +1854,11 @@ runWithAdmission policy store@(CoordinationStore _ _ db identity _ _ poisoned _ 
       mapM_ (appendInvalidation db) events
       readIORef deadline >>= mapM_ checkCommitDeadline
       readIORef admissionFence >>= mapM_ (\fence -> atomically (readTVar fence) >>= \stopped -> when stopped (throwIO StoreClosed))
+      -- The authorization revision advances before COMMIT, while this
+      -- transaction holds the Store gate. A revalidation that reads the
+      -- revision after the COMMIT thus always sees the advance. An advance
+      -- whose COMMIT then fails costs one extra facts read and nothing else.
+      readIORef authority >>= \marked -> when marked (advanceAuthorizationRevision store)
       writeIORef committing True
       SQL.exec db "COMMIT"
       when didChange (advanceAuthorization store)
@@ -1871,7 +1957,7 @@ instance NFData RetainedEvents where
 -- | Advance at most 256 events per call. The caller can continue bounded maintenance
 -- without holding a read transaction or a client connection between calls.
 retainEvents :: CoordinationStore -> IO Int
-retainEvents store = runTransaction store $ Transaction $ \(Context db _ _ _ _ _ _ _ _) -> do
+retainEvents store = runTransaction store $ Transaction $ \(Context db _ _ _ _ _ _ _ _ _) -> do
   count <- trimEvents db
   pure (count, [])
 
@@ -1911,7 +1997,7 @@ readRetainedEventsWith :: NFData a => CoordinationStore
   -> Transaction (Text, Maybe Word64, b)
   -> (b -> RetainedEvents -> Transaction a)
   -> IO (Either EventReadFailure a)
-readRetainedEventsWith store (Transaction prepare) project = runTransaction store $ Transaction $ \context@(Context db _ _ _ _ _ _ _ _) -> do
+readRetainedEventsWith store (Transaction prepare) project = runTransaction store $ Transaction $ \context@(Context db _ _ _ _ _ _ _ _ _) -> do
   (expected, requested, binding) <- prepare context
   _ <- trimEvents db
   let Transaction readBatch = do
@@ -1960,7 +2046,7 @@ readRetainedEventsWith store (Transaction prepare) project = runTransaction stor
       _ -> refuseTransaction StoreIntegrity
 
 chargeInput :: Context -> Text -> [SQL.SQLData] -> IO ()
-chargeInput (Context _ _ _ budget _ _ _ _ _) sql parameters = do
+chargeInput (Context _ _ _ budget _ _ _ _ _ _) sql parameters = do
   when (T.length sql > 65536 || T.any (`elem` ['\0', ';']) sql) (throwIO StoreLimit)
   let sqlBytes = BS.length (TE.encodeUtf8 sql)
   when (sqlBytes > 65536) (throwIO StoreLimit)
