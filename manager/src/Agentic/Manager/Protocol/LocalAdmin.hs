@@ -44,6 +44,9 @@ data LocalAdminRequest
     -- manager reloads the file that it serves. Offline administration only
     -- validates the given file.
     ReloadProfiles
+  | -- | Stop admitting new work for the rest of the serving lifetime, and let
+    -- the owned runs continue to their ends. The request has no deadline.
+    Drain
   | OtherAdmin !Text
 
 -- | Fixed refusals. Storage failure makes no assertion about publication or COMMIT.
@@ -79,10 +82,11 @@ adminOperation request = case request of
   CheckQuarantine _ -> "check-quarantine"
   ReleaseQuarantine {} -> "release-quarantine"
   ReloadProfiles -> "reload-profiles"
+  Drain -> "drain"
   OtherAdmin name -> name
 
 otherOperations :: [Text]
-otherOperations = ["drain", "shutdown", "backup", "restore"]
+otherOperations = ["shutdown", "backup", "restore"]
 
 validLocalFile :: FilePath -> Bool
 validLocalFile path = let value = T.pack path in T.length value >= 2 && T.length value <= 8192
@@ -112,6 +116,7 @@ validAdminRequest request = case request of
   CheckQuarantine ident -> validId ident
   ReleaseQuarantine ident evidence digest -> validId ident && validId evidence && validDigest digest
   ReloadProfiles -> True
+  Drain -> True
   OtherAdmin name -> name `elem` otherOperations
 
 decodeLocalAdminRequest :: BS.ByteString -> Either AdminFailure LocalAdminRequest
@@ -121,7 +126,7 @@ decodeLocalAdminRequest bytes
       value <- either (\failure -> Left (if failure == "duplicate-field" then DuplicateField else MalformedRequest)) Right (decodeStrictValue bytes)
       fields <- case value of Object fields -> Right fields; _ -> Left MalformedRequest
       operation <- case KM.lookup "operation" fields of Just (String name) -> Right name; _ -> Left MalformedRequest
-      unless (operation `elem` (["issue-credential","rotate-credential","revoke-credential","list-credentials","status","check-store","check-quarantine","release-quarantine","reload-profiles"] <> otherOperations)) (Left UnknownOperation)
+      unless (operation `elem` (["issue-credential","rotate-credential","revoke-credential","list-credentials","status","check-store","check-quarantine","release-quarantine","reload-profiles","drain"] <> otherOperations)) (Left UnknownOperation)
       case KM.lookup "version" fields of
         Just (Number 1) -> Right ()
         Just (Number _) -> Left UnsupportedVersion
@@ -156,6 +161,7 @@ parseRequest operation fields = case operation of
   "check-quarantine" -> CheckQuarantine <$> fields .: "quarantineId"
   "release-quarantine" -> ReleaseQuarantine <$> fields .: "quarantineId" <*> fields .: "cleanupEvidenceId" <*> fields .: "cleanupEvidenceDigest"
   "reload-profiles" -> pure ReloadProfiles
+  "drain" -> pure Drain
   _ -> do
     case operation of
       "backup" -> localFile "outputFile"

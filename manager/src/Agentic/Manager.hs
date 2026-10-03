@@ -9,7 +9,8 @@ module Agentic.Manager
     configurationSnapshot, selectConfiguredProfile, probeConfiguredProfile,
     CoordinationStore, StoreIdentity (..), StoreFailure (..), Checkpoint (..),
     withCoordinationStore, withServingStore, storeIdentity, checkpointStore, backupCoordinationStore, restoreCoordinationStore,
-    LocalAdminRequest, decodeLocalAdminRequest, administerCredentials, withLocalAdministration, ServeHooks (..), serveManager,
+    LocalAdminRequest, decodeLocalAdminRequest, administerCredentials, withLocalAdministration,
+    AdministrationHooks (..), offlineAdministration, StoreState (..), ServeHooks (..), serveManager,
   ) where
 
 import Agentic.Manager.Profile
@@ -18,7 +19,8 @@ import Agentic.Manager.Root
 
 import Agentic.Manager.Store
 import Agentic.Manager.Credentials (administerCredentials)
-import Agentic.Manager.LocalAdmin (withLocalAdministration)
+import Agentic.Manager.LocalAdmin (AdministrationHooks (..), offlineAdministration, withLocalAdministration)
+import Agentic.Manager.Quarantine (StoreState (..))
 import Agentic.Manager.Protocol.LocalAdmin (LocalAdminRequest, decodeLocalAdminRequest)
 import qualified Agentic.Manager.Application as Application
 import qualified Agentic.Manager.History as History
@@ -40,8 +42,10 @@ newtype ServeHooks = ServeHooks
 -- a configured profile. It is bound through 'History.bindLegacyHistory'
 -- before the service starts, and a binding that fails refuses the start with
 -- 'InvalidConfiguration'. With an administration root, the local
--- administration channel serves @reload-profiles@ with 'serveReload'. After a
--- successful reload, each installed profile is probed, as at the start.
+-- administration channel serves @reload-profiles@ with 'serveReload' and
+-- @drain@ with 'Service.drain', and @status@ reports @draining@ after a
+-- drain. After a successful reload, each installed profile is probed, as at
+-- the start. A drain keeps the listener serving until the process ends.
 serveManager :: ServeHooks -> Configuration -> [(FilePath, Text)] -> IO ()
 serveManager hooks configuration legacy = do
   https <- maybe (throwIO InvalidConfiguration) pure (configurationHttps configuration)
@@ -58,4 +62,6 @@ serveManager hooks configuration legacy = do
         let listen = Transport.runHttps https limits closing application
         case configurationAdministrationRoot configuration of
           Nothing -> listen
-          Just _ -> withLocalAdministration store (Service.wakeAdmission service) reload listen
+          Just _ -> withLocalAdministration store (AdministrationHooks
+            { hookState = (\closed -> if closed then StoreDraining else StoreServing) <$> Service.draining service,
+              hookWake = Service.wakeAdmission service, hookReload = Just reload, hookDrain = Just (Service.drain service) }) listen

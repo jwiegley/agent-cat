@@ -88,8 +88,15 @@ lifecycle = len(sys.argv) == 6 and sys.argv[5] == LIFECYCLE
 # serving, the command and receipt of each live reload in the manager log,
 # and offline validation through the offline configuration, which changes no
 # Store file. Each case prints its own PASS line. It runs one manager
-# lifetime. The manager has two execution reservations, so that the stale
-# review and the new request do not wait for each other.
+# lifetime. Case 2 is drain in a second lifetime: two owned runs at their
+# person questions, a review and a request that waits for capacity, a new
+# enqueue that refuses during the drain, one run answered to completion and
+# one cancelled during the drain, the run collection and an event stream
+# after both runs end, the drain records in the manager log, and a third
+# lifetime that prepares a new review for the request whose review the drain
+# stopped. The manager has three execution reservations, so that the stale
+# review and the new request of case 1 do not wait for each other, and so
+# that the two runs and the review of case 2 fill them.
 OPERATIONS = "operations"
 operations_mode = len(sys.argv) == 6 and sys.argv[5] == OPERATIONS
 mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, OPERATIONS, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-client-controls", "emacs-client", "emacs-client-controls", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline", "emacs-service", "emacs-service-broken-answer") + JOURNEYS
@@ -2503,7 +2510,7 @@ if (mixed and not client_controls_mode) or tui_mode in (OVERVIEW, TUI_FAILURES, 
         environment=[{"name": "PATH", "value": str(adapters)}]
         + ([{"name": "ACAT_PAGES_MARKER", "value": PAGES_ENVIRONMENT_MARKER}] if pages_mode else []))
 if operations_mode:
-    configuration["limits"]["executionReservations"] = 2
+    configuration["limits"]["executionReservations"] = 3
 # The tui-overview mode runs two mixed-controls runs at once and queues a
 # third request behind them. The manager has two execution reservations, and
 # each of its two profiles has its own resource key, so one run of each
@@ -4446,6 +4453,214 @@ def operations_checks():
           "and refused a duplicate profile with state-conflict;", len(before), "Store files kept their sizes and modification times",
           flush=True)
     print("PASS operations: reload-profiles case 1 held through the TLS 1.3 manager", flush=True)
+    operations_drain(with_second)
+
+
+def operations_drain(with_second):
+    """Case 2 is drain through the live channel of the second lifetime: two
+    owned runs wait at their person questions, a third request is in review
+    and a fourth waits for capacity. After the drain, the review is stopped
+    and its request returns to the queue, a new enqueue refuses, one run is
+    answered to completion and the other is cancelled, and reads and an event
+    stream answer after both runs end. A third lifetime prepares a new review
+    for the returned request. Each of the three holders is of its own
+    profile with its own resource key, so that they hold the three execution
+    reservations at once."""
+    drain = {"version": 1, "operation": "drain"}
+    status_request = {"version": 1, "operation": "status"}
+    base = with_second["profiles"][0]
+    served = dict(with_second, profiles=[dict(base, id="profile_" + str(index), resourceKeys=["drain_" + str(index)],
+                                              workspaceLabel="HTTPS drain fixture " + str(index)) for index in (1, 2, 3)])
+    config.write_text(json.dumps(served))
+    config.chmod(0o600)
+
+    def catalogue_workflow(authorized, profile):
+        status, catalogue, raw = request("/v1/workflows?profileId=" + profile, authorized)
+        assert status == 200, ("workflows", profile, status)
+        validate("WorkflowPage", catalogue, raw)
+        return next(item for item in catalogue["items"] if item["name"] == "mixed-controls")
+
+    def create_request(capabilities, authorized, workflow):
+        body = json.dumps({"workflowId": workflow["id"], "descriptorRevision": workflow["revision"],
+                           "profileId": workflow["profileId"], "profileRevision": workflow["profileRevision"]},
+                          separators=(",", ":")).encode()
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        status, created, raw = request("/v1/requests", authorized | {
+            "Content-Type": "application/json", "Idempotency-Key": key}, method="POST", payload=body)
+        assert status == 201, ("request creation", status, created.get("code"))
+        validate("Request", created, raw)
+        return created
+
+    def lifetime(number):
+        output = (work / f"server-{number}.stdout").open("wb")
+        errors = (work / f"server-{number}.stderr").open("wb")
+        process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(config),
+                                    "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+        return process, output, errors
+
+    def stop(number, process, output, errors):
+        if process.poll() is None:
+            process.terminate()
+        process.wait(timeout=25)
+        output.close()
+        errors.close()
+        (work / f"server-{number}.exit").write_text(str(process.returncode) + "\n")
+        assert process.returncode == 0, ("the manager exit", number, process.returncode)
+
+    process, output, errors = lifetime(1)
+    try:
+        wait_ready(process)
+        administration({"version": 1, "operation": "issue-credential", "label": "Operations drain",
+                        "scopes": ["observe", "submit", "control"], "profileIds": ["profile_1", "profile_2", "profile_3"],
+                        "expiresAt": "2999-01-01T00:00:00Z", "outputFile": str(work / "credential-drain")})
+        authorized = {"Authorization": "Bearer " + (work / "credential-drain").read_bytes().decode("ascii")}
+        status, capabilities, raw = request("/v1/capabilities", authorized)
+        assert status == 200
+        validate("Capabilities", capabilities, raw)
+        workflows = {profile: catalogue_workflow(authorized, profile) for profile in ("profile_1", "profile_2", "profile_3")}
+        client = mixed_client(capabilities, authorized)
+        observed, wait_for, mutate, _ = client
+
+        # Two owned runs wait at their person questions.
+        runs = []
+        for profile in ("profile_1", "profile_2"):
+            workflow = workflows[profile]
+            created = create_request(capabilities, authorized, workflow)
+            _, run = approve_mixed(created, workflow, client)
+            head, _, _ = drive_mixed(run, client, stop_at_question=True, overview=False)
+            assert head is not None, ("the run did not reach its question", run)
+            runs.append((created, run))
+        (answered_request, answered_run), (cancelled_request, cancelled_run) = runs
+
+        # A third request holds the last reservation in review, and a fourth
+        # waits for capacity.
+        reviewed = create_request(capabilities, authorized, workflows["profile_3"])
+        enqueue_mixed(reviewed, workflows["profile_3"], client)
+        current, _, _ = wait_for(reviewed["links"]["self"], "Request", lambda value: value["preparationId"] is not None)
+        stopped_preparation = current["preparationId"]
+        workflow = workflows["profile_1"]
+        waiting = create_request(capabilities, authorized, workflow)
+        enqueue_mixed(waiting, workflow, client)
+        wait_for(waiting["links"]["self"], "Request",
+                 lambda value: value["phase"] == "queued" and value["admission"]["reasons"] == ["capacity"])
+
+        # A fifth request has its inputs but is not enqueued before the drain.
+        late = create_request(capabilities, authorized, workflow)
+        for declaration in workflow["inputs"]:
+            value, tag, _ = observed(late["links"]["self"], "Request")
+            mutate(late["links"]["self"], {"operation": "set-input", "input": {"name": declaration["name"],
+                                                                                "source": "literal", "value": MIXED_TEXT}}, tag)
+        late_value, late_tag, _ = observed(late["links"]["self"], "Request")
+        assert late_value["phase"] == "draft" and not late_value["readiness"]["missing"], late_value["phase"]
+        overview, _, _ = observed("/v1/snapshot", "OverviewSnapshot")
+        cursor = overview["cursor"]
+        serving = administration(status_request)["result"]
+        assert serving["state"] == "serving" and serving["activeReservations"] == 3, serving
+
+        # 2a. The drain answers draining, status reports draining, a new
+        # enqueue refuses, and the waiting request stays queued.
+        drained = administration(drain)
+        assert drained["result"] == {"state": "draining"}, drained
+        reported = administration(status_request)["result"]
+        assert reported["state"] == "draining", reported
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        status, problem, raw, _ = exchange(late["links"]["self"], authorized | {
+            "Content-Type": "application/json", "Idempotency-Key": key, "If-Match": late_tag},
+            method="POST", payload=b'{"operation":"enqueue"}')
+        assert status == 503 and problem["code"] == "storage-unavailable", ("the enqueue during the drain", status, problem.get("code"))
+        validate("Problem", problem, raw)
+        returned, _, _ = wait_for(reviewed["links"]["self"], "Request",
+                                  lambda value: value["phase"] == "queued" and value["admission"]["state"] == "waiting")
+        preparation, _, _ = observed("/v1/preparations/" + stopped_preparation, "Preparation")
+        assert preparation["state"] == "invalidated", preparation["state"]
+        queued, _, _ = observed(waiting["links"]["self"], "Request")
+        assert queued["phase"] == "queued" and queued["admission"]["state"] == "waiting", (queued["phase"], queued["admission"])
+        print("PASS operations case 2a: drain answered", drained["result"], "and status reported draining; an enqueue during",
+              "the drain refused with 503 storage-unavailable; the review", stopped_preparation, "was invalidated and its",
+              "request returned to the queue, and the waiting request stayed queued", flush=True)
+
+        # 2b. One owned run is answered to completion, and the other is
+        # cancelled through its control and cleaned up.
+        _, answers, retries = drive_mixed(answered_run, client, overview=False)
+        assert answers == 1, ("the answers of the drained run", answers, retries)
+        control, tag, _ = observed("/v1/runs/" + cancelled_run + "/control", "RunControl")
+        assert control["cancelAllowed"] and control["supervision"] == "owned", (control["cancelAllowed"], control["supervision"])
+        key = capabilities["authorityEpoch"] + "." + secrets.token_urlsafe(16)
+        status, receipt, raw, _ = exchange("/v1/runs/" + cancelled_run + "/control", authorized | {
+            "Content-Type": "application/json", "Idempotency-Key": key, "If-Match": tag},
+            method="POST", payload=b'{"operation":"cancel"}')
+        assert status == 202, ("the cancel during the drain", status, receipt.get("code"))
+        validate("CommandReceipt", receipt, raw)
+        command, _, _ = wait_for(receipt["links"]["self"], "CommandReceipt",
+                                 lambda value: value["acknowledgement"] is not None or value["state"] in ("refused", "unresolved"))
+        assert command["state"] in ("acknowledged", "effect-observed"), ("the cancel command", command["state"])
+        cancel = receipt["id"]
+        snapshot, _, _ = wait_for("/v1/runs/" + cancelled_run + "/snapshot", "RunSnapshot",
+                                  lambda value: value["runtime"] is not None and value["runtime"]["status"] in ("succeeded", "failed", "cancelled"))
+        assert snapshot["runtime"]["status"] == "cancelled", snapshot["runtime"]["status"]
+        for created, run in runs:
+            released, _, _ = wait_for(created["links"]["self"], "Request",
+                                      lambda value: value["runId"] == run and value["admission"]["state"] == "released")
+            assert released["phase"] == "associated", released["phase"]
+        deadline = time.monotonic() + 30
+        while administration(status_request)["result"]["activeReservations"] != 0:
+            assert time.monotonic() < deadline, "the reservations of the drained runs were not released"
+            time.sleep(0.2)
+        print("PASS operations case 2b: run", answered_run, "was answered at its question and succeeded, and run", cancelled_run,
+              "was cancelled through", cancel, "and its reservation released, both during the drain", flush=True)
+
+        # 2c. After the last owned run ended, the run collection and an
+        # event stream answer, and the queue is unchanged.
+        status, page, raw, _ = fetch("/v1/runs", authorized)
+        assert status == 200, ("the run collection after the drain", status, page.get("code"))
+        validate("RunPage", page, raw)
+        listed = {item["id"] for item in page["items"]}
+        assert {answered_run, cancelled_run} <= listed, ("the drained runs are not listed", listed)
+        connection, stream, block = open_stream("/v1/events?after=" + cursor, authorized)
+        try:
+            assert b"data:" in block, ("the first event block after the drain", block[:200])
+        finally:
+            stream.close()
+            connection.close()
+        for created, phase in ((returned, "queued"), (queued, "queued"), (late_value, "draft")):
+            value, _, _ = observed(created["links"]["self"], "Request")
+            assert value["phase"] == phase, (created["id"], value["phase"], phase)
+        assert administration(status_request)["result"]["state"] == "draining"
+        print("PASS operations case 2c: after both runs ended, GET /v1/runs listed them and an event stream from the",
+              "cursor before the drain delivered events; the queued requests stayed queued", flush=True)
+    finally:
+        stop(1, process, output, errors)
+
+    # 2d. The next lifetime prepares a new review for the returned request.
+    process, output, errors = lifetime(2)
+    try:
+        wait_ready(process)
+        status, capabilities, raw = request("/v1/capabilities", authorized)
+        assert status == 200
+        observed, wait_for, _, _ = mixed_client(capabilities, authorized)
+        prepared, _, _ = wait_for(reviewed["links"]["self"], "Request",
+                                  lambda value: value["preparationId"] not in (None, stopped_preparation))
+        preparation, _, _ = observed("/v1/preparations/" + prepared["preparationId"], "Preparation")
+        assert preparation["state"] == "live", preparation["state"]
+        print("PASS operations case 2d: the next lifetime prepared review", prepared["preparationId"], "for request",
+              reviewed["id"], "that the drain returned to the queue", flush=True)
+    finally:
+        stop(2, process, output, errors)
+
+    # 2e. The manager log holds the drain command and its receipt.
+    flow_dir = work / "manager" / "flow"
+    stores = sorted(work.glob("manager/runs/runs/*/runtime"))
+    status, records, summary = read_flow("operations-drain-flow", [flow_dir] + stores, runner)
+    assert status == 0 and summary["verified"] and not summary["problems"], ("the flow verb", status, summary["problems"])
+    commands = [record for record in records if record["schema"] == "command" and record["body"].get("administration") == "drain"]
+    assert len(commands) == 1 and commands[0]["body"] == {"administration": "drain"}, commands
+    replies = [reply for reply in records if reply["log"] == commands[0]["log"] and reply.get("replyTo") == commands[0]["position"]]
+    assert len(replies) == 1 and replies[0]["schema"] == "receipt", replies
+    validate("LocalAdminResponse", replies[0]["body"])
+    assert replies[0]["body"]["result"] == {"state": "draining"}, replies[0]["body"]
+    print("PASS operations case 2e: the flow verb decoded the drain command at", commands[0]["position"],
+          "and its receipt", replies[0]["body"]["result"], flush=True)
+    print("PASS operations: drain case 2 held through the TLS 1.3 manager", flush=True)
 
 
 if operations_mode:

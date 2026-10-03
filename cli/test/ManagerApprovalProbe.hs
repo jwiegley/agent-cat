@@ -789,11 +789,12 @@ shutdownDrainChecks work native = withReadyRunnerProfiles [("profile",["shared"]
     result <- await(wait ending)
     check "genuine terminal drain completes without expiry" (result==ShutdownResult False(Right()))
     number store "SELECT count(*) FROM reservations WHERE state!='released'" >>= check "native drain releases only after original joined cleanup" . (==0)
+    number store ("SELECT count(*) FROM requests WHERE phase='queued' AND admission='waiting' AND queue_ordinal IS NOT NULL AND id='"<>draftId pending<>"'")
+      >>= check "drain returns the request of the unapproved preparation to the queue" . (==1)
     pure(draftId pending)
   withAdmission store $ \controller -> do
-    pending <- readDraft store proof pendingId >>= right
-    _ <- enqueueRequest controller proof pendingId(key "reuse-enqueue")(Just("\""<>draftRevision pending<>"\""))(encoded(object["operation" .= ("enqueue"::Text)])) >>= right
     live <- admitOldest controller >>= right >>= maybe(error "reused admission")pure
+    check "the next scope admits the request that the drain returned to the queue" (preparationRequestIdentity live==pendingId)
     void(await(awaitReview live) >>= right)
     check "same still-open Store prepares native work after healthy drain" True
 

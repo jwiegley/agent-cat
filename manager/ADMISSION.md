@@ -213,6 +213,21 @@ workflow success.
 `closeAdmission controller deadline` requests draining shutdown with an explicit
 absolute monotonic deadline in nanoseconds. `shutdownAdmission` also accepts
 `CancelNow`. Neither operation changes the frozen administrative JSON contract.
+
+`beginDrain controller` publishes a drain without a deadline and returns
+without waiting for the shutdown. The local `drain` operation of a serving
+manager uses it through `Service.drain`. In one STM transaction it writes the
+closed fence and, when no mode is set, the mode `DrainUntil maxBound`. The
+supervisor then runs the shutdown that this section describes, and the
+watchdog never expires the drain. The drain lasts until the scope ends or a
+caller selects `CancelNow`, which the mode merge of `shutdownAdmission` lets
+win. A termination signal ends the listener, and the scope exit then selects
+`CancelNow`. `admissionClosed` reports the closed fence. The scheduler of
+`Agentic.Manager.Service` does not poll a closed controller, so a drain
+records no admission fault, and `status` reports `draining` while the fence
+is closed. When the last owned run has ended, the supervisor completes the
+shutdown and releases the Store admission. The service keeps its listener,
+reads and event streams until the process ends.
 Scope exit uses explicit cancellation as lifetime cleanup, not an implicit drain
 timeout. The original body exception retains precedence over cleanup failure.
 
@@ -222,6 +237,15 @@ COMMIT. These are logical validation boundaries, not simultaneous STM and SQLite
 commits. Shutdown accounts for already-entered acceptance before distinguishing
 committed starts from genuinely unapproved preparations. Unapproved preparations
 are invalidated through existing finalization. Queued facts remain durable.
+During a drain, the shutdown stops each preparation whose start has not
+committed with `StopDrain`. That preparation is cleaned up as the manager's
+own close, with the pending kind `closed`, and its review becomes invalid with
+the reason `worker-lost`. Its final publication returns the request to
+`queued` with the admission `waiting`, keeps the original queue ordinal and
+enqueue association, and queues no request ending. The next lifetime restores
+the enqueue permit through `reconcileDrafts` and prepares a new review for the
+request. A preparation that explicit cancellation or drain expiry stopped
+first returns its request to `draft`, as before.
 Original accepted starts, ticket delivery and authorized live-run controls can
 continue during healthy drain through the same bounded operation ownership.
 History still observes that actual live ownership. Verified original start
@@ -270,8 +294,9 @@ FULL. Its I/O function injects a SQLite I/O result, not a device or VFS failure.
 No connection pointer escapes either callback.
 
 The approval probe's `shutdown-drain` mode checks committed original delivery,
-unapproved invalidation, person answers, owned History, genuine terminal evidence
-and native reuse. The existing captured-source `shutdown-races` audit adds only
+unapproved invalidation, the return of the unapproved request to the queue,
+person answers, owned History, genuine terminal evidence, and native reuse that
+admits the returned request without another enqueue. The existing captured-source `shutdown-races` audit adds only
 phase barriers before validation, after committed approval and after shutdown mode
 publication. It checks refusal versus retained original consent, exactly-once
 delivery and an old caller delayed across completed shutdown and actual native

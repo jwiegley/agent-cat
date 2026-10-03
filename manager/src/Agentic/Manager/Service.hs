@@ -3,7 +3,7 @@
 
 -- | One live coordinator and bounded indexes of its original owned associations.
 module Agentic.Manager.Service
-  ( Service, withService, withServiceRequest, serviceStore, serviceFault, wakeAdmission,
+  ( Service, withService, withServiceRequest, serviceStore, serviceFault, wakeAdmission, drain, draining,
     enqueue, editInput, withdraw, approve, discard, submitExport, submitLineage, controlRun, controlDecision, readControl, withControl,
     withSnapshot, withSnapshotSource, withOverviewSource, Overview.Collection (..), withCollectionSource,
     withRun, withOutputs, withOutputsSource, withExportsSource, withExport, withLineageSource, download
@@ -80,6 +80,20 @@ serviceFault = readTVarIO . faultCell
 wakeAdmission :: Service -> IO ()
 wakeAdmission = atomically . A.notifyAdmission . admission
 
+-- | Begin the drain of this service and return at once. New admission work
+-- refuses with @storage-unavailable@ for the rest of the lifetime, the
+-- scheduler stops polling admission, each preparation whose start has not
+-- committed stops and returns its request to the queue, and the owned runs
+-- continue with their controls. Reads and event streams keep serving until
+-- the service scope ends. See 'A.beginDrain'.
+drain :: Service -> IO ()
+drain = A.beginDrain . admission
+
+-- | Whether this service no longer admits new work: a drain or a shutdown
+-- has begun.
+draining :: Service -> IO Bool
+draining = atomically . A.admissionClosed . admission
+
 -- | The service of one Store lifetime. The legacy bindings come from
 -- 'History.bindLegacyHistory' and are never controllable.
 withService :: CoordinationStore -> [History.LegacyHistory] -> (Service -> IO a) -> IO a
@@ -131,7 +145,9 @@ schedule service = loop False
           Nothing -> pure ()
           Just changed -> loop (deferred || changed)
 
--- Each notification denotes new queue or released-reservation facts. Only a
+-- Each notification denotes new queue or released-reservation facts. A
+-- closed Admission controller, as during a drain, is not polled, so a drain
+-- records no fault. Only a
 -- proven unentered configuration callback keeps that notification pending.
 -- Opaque failures are recorded in the fault cell and the private log. They
 -- are never retried by the timer or made cancellation.
@@ -141,13 +157,18 @@ schedule service = loop False
 -- behind sixteen reservations names capacity.
 fill :: Service -> IO Bool
 fill service = do
-  (closing, count) <- atomically $ (,) <$> readTVar (stopping service) <*> (Map.size <$> readTVar (owned service))
+  (closing, count) <- atomically $ (,) <$> ((||) <$> readTVar (stopping service) <*> A.admissionClosed (admission service))
+    <*> (Map.size <$> readTVar (owned service))
   if closing then pure False else do
     outcome <- try @SomeException (A.refreshAdmission (count < 16) (admission service))
     case outcome of
       Left failure | Just asynchronous <- (fromException failure :: Maybe SomeAsyncException) -> throwIO asynchronous
       Left failure -> faulted (classifyFault failure)
-      Right (Left failure) -> faulted (CommandRefusal failure)
+      -- A drain that began during this poll closes the fence before the
+      -- poll's transaction, and that refusal is not a fault.
+      Right (Left failure) -> do
+        drained <- atomically (A.admissionClosed (admission service))
+        if drained then pure False else faulted (CommandRefusal failure)
       Right (Right A.AdmissionDeferred) -> pure True
       Right (Right A.AdmissionIdle) -> atomically (writeTVar (faultCell service) Nothing) >> pure False
       Right (Right (A.AdmissionReady live)) -> do

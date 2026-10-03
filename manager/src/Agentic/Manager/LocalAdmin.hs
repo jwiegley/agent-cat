@@ -2,12 +2,15 @@
 {-# LANGUAGE TypeApplications #-}
 
 -- | A same-user local channel to an existing coordinator, not a second writer.
-module Agentic.Manager.LocalAdmin (withLocalAdministration, callLocalAdministration, administerLocally, ProfileReload) where
+module Agentic.Manager.LocalAdmin
+  ( withLocalAdministration, callLocalAdministration, administerLocally,
+    AdministrationHooks (..), offlineAdministration, ProfileReload
+  ) where
 
 import Agentic.Manager.Administration (localAdministrator, recordAdministration, recordAdministrationReceipt)
 import Agentic.Manager.Configuration (Configuration, configurationAdministrationRoot)
 import Agentic.Manager.Credentials (administerCredentials)
-import Agentic.Manager.Flow (AdministrationBody (ReloadAdministration))
+import Agentic.Manager.Flow (AdministrationBody (DrainAdministration, ReloadAdministration))
 import Agentic.Manager.Profile (Diagnostic (UnreadableConfiguration), PublicProfile, publicId, publicRevision)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.Protocol.LocalAdmin
@@ -18,7 +21,7 @@ import Agentic.Runtime (PrivateRoot, assertPrivateRoot, closePrivateRoot, openPr
 import Control.Concurrent.Async (link, withAsync)
 import Control.Exception (IOException, bracket, finally, throwIO, try)
 import Control.Monad (forever, unless, void)
-import Data.Aeson (Value (..))
+import Data.Aeson (Value (..), object, (.=))
 import qualified Data.Aeson.KeyMap as KM
 import Data.Bits ((.&.))
 import qualified Data.ByteString as BS
@@ -38,14 +41,26 @@ import System.Timeout (timeout)
 -- again and install the profiles, or refuse and keep the installed profiles.
 type ProfileReload = IO (Either Diagnostic [PublicProfile])
 
+-- | The lifetime facts and actions that one dispatch of a request uses.
+-- 'hookState' is the state that @status@ reports. 'hookWake' tells the
+-- running admission controller that a committed quarantine release freed its
+-- execution slot and resource keys, or that a profile reload installed new
+-- profiles. 'hookReload' performs @reload-profiles@ and 'hookDrain' performs
+-- @drain@ on a serving manager. Without them, the dispatch refuses those
+-- operations with 'StateConflict'.
+data AdministrationHooks = AdministrationHooks
+  { hookState :: IO StoreState, hookWake :: IO (), hookReload :: Maybe ProfileReload, hookDrain :: Maybe (IO ()) }
+
+-- | The hooks of offline administration: the Store is stopped, no admission
+-- controller runs, and nothing can be reloaded or drained.
+offlineAdministration :: AdministrationHooks
+offlineAdministration = AdministrationHooks (pure StoreStopped) (pure ()) Nothing Nothing
+
 -- | Serve the frozen requests while retaining the original Store configuration
 -- and endpoint lease. The configuration guard is released before any request.
--- The wake action tells the running admission controller that a committed
--- quarantine release freed its execution slot and resource keys, or that a
--- profile reload installed new profiles. The reload action performs
--- @reload-profiles@.
-withLocalAdministration :: CoordinationStore -> IO () -> ProfileReload -> IO a -> IO a
-withLocalAdministration store wake reload action = do
+-- The hooks are those of the serving manager.
+withLocalAdministration :: CoordinationStore -> AdministrationHooks -> IO a -> IO a
+withLocalAdministration store hooks action = do
   result <- withStoreAdministration store $ \root -> do
     -- Exclusive directory ownership, not process absence, permits stale-name removal.
     previous <- try @IOException (checkedSocket root)
@@ -73,28 +88,28 @@ withLocalAdministration store wake reload action = do
             Left _ -> pure (adminError Nothing MalformedRequest)
             Right bytes -> case decodeLocalAdminRequest bytes of
               Left failure -> pure (adminError Nothing failure)
-              Right request -> administerLocally StoreServing wake (Just reload) store request
+              Right request -> administerLocally hooks store request
           -- Only connection IO has an outer deadline. An admitted mutation is
           -- neither interrupted by this timer nor retried after a lost reply.
           void (try @IOException (boundedIO 5000000 (Net.sendAll connection response)))
 
 -- | Dispatch one decoded request to its owner on the original Store. The live
--- channel passes 'StoreServing', the wake of its admission controller and its
--- profile reload. Offline administration passes 'StoreStopped', no wake,
--- since no controller runs, and no reload. Offline @reload-profiles@ only
--- validates a file, before any Store opens, so without a reload this
--- dispatch refuses it with 'StateConflict'.
-administerLocally :: StoreState -> IO () -> Maybe ProfileReload -> CoordinationStore -> LocalAdminRequest -> IO BS.ByteString
-administerLocally state wake reload store request = case request of
-  Status -> reportStatus state store
+-- channel passes the hooks of the serving manager. Offline administration
+-- passes 'offlineAdministration'. Offline @reload-profiles@ only validates a
+-- file, before any Store opens, and offline @drain@ has no lifetime to drain,
+-- so without their hooks this dispatch refuses them with 'StateConflict'.
+administerLocally :: AdministrationHooks -> CoordinationStore -> LocalAdminRequest -> IO BS.ByteString
+administerLocally hooks store request = case request of
+  Status -> hookState hooks >>= \state -> reportStatus state store
   CheckStore -> reportStoreCheck store
   CheckQuarantine ident -> checkQuarantine store ident
-  ReleaseQuarantine ident evidence digest -> releaseQuarantine store wake ident evidence digest
+  ReleaseQuarantine ident evidence digest -> releaseQuarantine store (hookWake hooks) ident evidence digest
   IssueCredential {} -> administerCredentials store request
   RotateCredential {} -> administerCredentials store request
   RevokeCredential {} -> administerCredentials store request
   ListCredentials -> administerCredentials store request
-  ReloadProfiles -> maybe (pure (adminError (Just (adminOperation request)) StateConflict)) (reloadServing store wake) reload
+  ReloadProfiles -> maybe (pure (adminError (Just (adminOperation request)) StateConflict)) (reloadServing store (hookWake hooks)) (hookReload hooks)
+  Drain -> maybe (pure (adminError (Just (adminOperation request)) StateConflict)) (drainServing store) (hookDrain hooks)
   OtherAdmin _ -> administerCredentials store request
 
 -- | @reload-profiles@ on a serving manager. A transaction appends the command
@@ -109,27 +124,51 @@ administerLocally state wake reload store request = case request of
 -- installed profiles. A command record that cannot be appended refuses the
 -- reload with 'StorageUnavailable' before it runs.
 reloadServing :: CoordinationStore -> IO () -> ProfileReload -> IO BS.ByteString
-reloadServing store wake reload = do
+reloadServing store wake reload = recordedServing store operation ReloadAdministration $ do
+  result <- reload
+  case result of
+    Left UnreadableConfiguration -> pure (failure StorageUnavailable, pure ())
+    Left _ -> pure (failure StateConflict, pure ())
+    Right profiles -> do
+      advanceAuthorizationRevision store
+      pure (adminSuccess operation (reloadedProfiles [(publicId profile, publicRevision profile) | profile <- profiles]), wake)
+  where
+    operation = "reload-profiles"
+    failure = adminError (Just operation)
+
+-- | @drain@ on a serving manager. A transaction appends the command record of
+-- the drain to the manager log and commits. The drain is then published, and
+-- the answer @{state: draining}@ and its receipt follow. The drain has no
+-- deadline and lasts for the rest of the lifetime. A repeated drain answers
+-- the same. A command record that cannot be appended refuses the drain with
+-- 'StorageUnavailable' before it is published.
+drainServing :: CoordinationStore -> IO () -> IO BS.ByteString
+drainServing store drain = recordedServing store "drain" DrainAdministration $ do
+  drain
+  pure (adminSuccess "drain" (object ["state" .= ("draining" :: Text)]), pure ())
+
+-- | One mutating operation of a serving manager that changes no Store row. A
+-- transaction appends its command record to the manager log and commits. The
+-- operation then runs and gives its response and an action that follows the
+-- receipt. The receipt of the response is appended, and the action runs. A
+-- size limit of the log refuses with 'SizeLimit', a refused append with its
+-- refusal, and every other failure with 'StorageUnavailable', each before the
+-- operation runs.
+recordedServing :: CoordinationStore -> Text -> AdministrationBody -> IO (BS.ByteString, IO ()) -> IO BS.ByteString
+recordedServing store operation body perform = do
   principal <- localAdministrator
   recorded <- try @IOException (try @AdminFailure (try @StoreFailure (withStoreRequest store $ \scoped ->
-    runTransaction scoped ((\logged -> (logged, [])) <$> recordAdministration scoped principal ReloadAdministration))))
+    runTransaction scoped ((\logged -> (logged, [])) <$> recordAdministration scoped principal body))))
   case recorded of
     Right (Right (Right logged)) -> do
-      result <- reload
-      response <- case result of
-        Left UnreadableConfiguration -> pure (failure StorageUnavailable)
-        Left _ -> pure (failure StateConflict)
-        Right profiles -> do
-          advanceAuthorizationRevision store
-          pure (adminSuccess operation (reloadedProfiles [(publicId profile, publicRevision profile) | profile <- profiles]))
+      (response, after) <- perform
       answered <- recordAdministrationReceipt store principal logged response
-      either (const (pure ())) (const wake) result
+      after
       pure answered
     Right (Right (Left StoreLimit)) -> pure (failure SizeLimit)
     Right (Left refusal) -> pure (failure refusal)
     _ -> pure (failure StorageUnavailable)
   where
-    operation = "reload-profiles"
     failure = adminError (Just operation)
 
 -- | Nothing selects the existing offline path. A configured channel failure

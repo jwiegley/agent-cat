@@ -855,7 +855,8 @@ storage failures are not converted into successful receipts.
 the command boundary. Offline administration and a configured same-user local
 channel implement credential listing, issuance, rotation and revocation, the
 read-only `status`, `check-store` and `check-quarantine` operations, and
-`release-quarantine`.
+`release-quarantine`. The configured local channel also implements
+`reload-profiles` and `drain`.
 `check-quarantine` answers `clean` with cleanup evidence when the reservation
 never launched a run, when the run log of its run holds the terminal record
 of the runtime, or when that run has no terminal record and the exclusive lock
@@ -887,8 +888,19 @@ file receive `state-conflict`, a file that cannot be read receives
 reload gives every profile a new revision, so a review prepared under an
 earlier revision refuses approval with `stale-revision`. The manager log
 records the reload and its receipt. Offline, `reload-profiles` only validates
-the given file and opens no Store. The operations `drain`, `shutdown`,
-`backup`, and `restore` receive `state-conflict`.
+the given file and opens no Store. `drain` takes no field and has no
+deadline. Through the live channel, the serving manager stops admitting new
+work for the rest of its lifetime and returns `state` `draining`, and
+`status` then reports `draining`. An enqueue, an input change and a
+withdrawal of a request then receive 503 `storage-unavailable`, and no new
+review is prepared. A request that waits in the queue stays queued. A review
+whose approval has not committed becomes invalid, and its request returns to
+the queue for the next lifetime. Started runs continue, and their decisions
+and controls, `cancel` included, work as usual. The manager keeps serving
+reads and event streams after the last run ends, until the process ends. The
+manager log records the drain and its receipt. No `/v1` route or problem code
+changes. Offline, `drain` receives `state-conflict`. The operations
+`shutdown`, `backup`, and `restore` receive `state-conflict`.
 Existing `RUNNER --tui` and native frontend commands remain unchanged.
 
 ```text

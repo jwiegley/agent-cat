@@ -5,10 +5,10 @@
 module Agentic.Cli.LocalAdmin (runLocalAdmin) where
 
 import Agentic.Manager.Configuration
-import Agentic.Manager.LocalAdmin (administerLocally, callLocalAdministration)
+import Agentic.Manager.LocalAdmin (administerLocally, callLocalAdministration, offlineAdministration)
 import Agentic.Manager.Profile (Diagnostic (UnreadableConfiguration), publicId, publicRevision)
 import Agentic.Manager.Protocol.LocalAdmin
-import Agentic.Manager.Quarantine (StoreState (StoreStopped), unavailableStoreCheck)
+import Agentic.Manager.Quarantine (unavailableStoreCheck)
 import Agentic.Manager.Store (CoordinationStore, StoreFailure, withCoordinationStore)
 import Control.Exception (IOException, bracket, throwIO, try)
 import Data.IORef (newIORef, readIORef, writeIORef)
@@ -22,7 +22,8 @@ import System.IO (stdin, stdout)
 -- selects offline ownership, including the normal restart reconciliation.
 -- Operations without an implementation refuse before either path. Offline
 -- reload-profiles validates the given file through the loader and answers
--- before the configuration lease and the Store are acquired.
+-- before the configuration lease and the Store are acquired. Offline drain
+-- has no serving lifetime to drain and refuses at the same point.
 runLocalAdmin :: (FilePath -> IO (Either Diagnostic Configuration)) -> FilePath -> IO ()
 runLocalAdmin load path = do
   input <- try @IOException (BS.hGet stdin 2097153)
@@ -47,6 +48,7 @@ runLocalAdmin load path = do
                     case (live, request) of
                       (Just response, _) -> pure response
                       (Nothing, ReloadProfiles) -> validateOffline value
+                      (Nothing, Drain) -> pure (adminError (Just (adminOperation request)) StateConflict)
                       (Nothing, _) -> do
                         installed <- installConfiguration value
                         case installed of
@@ -77,7 +79,7 @@ validateOffline value = do
 offline :: LocalAdminRequest -> ((CoordinationStore -> IO BS.ByteString) -> IO BS.ByteString) -> IO BS.ByteString
 offline request open = do
   entered <- newIORef False
-  result <- try @StoreFailure (open (\store -> writeIORef entered True >> administerLocally StoreStopped (pure ()) Nothing store request))
+  result <- try @StoreFailure (open (\store -> writeIORef entered True >> administerLocally offlineAdministration store request))
   opened <- readIORef entered
   case (request, result) of
     (_, Right response) -> pure response

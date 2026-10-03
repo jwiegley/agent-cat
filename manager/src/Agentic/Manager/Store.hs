@@ -477,14 +477,15 @@ orphanedReply db record content = case content of
 -- operation: the @credential_administration@ row of an issued credential, the
 -- row of the superseded credential that names the credential of a rotation,
 -- the revocation of a revoked credential, and the release of a released
--- reservation. A profile reload changes no Store row, so the Store never
--- holds its effect.
+-- reservation. A profile reload and a drain change no Store row, so the Store
+-- never holds their effect.
 administrationCommitted :: SQL.Database -> AdministrationBody -> IO Bool
 administrationCommitted db body = do
   found <- case body of
     ReleaseAdministration quarantine _ _ _ ->
       scalar' "SELECT EXISTS(SELECT 1 FROM reservations WHERE id=? AND state='released')" [quarantine]
     ReloadAdministration -> pure [[SQL.SQLInteger 0]]
+    DrainAdministration -> pure [[SQL.SQLInteger 0]]
     AdministrationBody {administrationOperation = operation, administrationCredential = credential, administrationPrevious = previous} -> case operation of
       AdministerIssue -> scalar' "SELECT EXISTS(SELECT 1 FROM credential_administration WHERE credential_id=?)" [credential]
       AdministerRotate -> case previous of
@@ -493,6 +494,7 @@ administrationCommitted db body = do
       AdministerRevoke -> scalar' "SELECT EXISTS(SELECT 1 FROM credentials WHERE id=? AND revoked=1)" [credential]
       AdministerRelease -> pure [[SQL.SQLInteger 0]]
       AdministerReload -> pure [[SQL.SQLInteger 0]]
+      AdministerDrain -> pure [[SQL.SQLInteger 0]]
   case found of
     [[SQL.SQLInteger flag]] -> pure (flag /= 0)
     _ -> throwIO StoreIntegrity

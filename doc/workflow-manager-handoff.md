@@ -1697,8 +1697,10 @@ G1.
   wakes admission, so that a queued request starts with one execution
   reservation. The lost run keeps its lost supervision. A refusal changes
   nothing. `reload-profiles` installs a changed profile set on the live
-  channel and validates the file offline (PG5). `drain` and `shutdown` still
-  answer `state-conflict`.
+  channel and validates the file offline (PG5). `drain` stops new admission
+  on the live channel for the rest of the lifetime, returns each unapproved
+  review's request to the queue and lets started runs finish (PG6).
+  `shutdown` still answers `state-conflict`.
 - The open of a serving lifetime answers each command ask of an earlier
   lifetime that has no reply. An ordinary command gets its current receipt
   or a failure reply, and an administration ask gets
@@ -2085,7 +2087,7 @@ Phase C.
 | WM-034 (`acat-wm-034-3vqz`) | Met for function. The legacy result retrieval and the stale-draft rule wait for operator decisions. | PC8, PC15 to PC30, gate steps 3, 9 and 11 | Open for the two operator decisions and the Emacs parity |
 | WM-035 (`acat-wm-035-9uqq`) | Met for function by the package lens. The working lens rated it partial for the 40x12 monitor and the 80x24 lineage review fit. PE6 met the 40x12 monitor (`acat-jdmd`), and PE7 met the 80x24 lineage review fit. | PC31 to PC33, gate steps 9, 10, 11 and 14, PE6, PE7 | Open for item 2 of `acat-phase-c-review-findings-hwxy` |
 | Phase A TUI polish findings | Delivered. The retrieval retry, the bounded refresh pause and `saveExact` after publication came with PC8. PE8 diagnosed the early `StoreBusy` on the answer route, and PE9 carries one admission deadline through the stacked Store locks of one Store request. | PC8, gate steps 3 and 11 | `acat-a6a7-fess-followup-1exm`, `acat-a10a11-fess-followup-33k1`, `acat-a5s2b-fess-followup-s9rl` open |
-| Quarantine inspection and release (WM-042, `acat-wm-042-sdg9`) | Met for the quarantine finding. WM-042 stays partial, because `drain` and `shutdown` still answer `state-conflict`. `reload-profiles` is implemented (PG5). | PC1 to PC3, gate steps 5 and 8 (`failures-manager`) | Open |
+| Quarantine inspection and release (WM-042, `acat-wm-042-sdg9`) | Met for the quarantine finding. WM-042 stays partial, because `shutdown` still answers `state-conflict`. `reload-profiles` (PG5) and `drain` (PG6) are implemented. | PC1 to PC3, gate steps 5 and 8 (`failures-manager`) | Open |
 | Floor stop (`acat-phase-b2-review-findings-x8fv`) | Met | PC4, gate steps 5 and 8 | Open for the low findings 5 to 11 |
 | Legacy windowing (`acat-phase-b2-review-findings-x8fv`) | Met | PC5, PC6, gate step 8 (`pages`) and step 9 (`tui-history`) | Open for the low findings 5 to 11 |
 | Adapter cancel (`acat-phase-b2-review-findings-x8fv`) | Met | PC7, gate step 7 | Open for the low findings 5 to 11 |

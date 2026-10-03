@@ -64,17 +64,16 @@ fields, unknown fields, unknown operations, malformed input, and oversized input
 refuse before dispatch with `operation: null`. Errors do not reflect input or
 parser diagnostics. The implemented operations are `issue-credential`,
 `rotate-credential`, `revoke-credential`, `list-credentials`, `status`,
-`check-store`, `check-quarantine`, `release-quarantine`, and
-`reload-profiles`. The other recognized operations, `drain`, `shutdown`,
-`backup`, and `restore`, receive `state-conflict` before the CLI reads the
-configuration.
+`check-store`, `check-quarantine`, `release-quarantine`, `reload-profiles`,
+and `drain`. The other recognized operations, `shutdown`, `backup`, and
+`restore`, receive `state-conflict` before the CLI reads the configuration.
 
 `status` and `check-store` are read-only. They change no Store row and append
 nothing to the manager log. `status` returns the authority epoch and stream
 identity of the Store, the process generation of the lifetime that answers, and
 the count of reservations that are not released, quarantined reservations
-included. Its `state` is `serving` through the live channel and `stopped` in
-offline administration. `check-store` runs the SQLite quick check on the open
+included. Its `state` is `serving` through the live channel, `draining` through
+the live channel after a `drain`, and `stopped` in offline administration. `check-store` runs the SQLite quick check on the open
 Store and reports `valid` or `corrupt`. It also lists, in identity order and at
 most 256, the identities of the reservations in state `quarantined` and of the
 claims that a restoration carried forward. A reservation identity is its
@@ -147,11 +146,15 @@ an already-owned installation and retains ordinary Store restart reconciliation.
 When that directory is configured, the CLI sends the same request to its private
 Unix socket and never opens a second Store or falls back after a channel failure.
 
-Trusted embedding uses `withLocalAdministration store wake reload action` to
-retain a local channel during the action. `wake` notifies the admission
-controller, and `reload` performs `reload-profiles`. `serveManager` builds
-`reload` from the `serveReload` member of its `ServeHooks` argument, which the
-CLI supplies. The original Store supplies its installed directory
+Trusted embedding uses `withLocalAdministration store hooks action` to retain
+a local channel during the action. The `AdministrationHooks` record supplies
+the state that `status` reports, the wake that notifies the admission
+controller, the action that performs `reload-profiles` and the action that
+performs `drain`. Offline administration dispatches with
+`offlineAdministration`, which reports `stopped`, wakes nothing and has no
+reload or drain action. `serveManager` builds the reload action from the
+`serveReload` member of its `ServeHooks` argument, which the CLI supplies,
+and the drain action and the state from its service. The original Store supplies its installed directory
 binding and retains the configuration lease. A separate exclusive directory
 lease prevents duplicate listeners and authorizes removal of a stale socket name.
 Regular files and symbolic links are not removed. A scoped listener removes only
@@ -326,6 +329,36 @@ configuration lease and opens no Store, so a serving manager does not refuse
 it and no Store file changes. Its `revision` comes from that discarded
 registry and equals no installed revision. An invalid file refuses with
 `state-conflict` and an unreadable file with `storage-unavailable`.
+
+### Drain
+
+`drain` has no request field and no deadline. Its result is the frozen
+`state` `draining`. Through the live channel, the serving manager appends the
+`command` record of the drain to the manager log, publishes the drain, and
+then answers and appends the response as the `receipt`. The drain lasts for
+the rest of the lifetime and cannot be reversed. A repeated `drain` answers
+`draining` again. The process ends at a termination signal, as before, and
+that signal cancels the work that the drain still waits for.
+
+During the drain the manager admits no new work. An enqueue, an input change
+and a withdrawal of a request refuse with 503 `storage-unavailable`, and so do
+the approval and the discard of a review while it is still live. A new
+request can still be created. The scheduler stops its admission polls. A
+request that waits in the queue stays queued. A preparation whose start has
+not committed stops, its review becomes invalid with the reason
+`worker-lost`, and its request returns to the queue with its original
+position, so that the next lifetime prepares a new review for it. A run that
+has started continues: its person questions, recovery decisions and controls,
+`cancel` included, work as usual, and its reservation is released when its
+worker ends. Reads, page sets and event streams keep serving after the last
+run ends, until the process ends. Case 2 of the `operations` mode of
+`manager/test/service_http.py` checks the enqueue refusal, the queued request,
+the invalid review and its returned request, an answer and a cancellation
+during the drain, and `GET /v1/runs` and an event stream after the last run
+ends.
+
+Offline, `drain` refuses with `state-conflict` before it acquires the
+configuration lease, because no serving lifetime exists to drain.
 
 ## Credential lifecycle through the serving manager
 
@@ -559,7 +592,8 @@ a request ending or a review ending, and `recordReceipt` appends them after the
 receipt or after the gap entry of a failed receipt. A replay appends none.
 
 The local administration channel of a serving manager records its credential
-operations, its quarantine releases and its profile reloads in the same log,
+operations, its quarantine releases, its profile reloads and its drain in the
+same log,
 through the shared helper `Agentic.Manager.Administration`. `administerCredentials` appends the
 `command` record of `issue-credential`, `rotate-credential` and
 `revoke-credential`, and `releaseQuarantine` appends the `command` record of
@@ -572,11 +606,11 @@ rotates to or revokes, the credential that a rotation supersedes, and the label,
 scopes, profiles and expiry of that credential. The bearer, its verifier and the
 output file never enter a record. The body of a release names the
 reservation, its request, and the cleanup evidence identity and digest that
-the release verified. The body of a profile reload holds only the
+the release verified. The body of a profile reload or a drain holds only the
 operation. Its transaction appends only the `command` record and commits
-before the reload runs, because the reload changes no Store row. The
+before the reload or the drain runs, because neither changes a Store row. The
 `receipt` then carries the result or the refusal. A lifetime that ends
-between the two leaves the reload `outcome-uncertain` at the next open. The
+between the two leaves the operation `outcome-uncertain` at the next open. The
 appends use the ceiling with which the
 lifetime opened its log, so a revocation still takes no configuration lock. The
 writer synchronizes the record. A failed append, or a decoded record that

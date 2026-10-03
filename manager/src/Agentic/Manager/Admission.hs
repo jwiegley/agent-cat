@@ -8,7 +8,7 @@ module Agentic.Manager.Admission
   ( Admission, LivePreparation, ReviewContext (..), MonotonicClock (..),
     withAdmission, withAdmissionClock, enqueueRequest, admitOldest, AdmissionPoll (..), pollAdmission, refreshAdmission,
     editRequestInput, withdrawRequest, awaitReview, withReviewAcceptance,
-    retryAdmissionCleanup, awaitAdmissionCleanup, closeAdmission, ShutdownMode (..), ShutdownResult (..), shutdownAdmission, reservationIdentity, observeLivePreparation, ownsHistoryRun,
+    retryAdmissionCleanup, awaitAdmissionCleanup, closeAdmission, beginDrain, admissionClosed, ShutdownMode (..), ShutdownResult (..), shutdownAdmission, reservationIdentity, observeLivePreparation, ownsHistoryRun,
     awaitAdmissionWork, notifyAdmission, preparationRequestIdentity, awaitAcceptedStart, requestPreparationStop,
     acceptControlCommand, acceptAndDeliverControlCommand, deliverAcceptedControl, acceptedControlContext,
     AcceptedStart, acceptStartCommand, acceptAndDeliverStartCommand, deliverAcceptedStart, stopAcceptedStart, observeAcceptedStart, acceptedStartRun, acceptedTimerRetired, invalidateLivePreparation, discardLivePreparation, consumeAcceptedStart
@@ -51,7 +51,7 @@ import qualified Data.List
 import qualified Database.SQLite3 as SQL
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Maybe (isJust)
+import Data.Maybe (isJust, isNothing)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -124,7 +124,10 @@ data AcceptedStart = AcceptedStart !Admission !Entry !DispatchTicket !Text
 acceptedStartRun :: AcceptedStart -> Text
 acceptedStartRun (AcceptedStart _ _ _ run) = run
 
-data Stop = StopCommand !DispatchTicket !Text !Text | StopService !Text
+-- 'StopDrain' is the stop of a preparation whose start had not committed when
+-- a drain began. Its cleanup is the cleanup of @StopService "closed"@, and its
+-- final publication returns the request to the queue.
+data Stop = StopCommand !DispatchTicket !Text !Text | StopService !Text | StopDrain
 -- Only this current in-memory operation may retry its own final publication.
 data Finalization = Finalization !(Maybe DispatchTicket) !Text !Text
 
@@ -165,6 +168,27 @@ withAdmissionClock timer owner action = mask $ \restore -> do
 -- | Normal shutdown drains until the caller's explicit monotonic deadline.
 closeAdmission :: Admission -> Word64 -> IO ShutdownResult
 closeAdmission controller deadline = shutdownAdmission controller (DrainUntil deadline)
+
+-- | Publish a drain without a deadline and return without waiting for the
+-- shutdown. One transaction writes the closed fence and, when no mode is set,
+-- the mode @DrainUntil maxBound@. The supervisor then runs its shutdown: each
+-- preparation whose start has not committed stops with 'StopDrain', and the
+-- started runs continue with their controls, since the run operations check
+-- the cancelled fence. A drain lasts until the scope ends or a caller selects
+-- 'CancelNow' through the mode merge of 'shutdownAdmission'. A drain after
+-- the shutdown completed, or while another mode is set, changes nothing.
+beginDrain :: Admission -> IO ()
+beginDrain controller = atomically $ do
+  done <- tryReadTMVar (finished controller)
+  when (isNothing done) $ do
+    writeTVar (closed controller) True
+    mode <- readTVar (shutdownMode controller)
+    when (isNothing mode) (writeTVar (shutdownMode controller) (Just (DrainUntil maxBound)))
+
+-- | Whether the closed fence refuses new admission work: a drain or a
+-- shutdown has begun, or the Store admission ended.
+admissionClosed :: Admission -> STM Bool
+admissionClosed = readTVar . closed
 
 -- | Scope teardown uses CancelNow. Repeated calls cannot postpone cancellation or
 -- erase an expired deadline. Only the retained supervisor and watchdog broadcast,
@@ -562,7 +586,7 @@ selectFinalization controller entry fallback = locked controller $ do
         Nothing -> do
           stopping <- atomically(tryReadTMVar(entryStop entry))
           started<-dbTerminalRead controller(startCommitted entry)
-          let kind=if started then "closed" else case stopping of Just(StopService reason)->reason;_->fallback
+          let kind=if started then "closed" else case stopping of Just(StopService reason)->reason;Just StopDrain->"closed";_->fallback
           revision <- markServiceCleanup controller entry kind
           let final=Finalization Nothing kind revision
           atomically(writeTVar(entryFinal entry)(Just final))
@@ -588,12 +612,16 @@ reviewWait controller entry deadline = do
 finishEntry :: Admission -> Entry -> FrontendWorker -> Stop -> IO ()
 finishEntry controller entry worker stopping = do
   started<-dbTerminalRead controller(startCommitted entry)
-  let effective=case stopping of StopService _ | started -> StopService "closed";_->stopping
+  -- A started run and a drain stop clean up as the manager's own close.
+  let effective=case stopping of
+        StopCommand ticket kind revision -> Left (ticket,kind,revision)
+        StopService kind | not started -> Right kind
+        _ -> Right "closed"
   case effective of
-    StopCommand ticket kind revision -> do
+    Left (ticket,kind,revision) -> do
       atomically(writeTVar(entryFinal entry)(Just(Finalization(Just ticket)kind revision)))
       dispatchCleanup entry ticket (discardAndClose controller entry (Just ticket) worker)
-    StopService kind -> do
+    Right kind -> do
       pending <- readTVarIO(entryFinal entry)
       case pending of
         Nothing -> do
@@ -681,13 +709,15 @@ finalizeKnown controller entry = locked controller $ do
   pending <- readTVarIO(entryFinal entry) >>= maybe(throwIO StateConflict)pure
   let Finalization ticket kind revision=pending
       finalPhase=if kind=="withdraw" then "withdrawn" else "draft"
+  stop <- atomically(tryReadTMVar(entryStop entry))
+  let drained=case stop of Just StopDrain -> True; _ -> False
   next <- fresh "request_revision_"
   runRevision <- fresh "run_revision_"
   let publish = do
         rows <- query "SELECT r.revision,r.phase,v.request_revision,v.process_generation,v.pending_command,v.pending_kind FROM requests r JOIN reservations v ON v.request_id=r.id WHERE r.id=? AND v.id=? AND v.state='cleanup-pending'"
           [text(entryRequest entry),text(entryReservation entry)]
         let command=maybe SQL.SQLNull (text.dispatchCommandId) ticket
-        case rows of
+        requeue <- case rows of
           [[SQL.SQLText actual,SQL.SQLText phaseName,SQL.SQLText bound,SQL.SQLText generation,storedCommand,SQL.SQLText storedKind]] -> do
             -- First Runtime evidence may associate after cleanup-pending committed.
             -- Only that exact post-start revision may supersede the retained fence.
@@ -697,13 +727,20 @@ finalizeKnown controller entry = locked controller $ do
               pure (case intents of [[SQL.SQLText run]] -> actual=="associated_"<>run; _ -> False)
               else pure False
             unless((actual==revision || associated) && bound==actual && generation==entryGeneration entry && storedCommand==command && storedKind==kind && phaseName `elem` (if kind=="closed" then ["preparing","review","start-pending","associated"] else ["preparing","review"]))(refuseTransaction StateConflict)
+            pure (drained && kind=="closed" && command==SQL.SQLNull && phaseName `elem` ["preparing","review"])
           _->refuseTransaction StateConflict
         execute "DELETE FROM reservation_resources WHERE reservation_id=?" [text(entryReservation entry)]
         execute "UPDATE reservations SET state='released',slot=NULL,request_revision=? WHERE id=?" [text next,text(entryReservation entry)]
-        execute "UPDATE requests SET phase=CASE WHEN phase IN ('start-pending','associated') THEN phase ELSE ? END,admission='released',revision=?,queue_ordinal=NULL,queue_origin_revision=NULL,queue_generation=NULL,blocking_reasons=? WHERE id=?"
-          [text finalPhase,text next,SQL.SQLBlob(encoded([]::[Text])),text(entryRequest entry)]
+        -- A preparation that a drain stopped before its start committed
+        -- returns its request to the queue with its original position, and
+        -- the request does not end.
+        if requeue
+          then execute "UPDATE requests SET phase='queued',admission='waiting',revision=?,blocking_reasons=? WHERE id=?"
+            [text next,SQL.SQLBlob(encoded([]::[Text])),text(entryRequest entry)]
+          else execute "UPDATE requests SET phase=CASE WHEN phase IN ('start-pending','associated') THEN phase ELSE ? END,admission='released',revision=?,queue_ordinal=NULL,queue_origin_revision=NULL,queue_generation=NULL,blocking_reasons=? WHERE id=?"
+            [text finalPhase,text next,SQL.SQLBlob(encoded([]::[Text])),text(entryRequest entry)]
         runChanges <- changeRunSupervision entry "cleanup-pending" "lost" runRevision
-        noticeRequestEnding entry kind (dispatchCommandId <$> ticket)
+        unless requeue (noticeRequestEnding entry kind (dispatchCommandId <$> ticket))
         pure (requestEvent(entryRequest entry)next:runChanges)
   case ticket of
     Nothing -> dbTerminalChange controller $ do events<-publish;pure((),events)
@@ -1255,7 +1292,7 @@ shutdown controller = do
     classification <- try @SomeException $ forM_ current $ \entry -> do
       stoppingNow <- readTVarIO(cancelled controller)
       started <- if stoppingNow then pure False else locked controller (dbTerminalRead controller(startCommitted entry))
-      unless started $ atomically(void(tryPutTMVar(entryStop entry)(StopService "closed")))
+      unless started $ atomically(void(tryPutTMVar(entryStop entry)(if stoppingNow then StopService "closed" else StopDrain)))
     case classification of
       Left _ -> void(requestCancellation controller)
       Right () -> pure()

@@ -42,12 +42,14 @@ import System.IO.Error (isAlreadyExistsError)
 import System.Posix.IO (closeFd)
 
 -- | The lifetime that answers @status@: the live channel of a serving
--- manager, or offline administration while no manager serves.
-data StoreState = StoreServing | StoreStopped
+-- manager, the live channel of a manager that drains and admits no new work,
+-- or offline administration while no manager serves.
+data StoreState = StoreServing | StoreDraining | StoreStopped
 
 stateName :: StoreState -> Text
 stateName state = case state of
   StoreServing -> "serving"
+  StoreDraining -> "draining"
   StoreStopped -> "stopped"
 
 -- | The durable identities of the Store, the process generation of the
