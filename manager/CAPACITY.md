@@ -768,7 +768,16 @@ written after its last PASS line. The prints change no assertion of a mode.
   exits with status 2, writes "manager service is unavailable" to
   standard error and serves no port. Offline `status` refuses with
   `storage-unavailable`, `check-store` reports `unavailable`, and the marker
-  remains. When the kill
+  remains. Before the kill, a lifetime creates one more draft, and a backup
+  of that Store is the other backup. On the fenced root, a restoration from
+  the other backup and a restoration with fencing evidence of another
+  authority epoch refuse with `state-conflict` and leave the marker bytes.
+  The same restoration then completes: it answers new identities and
+  removes the marker, `check-store` reports `valid`, and offline `status`
+  reports the new identities. The next `serve` lifetime issues a new
+  credential, which reads the draft of case 0, lists the requests without
+  the draft of the other backup, and runs a new `prompt-source` request to
+  success. When the kill
   of case 2 or case 3 lands outside its window, the case prints "not
   reached" and does not count. The mode writes the file
   `failures-backup-measure.json` with `failures.backup.passed` `true` after

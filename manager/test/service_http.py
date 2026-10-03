@@ -635,9 +635,18 @@ FAULTS_COMMANDS = 100
 #    the restoration verifies the capture of the root and that of the backup
 #    after the marker. Ordinary serve then exits with a failure status and
 #    serves no port, offline status refuses with storage-unavailable,
-#    check-store reports integrity unavailable, and the marker remains. When
-#    the restoration completes before the kill, the case prints "not
-#    reached".
+#    check-store reports integrity unavailable, and the marker remains.
+#    Before the kill, a lifetime creates one more draft, and a backup of
+#    that Store is the other backup. On the fenced root, a restoration from
+#    the other backup and a restoration with fencing evidence of another
+#    authority epoch refuse with state-conflict and leave the marker bytes.
+#    The same restoration then completes: it answers new identities and
+#    removes the marker, check-store reports integrity valid, and offline
+#    status reports the new identities. The next serve lifetime issues a
+#    new credential, which reads the draft of case 0, lists the requests
+#    without the draft of the other backup, and runs a new prompt-source
+#    request to success. When the restoration completes before the kill, the case
+#    prints "not reached".
 # The mode writes FAILURES_BACKUP_RECORD with failures.backup.passed true
 # after the PASS line of case 1 and the PASS or "not reached" lines of cases
 # 2 and 3, and with values that name no ceiling.
@@ -19692,7 +19701,19 @@ def failures_backup_checks():
         print("failures-backup case 2: not reached; the backup ended with status", child.returncode, "and the temporary copy",
               temporary, "before the kill", flush=True)
 
-    # Case 3. The restoration stopped by SIGKILL after its marker.
+    # Case 3. The restoration stopped by SIGKILL after its marker. Before it,
+    # a lifetime creates one more draft, and a backup of that Store is the
+    # other backup, whose database copy differs from that of complete.
+    process, resident, credentials = meter.begin("bk-other", root, ["cap_01"], {}, names)
+    try:
+        status, later, _ = meter.create(credentials["bk-1"], "cap_01", "captured-input")
+        assert status == 201, ("the draft of the other backup", status, later.get("code"))
+    finally:
+        meter.end("bk-other", process, resident, credentials)
+    other = work / "backup-3-other"
+    administration(backup(other), path=offline)
+    digest = lambda backup_directory: hashlib.sha256((backup_directory / "coordination.sqlite3").read_bytes()).hexdigest()
+    assert digest(other) != digest(complete), "the other backup has the database copy of the complete backup"
     identity = stopped_status()
     child = started(restore(complete))
     killed = False
@@ -19721,6 +19742,65 @@ def failures_backup_checks():
         print("PASS failures-backup case 3: SIGKILL stopped the restoration from", complete.name, "after its restore-in-progress",
               "marker; ordinary serve exited with status", fenced.returncode, "and served no port, offline status refused with",
               refused["error"]["code"], "check-store reports", checked["integrity"], "and the marker remains", flush=True)
+        # The restore of another backup and the restore with evidence of
+        # other identities refuse on the fenced root and leave the marker.
+        fence = marker.read_bytes()
+        conflict = administration(restore(other), refused="state-conflict", path=offline)
+        assert marker.read_bytes() == fence, "the restore of another backup changed the marker"
+        saved = evidence.read_bytes()
+        mismatched = json.loads(saved)
+        mismatched["result"]["authorityEpoch"] = "authority_other"
+        evidence.write_text(json.dumps(mismatched) + "\n")
+        try:
+            administration(restore(complete), refused="state-conflict", path=offline)
+        finally:
+            evidence.write_bytes(saved)
+        assert marker.read_bytes() == fence, "the restore with other fencing evidence changed the marker"
+        # The same restore completes the interrupted restoration.
+        completion = administration(restore(complete), path=offline)["result"]
+        assert not marker.exists(), "the completed restoration left its marker"
+        rotated = (completion["authorityEpoch"], completion["streamId"])
+        assert rotated[0] != identity[0] and rotated[1] != identity[1] and completion["credentialsRevoked"] is True, (
+            "the completed restoration", completion, identity)
+        checked = administration(check_request, path=offline)["result"]
+        assert checked["integrity"] == "valid", ("check-store after the completed restoration", checked)
+        current = administration(status_request, path=offline)["result"]
+        assert current["state"] == "stopped" and (current["authorityEpoch"], current["streamId"]) == rotated, (current, rotated)
+        print("PASS failures-backup case 3: on the fenced root a restore of", other.name, "and a restore with fencing evidence of",
+              "another authority epoch refused with", conflict["error"]["code"], "and left the marker; the same restore of",
+              complete.name, "completed with authority epoch", rotated[0], "and stream", rotated[1] + ", removed the marker,",
+              "and check-store reports", checked["integrity"], flush=True)
+        # Serve starts. A reprovisioned credential reads the restored
+        # history and runs a new request to completion.
+        process, resident, credentials = meter.begin("bk-restored", root, ["cap_01"], {}, ["bk-restored"])
+        try:
+            reader = credentials["bk-restored"]
+            assert meter.state["epoch"] == rotated[0], ("the authority epoch after the completion", meter.state["epoch"])
+            value, _, _ = meter.read(reader, draft["links"]["self"], "Request")
+            assert value["id"] == draft["id"] and value["phase"] == served["phase"], ("the restored draft", value, served)
+            listed = [item["id"] for item in meter.one_page(reader, "/v1/requests", "RequestPage")["items"]]
+            assert draft["id"] in listed and later["id"] not in listed, ("the restored requests", listed, draft["id"], later["id"])
+            created, status, receipt, _ = meter.submit(reader, "cap_01", "prompt-source")
+            assert status == 202, ("the enqueue after the completion", status, receipt.get("code"))
+            current, _ = meter.settle(reader, created["links"]["self"],
+                                      lambda value: value["phase"] == "review" and value["preparationId"] is not None,
+                                      "the request after the completion did not reach review")
+            meter.approve(reader, current["preparationId"], created["id"])
+            current, _ = meter.settle(reader, created["links"]["self"], lambda value: value["runId"] is not None,
+                                      "the run after the completion did not start")
+            deadline = time.monotonic() + 60
+            while True:
+                snapshot, _, _ = meter.read(reader, "/v1/runs/" + current["runId"] + "/snapshot", "RunSnapshot")
+                if snapshot["runtime"] is not None and snapshot["runtime"]["status"] in ("succeeded", "failed", "cancelled"):
+                    break
+                assert time.monotonic() < deadline, ("the run after the completion did not end", current["runId"])
+                time.sleep(0.05)
+            assert snapshot["runtime"]["status"] == "succeeded", ("the run after the completion", snapshot["runtime"]["status"])
+        finally:
+            meter.end("bk-restored", process, resident, credentials)
+        print("PASS failures-backup case 3: serve started after the completion; the reprovisioned credential read draft",
+              draft["id"], "of the restored history, whose request list does not hold draft", later["id"], "of the other backup, and run",
+              current["runId"], "of a new request succeeded", flush=True)
     else:
         print("failures-backup case 3: not reached; the restoration ended with status", child.returncode, "and the marker",
               "exists" if marker.exists() else "is absent", flush=True)

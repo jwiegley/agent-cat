@@ -128,8 +128,8 @@ if mode == "authorization-commit-gap":
 elif mode == "restore-interruption":
     store = "manager/src/Agentic/Manager/Store.hs"
     replace(store, "import Agentic.Manager.Lease (duplicateLease)\n", "import qualified Agentic.Manager.Test.AcceptanceAudit as Audit\nimport Agentic.Manager.Lease (duplicateLease)\n")
-    replace(store, '      publishBytes root ["restore-in-progress"] (BL.toStrict(encode(revision,storeAuthorityEpoch identity,claims)))\n',
-            '      publishBytes root ["restore-in-progress"] (BL.toStrict(encode(revision,storeAuthorityEpoch identity,claims)))\n      Audit.afterCurrentReview "restore-marker"\n')
+    replace(store, '          publishBytes root ["restore-in-progress"] (encodeRestorationMarker marker)\n',
+            '          publishBytes root ["restore-in-progress"] (encodeRestorationMarker marker)\n          Audit.afterCurrentReview "restore-marker"\n')
     target, arguments = "manager-admission-check", ["restart-interruption"]
 elif mode == "shutdown-races":
     replace(commands, "import Agentic.Manager.Authorization\n", "import qualified Agentic.Manager.Test.AcceptanceAudit as Audit\nimport Agentic.Manager.Authorization\n")

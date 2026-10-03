@@ -297,12 +297,55 @@ restartChecks work = do
       (restoreCoordinationStore installed backup (fenceOf before))
     current >>= restoreCoordinationStore installed backup >>= check "a repeated restore installs new identities" . (/= installedIdentity)
     withCoordinationStore installed $ \store -> runRead store reservationOccupancy >>= check "repeated restore deduplicates only identical original claims" . (==expected)
+    -- A complete backup of the current Store, which differs from the backup
+    -- of the restorations.
+    let otherBackup=work </> "snapshot-other"
+    other <- backupCoordinationStore installed otherBackup
+    check "the other backup has another database copy" (backupSha256 other /= backupSha256 copied)
     -- An actual target publication failure must retain the restoration fence.
     BS.writeFile capture "changed target bytes"
     fence <- current
     expect "different immutable target bytes are never overwritten" StoreIntegrity (restoreCoordinationStore installed backup fence)
     doesFileExist(root </> "restore-in-progress") >>= check "failed restoration leaves durable startup fence"
     expect "incomplete restore refuses ordinary serving" StoreUnavailable(withCoordinationStore installed (const(pure())))
+    expect "incomplete restore refuses a backup" StoreUnavailable(backupCoordinationStore installed (work </> "snapshot-fenced"))
+    -- An interruption after the database copy leaves the database of the
+    -- backup, whose identities are those before the restorations.
+    withDatabase SQL.SQLOpenReadOnly (backup </> "coordination.sqlite3") $ \source ->
+      withDatabase SQL.SQLOpenReadWrite (root </> "coordination.sqlite3") $ \target -> do
+        copy <- SQL.backupInit target "main" source "main"
+        (SQL.backupStep copy (-1) >>= check "the fixture copies the backup database into the fenced root" . (\step -> case step of SQL.BackupDone -> True; _ -> False))
+          `finally` SQL.backupFinish copy
+    markerBytes <- BS.readFile(root </> "restore-in-progress")
+    let marked = do
+          present <- doesFileExist(root </> "restore-in-progress")
+          if present then (== markerBytes) <$> BS.readFile(root </> "restore-in-progress") else pure False
+    expect "a fenced restoration compares the fence with the marker, not with the database" StoreFenceMismatch
+      (restoreCoordinationStore installed backup (fenceOf before))
+    marked >>= check "a refused fence on a fenced root leaves the marker"
+    expect "a fenced restoration refuses another backup" StoreFenceMismatch (restoreCoordinationStore installed otherBackup fence)
+    marked >>= check "another backup on a fenced root leaves the marker"
+    BS.writeFile capture content
+    completed <- restoreCoordinationStore installed backup fence
+    doesFileExist(root </> "restore-in-progress") >>= check "the same restore completes the interrupted restoration and removes its marker" . not
+    completedIdentity <- withCoordinationStore installed storeIdentity
+    check "the completed restoration installs new identities"
+      (completed == StoreRestoration (storeAuthorityEpoch completedIdentity) (storeStreamId completedIdentity)
+        && fenceOf completedIdentity /= fence && fenceOf completedIdentity /= fenceOf before)
+    withCoordinationStore installed $ \store -> do
+      runRead store reservationOccupancy >>= check "the completion applies the recorded original claims" . (==expected)
+      count store "restorations WHERE effects_uncertain=1" >>= check "the completion records the uncertainty of one restoration" . (==1)
+      count store ("restorations WHERE previous_epoch='" <> fenceAuthorityEpoch fence <> "'")
+        >>= check "the completion records the authority epoch before the interrupted restoration" . (==1)
+      count store "credentials WHERE revoked=0" >>= check "the completion revokes every restored credential" . (==0)
+    BS.readFile capture >>= check "the completion keeps the immutable capture" . (==content)
+    -- A marker of the earlier format records no backup, and no restoration
+    -- completes on it.
+    BS.writeFile(root </> "restore-in-progress") (BL.toStrict(encode("restoration_earlier"::Text,fenceAuthorityEpoch fence,[]::[(Text,Int,[(Text,Text)])])))
+    setFileMode(root </> "restore-in-progress")0o600
+    expect "a marker of the earlier format refuses completion" StoreFenceMismatch (restoreCoordinationStore installed backup fence)
+    doesFileExist(root </> "restore-in-progress") >>= check "a marker of the earlier format remains"
+    removeFile(root </> "restore-in-progress")
   (badPath,badRoot) <- fixture work "missing-current"
   withInstalled badPath $ \installed -> do
     void(withCoordinationStore installed storeIdentity)
@@ -485,6 +528,10 @@ client ident = execute "INSERT INTO clients VALUES (?, 'revision_1', 'authorizat
 
 rowsEqual :: CoordinationStore -> Text -> [[SQL.SQLData]] -> IO Bool
 rowsEqual store sql expected = runRead store ((== expected) <$> query sql [])
+
+-- | One SQLite connection of the fixture, outside the Store.
+withDatabase :: SQL.SQLOpenFlag -> FilePath -> (SQL.Database -> IO a) -> IO a
+withDatabase flag path = bracket (SQL.open2 (T.pack path) [flag] SQL.SQLVFSDefault) SQL.close
 
 count :: CoordinationStore -> Text -> IO Int
 count store table = runRead store $ do

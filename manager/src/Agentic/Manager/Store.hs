@@ -95,7 +95,10 @@ data StoreIdentity = StoreIdentity
 -- | Fixed storage refusals. SQLite details and bound private data are not public diagnostics.
 -- 'StoreOutputConflict' refuses a backup whose destination already exists.
 -- 'StoreFenceMismatch' refuses a restoration whose fencing evidence names
--- another authority epoch or stream identity than the stopped Store.
+-- another authority epoch or stream identity than the stopped Store, or, on
+-- a root that an interrupted restoration fenced, than the marker records. It
+-- also refuses the completion of an interrupted restoration from another
+-- backup, or under a marker that records no backup.
 data StoreFailure = StoreBusy | StoreClosed | StorePoisoned | StoreLimit
   | StoreDeadline | StoreVersion | StoreIntegrity | StoreUnavailable | StoreCleanupUnproven
   | StoreOutputConflict | StoreFenceMismatch
@@ -172,8 +175,11 @@ data Invalidation = Invalidation !Text !Text !Text deriving (Eq, Show)
 -- | How a Store lifetime begins. A serving or administering lifetime migrates
 -- and reconciles a restart. Only a serving lifetime writes the manager log,
 -- through the line codec and the test fault that it names. A copying
--- lifetime, for backup or restoration, does neither.
-data StoreMode = ServingStore !FlowCodec !(Maybe ManagerFlowFault) | AdministeringStore | CopyingStore
+-- lifetime, for backup or inspection, does neither. A restoring lifetime is
+-- the copying lifetime of a restoration. It is the only lifetime that opens
+-- while the @restore-in-progress@ marker exists, so that a restoration that
+-- an interruption fenced can complete.
+data StoreMode = ServingStore !FlowCodec !(Maybe ManagerFlowFault) | AdministeringStore | CopyingStore | RestoringStore
 
 -- | The codec and the test fault of the manager log of a serving lifetime.
 servingFlow :: StoreMode -> Maybe (FlowCodec, Maybe ManagerFlowFault)
@@ -351,12 +357,15 @@ openStore :: StoreMode -> InstalledConfiguration -> PrivateRoot -> Fd -> IO Coor
 openStore mode installed root lease = storageErrors $ do
   let restart = case mode of
         CopyingStore -> False
+        RestoringStore -> False
         _ -> True
   -- A serving lifetime needs the configured ledger ceiling for its manager
   -- log. The configuration is read before the database is opened.
   logCeiling <- forM (servingFlow mode) $ \serving ->
     (,) serving . fromIntegral . limitGlobalMutationLedgerBytes <$> (configuredLimits installed >>= either throwIO pure)
-  requireNoRestoration root
+  case mode of
+    RestoringStore -> pure ()
+    _ -> requireNoRestoration root
   -- Stable operator-controlled paths are required. Runtime still checks private files.
   existing <- try @IOException (checkPrivateFile root databaseName)
   case existing of
@@ -645,6 +654,37 @@ decodeOccupancy rows = do
         _ -> Right(Map.insert ident fact claims)
     collect _ _ = Left StoreIntegrity
 
+-- | The durable fence of a restoration, the file @restore-in-progress@. It
+-- records the restoration revision, the authority epoch of the Store before
+-- the restoration and the original safety claims. A marker of the current
+-- format also records the stream identity of the Store before the
+-- restoration and the lowercase hexadecimal SHA-256 digest of the database
+-- copy of the backup. A marker of the earlier format has neither, and no
+-- restoration completes on it.
+data RestorationMarker = RestorationMarker
+  { markerRevision :: !Text, markerAuthorityEpoch :: !Text, markerClaims :: ![(Text, Int, [(Text, Text)])],
+    markerStreamId :: !(Maybe Text), markerBackupSha256 :: !(Maybe Text) }
+
+-- | The marker of the current format: the three elements of the earlier
+-- format, followed by the stream identity and the backup digest.
+encodeRestorationMarker :: RestorationMarker -> BS.ByteString
+encodeRestorationMarker (RestorationMarker revision epoch claims stream digest) =
+  BL.toStrict (encode (revision, epoch, claims, stream, digest))
+
+-- | The marker of the root, when it exists. A marker of either format is
+-- read. A marker that is not one of them fails with 'StoreIntegrity'.
+readRestorationMarker :: PrivateRoot -> IO (Maybe RestorationMarker)
+readRestorationMarker root = do
+  marker <- try @IOException (readPrivateFileAt root ["restore-in-progress"] 4194304)
+  case marker of
+    Left failure | isDoesNotExistError failure -> pure Nothing
+    Left failure -> throwIO failure
+    Right bytes -> case eitherDecodeStrict' bytes of
+      Right (revision, epoch, claims, stream, digest) -> pure (Just (RestorationMarker revision epoch claims (Just stream) (Just digest)))
+      Left _ -> case eitherDecodeStrict' bytes of
+        Right (revision, epoch, claims) -> pure (Just (RestorationMarker revision epoch claims Nothing Nothing))
+        Left _ -> throwIO StoreIntegrity
+
 requireNoRestoration :: PrivateRoot -> IO ()
 requireNoRestoration root = do
   marker <- try @IOException(readPrivateFileAt root ["restore-in-progress"] 1024)
@@ -699,32 +739,62 @@ data StoreRestoration = StoreRestoration { restoredAuthorityEpoch :: !Text, rest
 
 -- | Restore only with a readable current safety state under the original service lease.
 -- No Store escapes, and an interrupted publication leaves startup fenced by the marker.
--- The fence is compared first, with the identities that the copying lifetime
--- read at its open: it neither migrates nor reconciles a restart. A fence that
+-- The restoring lifetime neither migrates nor reconciles a restart.
+--
+-- On a root without a marker, the fence is compared first, with the
+-- identities that the restoring lifetime read at its open. A fence that
 -- names another authority epoch or stream refuses with 'StoreFenceMismatch'
 -- before anything is read from the backup or written to the Store.
+--
+-- On a root with a marker, the restoration completes the interrupted one.
+-- The fence is compared with the authority epoch and the stream identity
+-- before the restoration that the marker records, not with the identities of
+-- the database, which the interruption can have replaced. The backup must be
+-- the backup that the marker records: its database copy must have the
+-- recorded digest. A marker of the earlier format, a fence of other
+-- identities and another backup each refuse with 'StoreFenceMismatch' and
+-- leave the marker. The completion verifies the backup again and applies the
+-- recorded restoration revision and claims, not new ones. It never reads
+-- safety facts from the database that the interruption left.
 restoreCoordinationStore :: InstalledConfiguration -> FilePath -> RestoreFence -> IO StoreRestoration
-restoreCoordinationStore installed source fence = withStoreMode CopyingStore installed $ \(CoordinationStore _ root db identity _ _ _ _ _ _ _ _ _ _ _) -> do
-  unless (fence == RestoreFence (storeAuthorityEpoch identity) (storeStreamId identity)) (throwIO StoreFenceMismatch)
+restoreCoordinationStore installed source fence = withStoreMode RestoringStore installed $ \(CoordinationStore _ root db identity _ _ _ _ _ _ _ _ _ _ _) -> do
+  interrupted <- readRestorationMarker root
+  let fenced = case interrupted of
+        Nothing -> Just (RestoreFence (storeAuthorityEpoch identity) (storeStreamId identity))
+        Just marker -> RestoreFence (markerAuthorityEpoch marker) <$> markerStreamId marker
+  unless (Just fence == fenced) (throwIO StoreFenceMismatch)
   bracket (openPrivateRoot "coordination backup" source) closePrivateRoot $ \backup -> do
     validateRootSeparation root [source]
     let expected = TE.encodeUtf8(T.pack(privateRootIdentity root))
     binding <- readPrivateFileAt backup ["complete"] 1024
     unless(binding==expected)(throwIO StoreIntegrity)
+    (digest, _) <- withPrivateRead backup "coordination.sqlite3" fileDigest
+    forM_ interrupted $ \marker -> unless (markerBackupSha256 marker == Just digest) (throwIO StoreFenceMismatch)
     withSnapshotDatabase backup True $ \snapshot -> do
-      validateSnapshot db
-      validateSnapshot snapshot
-      current <- readOccupancy db
-      older <- readOccupancy snapshot
       let rows facts = [[SQL.SQLText ident,SQL.SQLInteger(fromIntegral slot),SQL.SQLText(TE.decodeUtf8(BL.toStrict(encode keys)))] | (ident,slot,keys)<-facts]
-      claims <- either throwIO pure(decodeOccupancy(rows(current<>older)))
+      claims <- case interrupted of
+        Just marker -> do
+          validateSnapshot snapshot
+          either throwIO pure (decodeOccupancy (rows (markerClaims marker)))
+        Nothing -> do
+          validateSnapshot db
+          validateSnapshot snapshot
+          current <- readOccupancy db
+          older <- readOccupancy snapshot
+          either throwIO pure(decodeOccupancy(rows(current<>older)))
       -- Read and verify every immutable source before touching the target database.
       verifyCaptures snapshot backup
       backupEpoch <- scalar snapshot "SELECT authority_epoch FROM service_metadata WHERE singleton=1"
       epoch <- freshIdentity "authority_"
       stream <- freshIdentity "stream_"
-      revision <- freshIdentity "restoration_"
-      publishBytes root ["restore-in-progress"] (BL.toStrict(encode(revision,storeAuthorityEpoch identity,claims)))
+      marker <- case interrupted of
+        Just marker -> pure marker
+        Nothing -> do
+          revision <- freshIdentity "restoration_"
+          let marker = RestorationMarker revision (storeAuthorityEpoch identity) claims (Just (storeStreamId identity)) (Just digest)
+          publishBytes root ["restore-in-progress"] (encodeRestorationMarker marker)
+          pure marker
+      let revision = markerRevision marker
       copyCaptures snapshot backup root
       copyDatabase db snapshot
       bounded db 30000000 $ do
@@ -735,7 +805,7 @@ restoreCoordinationStore installed source fence = withStoreMode CopyingStore ins
           SQL.exec db "UPDATE credentials SET revoked=1"
           forM_ claims $ \(ident,slot,keys) -> rawExecute db "INSERT INTO restoration_quarantine VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET slot=excluded.slot,resources=excluded.resources"
             [SQL.SQLText ident,SQL.SQLInteger(fromIntegral slot),SQL.SQLText(TE.decodeUtf8(BL.toStrict(encode keys)))]
-          rawExecute db "INSERT INTO restorations VALUES (?,?,?,1)" [SQL.SQLText revision,SQL.SQLText(storeAuthorityEpoch identity),backupEpoch]
+          rawExecute db "INSERT INTO restorations VALUES (?,?,?,1)" [SQL.SQLText revision,SQL.SQLText(markerAuthorityEpoch marker),backupEpoch]
           SQL.exec db "COMMIT"
         either (\failure -> void(try @SomeException(rollback db)) >> throwIO failure) pure result
         void (reconcileRestart db revision)

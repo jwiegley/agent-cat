@@ -13476,6 +13476,49 @@ Open:
    sampler in each meter.begin but records no RSS value. Skip the sampler for this mode or note
    it. Case 3 widens its window with the 64 MiB capture, not 64 MiB of rows (disclosed).
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG11
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg11-fess-followup-dygs
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 10:00]
+:MODIFIED: [2026-10-03 Sat 10:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG11-r1 (report fess/pg-PG11-r1.md in the private evidence
+directory). PG11 added the completion of a restoration that an interruption fenced.
+
+Open:
+
+1. (low) manager/COMMANDS.md (about lines 486-489): the text still says without a condition that
+   restoreCoordinationStore compares the identities that its copying lifetime reads at the open,
+   before it reads the backup or writes the marker. The lifetime is now the restoring lifetime, and
+   on a fenced root the comparison uses the marker identities. Rename the lifetime and limit the
+   sentence to a root without a marker, or point to the completion paragraph.
+2. (low) manager/src/Agentic/Manager/Store.hs (about line 740) and manager/STORAGE.md (about lines
+   558-560): both say without a condition that a restore needs a readable current safety state. A
+   completion reads no safety fact from the database and takes the claims from the marker. Limit
+   the requirement to a restoration on an unmarked root.
+3. (low) manager/test/StoreCheck.hs (about lines 64 and 231): the restoration cases, the new
+   completion case included, are in the restart subcommand, not in the main suite that the PG11
+   acceptance names. Both were run at N8. Correct the acceptance wording or move restartChecks into
+   the main suite.
+4. (low) manager/src/Agentic/Manager/Store.hs (about lines 765-771): a root fenced by a marker of
+   the earlier three-element format cannot complete and refuses with state-conflict. This is
+   documented. Add a recovery only if fenced roots from before PG11 must be recoverable.
+5. (low) manager/test/service_http.py (failures-backup case 3, about lines 19745-19803): in the
+   recorded run the kill landed before the database copy, so the CLI completion ran against the
+   pre-restore database. Completion over a replaced database is covered only by the StoreCheck
+   fixture. Add a kill point after the database copy, or a second kill attempt.
+6. (low) manager/test/admission_audit.py (about lines 131-132): the anchor of the
+   restore-interruption mutation audit was updated and matches Store.hs once, but the audit was not
+   run under the fast-validation rule. Run it in a stage that is authorized to run it.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PG8
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -24823,7 +24866,7 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 09:24]
+:MODIFIED: [2026-10-03 Sat 10:00]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-042
 :SOURCE_REPO: agent-cat
@@ -25034,6 +25077,13 @@ recipe that ignores WAL or unresolved effects.
     "author": "johnw",
     "text": "PG9: offline restore through local administration with fencing evidence. Typed Restore constructor (OtherAdmin removed), restoreStopped dispatched after installConfiguration under the configuration lease, fence of authorityEpoch and streamId from a saved offline status answer compared before the restore-in-progress marker, frozen {authorityEpoch, streamId, credentialsRevoked: true, reprovisioned: false}; mismatch and the live channel refuse state-conflict. Evidence (PG/PG9/impl-r1): build, manager-store-check main suite N8, manager-artifact-check main suite N8, manager-command-check N8 with command_contract.py and credential_cli.py, service_http.py operations N8 cases 1-5 (fess rerun passed, 28 PASS), Phase A journey N8, make -C doc check (Integrator rerun PG/PG9-integrator-doc-check). Not of record under the PG1 rule. Follow-up: acat-pg9-fess-followup-ambi.",
     "created_at": "2026-10-03T16:24:30Z"
+  },
+  {
+    "id": 725,
+    "issue_id": "acat-wm-042-sdg9",
+    "author": "johnw",
+    "text": "PG11 (2026-10-03): the restore operation of WM-042 now completes a restoration that an interruption fenced. On a root with a restore-in-progress marker, restore compares the fencing evidence with the pre-restore identities that the marker records, requires the backup digest that the marker records, verifies and copies the backup again, applies the recorded revision and claims, rotates the identities, revokes credentials and removes the marker last. Another backup or mismatched evidence refuses with state-conflict and leaves the marker. Markers of the earlier format refuse. Evidence (PG/PG11/impl-r1): build, manager-store-check main and restart at N8 (restart holds the completion case), manager-admission-check main at N8, service_http.py failures-backup at N8 with case 3 reached (completion, serve, history read and a new run), Phase A journey at N8 and make -C doc check, all exit 0. Not a capacity run. Findings in acat-pg11-fess-followup-dygs.",
+    "created_at": "2026-10-03T17:00:10Z"
   }
 ]
 #+end_src

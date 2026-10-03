@@ -544,13 +544,16 @@ such claims.
 
 The fence is a `RestoreFence`: the authority epoch and the stream identity of
 the stopped Store, as an offline `status` answer reports them. A restoration
-compares the fence first, with the identities that its copying lifetime read
-at the open. That lifetime neither migrates nor reconciles a restart. A fence
+compares the fence first, with the identities that its restoring lifetime
+read at the open. The restoring lifetime is a copying lifetime: it neither
+migrates nor reconciles a restart. A fence
 that names another authority epoch or stream refuses with
 `StoreFenceMismatch` before the restoration opens the backup. No row,
-identity, capture or marker changes. The copying lifetime only opens and
+identity, capture or marker changes. The restoring lifetime only opens and
 closes the database and its write-ahead companions. A process generation is not part of the fence, because each
-Store open creates a new one.
+Store open creates a new one. On a root that an interrupted restoration
+fenced, the comparison uses the identities that the marker records, as the
+completion below describes.
 
 Restore requires that same root and a readable current safety state. Missing,
 corrupt, incomplete or over-budget current safety facts refuse before database
@@ -561,8 +564,11 @@ resource facts agree. Slot collisions retain separate capacity pressure. No
 claim is discarded to make capacity available, and no clearing API is supplied
 without original cleanup evidence. Eligible disjoint new work can proceed.
 
-Before publication, restore durably records `restore-in-progress`, including
-the bounded original safety claims. It verifies source captures, refuses
+Before publication, restore durably records `restore-in-progress`. The
+marker records the restoration revision, the authority epoch and the stream
+identity of the Store before the restoration, the bounded original safety
+claims, and the lowercase hexadecimal SHA-256 digest of the database copy of
+the backup, which is the `sha256` of the `backup` result. It verifies source captures, refuses
 replacement of different immutable target bytes, restores through SQLite backup,
 rotates authority and stream identities, revokes every restored credential and
 records uncertainty about effects newer than the backup. Completion removes the
@@ -573,7 +579,29 @@ present, ordinary `serve` exits with status 2, writes "manager service is
 unavailable" to standard error and serves no port. Offline `status` refuses
 with `storage-unavailable`, and `check-store` reports integrity
 `unavailable`. Do not delete that marker to assert completion.
-Automated repair of an interrupted restoration is not provided by this API.
+
+The same restoration completes an interrupted one. The restoring lifetime is
+the only Store lifetime that opens while the marker exists, and it serves no
+request. On a root with the marker, `restoreCoordinationStore` compares the
+fence with the authority epoch and the stream identity that the marker
+records, not with the identities of the database, which the interruption can
+have replaced with those of the backup. The backup must have the completion
+binding of the root, and its database copy must have the digest that the
+marker records. The completion verifies the backup database and every
+backup capture again, republishes the captures with the existing refusal of
+different immutable target bytes, and restores the database through SQLite
+backup. It then applies the restoration revision and the claims that the
+marker records, not new ones, and reads no safety fact from the database
+that the interruption left. It rotates the authority epoch and the stream
+identity, revokes every restored credential, records the uncertainty about
+effects newer than the backup with the authority epoch before the
+restoration, and removes the marker last. A fence of other identities and a
+backup with another database digest refuse with `StoreFenceMismatch` and
+leave the marker. A marker that an earlier version wrote records neither the
+stream identity nor the backup digest. It is still read, and every
+restoration on it refuses with `StoreFenceMismatch` and leaves the marker. A
+backup refuses while the marker exists, because its copying lifetime does not
+open on a fenced root.
 
 Local administration reprovisions through `issue-credential`, which registers
 a new client with a new credential. A restored credential cannot be rotated,
@@ -592,9 +620,14 @@ runs the existing captured-source audit once for restoration interruption. Its
 single phase barrier follows durable marker publication, and its N1 and N8
 checks cancel and join the original Async before asserting startup refusal.
 These are not HTTP, client transport, hardware durability or full failure-matrix
-evidence. The `failures-backup` mode of `manager/test/service_http.py` checks
-an interrupted backup and an interrupted restoration through local
-administration with the offline configuration, as the
+evidence. The `restart` case of `manager-store-check` completes a
+restoration that a capture publication failure interrupted after its marker,
+on a database that the fixture replaced with the backup database. It also
+checks the refusals of a fence of the database identities, of another backup
+and of a marker of the earlier format. The `failures-backup` mode of
+`manager/test/service_http.py` checks an interrupted backup and an
+interrupted restoration, and the completion of that restoration, through
+local administration with the offline configuration, as the
 [capacity record](CAPACITY.md#failure-modes) describes.
 OS containment is excluded from this project and is not a pending capability.
 

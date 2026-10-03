@@ -455,8 +455,9 @@ binding last, and a source Store with unchanged rows and unchanged other
 files. It also checks that a second backup into the same destination refuses
 with `output-conflict` and that a backup through the live channel of the next
 lifetime refuses with `state-conflict`. The `failures-backup` mode checks a
-backup that a file-size limit or SIGKILL interrupts and a restoration that
-SIGKILL interrupts after its `restore-in-progress` marker, as the
+backup that a file-size limit or SIGKILL interrupts, a restoration that
+SIGKILL interrupts after its `restore-in-progress` marker, and the
+completion of that restoration, as the
 [capacity record](CAPACITY.md#failure-modes) describes.
 
 ### Restore
@@ -493,6 +494,19 @@ unreadable evidence file, a backup of another manager root, a backup that
 fails verification and every other failure refuse with
 `storage-unavailable`, as the
 [storage contract](STORAGE.md#restart-and-offline-restoration) describes.
+
+The same `restore` completes a restoration that an interruption left with its
+`restore-in-progress` marker. Offline `status` refuses on such a root, so the
+operator gives the fencing evidence that the interrupted restoration used.
+The restoration compares its `authorityEpoch` and `streamId` with the
+identities before the restoration that the marker records, not with the
+database, and requires the backup whose database copy has the digest that
+the marker records, which is the `sha256` of its `backup` result. It verifies
+the backup again, applies the restoration revision and the claims that the
+marker records, rotates the identities, revokes every credential, removes
+the marker last and answers the same frozen result. Evidence that names
+other identities, another backup, and a marker that an earlier version wrote
+without these facts refuse with `state-conflict` and leave the marker.
 
 A restoration replaces the database with the database of the backup and
 republishes the captures that the backup holds. It rotates the authority

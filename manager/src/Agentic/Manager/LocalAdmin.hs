@@ -231,10 +231,14 @@ backupStopped installed destination = do
 -- @authorityEpoch@ and @streamId@ must name the identities of the stopped
 -- Store. Its @processGeneration@ is not compared, because each Store open
 -- creates a new one. 'restoreCoordinationStore' compares the two identities
--- under its configuration lease, at the open of its copying lifetime and
--- before it writes the restoration marker. Evidence that is not such an
--- answer, or that names other identities, refuses with 'StateConflict' and
--- changes nothing. A completed restoration answers the frozen result that
+-- under its configuration lease, at the open of its restoring lifetime and
+-- before it writes the restoration marker. On a root that an interrupted
+-- restoration fenced, it compares them with the identities before the
+-- restoration that the marker records, and it completes that restoration
+-- only from the backup that the marker records. Evidence that is not such an
+-- answer, evidence that names other identities, and another backup on a
+-- fenced root refuse with 'StateConflict' and change nothing, the marker
+-- included. A completed restoration answers the frozen result that
 -- 'restored' defines. Every other failure propagates to the caller.
 restoreStopped :: InstalledConfiguration -> FilePath -> FilePath -> IO BS.ByteString
 restoreStopped installed source evidenceFile = do
