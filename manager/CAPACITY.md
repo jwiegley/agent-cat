@@ -38,15 +38,35 @@ manager under other conditions.
 Each workload runs one manager lifetime unless its section states more.
 The measurements of a workload use these rules:
 
-- **Resident memory.** The harness reads `ps -o rss= -p PID` for the manager
-  process every 250 milliseconds from the start of the lifetime to its end,
-  and multiplies the value in KiB by 1024. The peak is the largest sample.
-  Worker processes are not counted.
+- **Resident memory.** The harness reads the resident size of the manager
+  process every 250 milliseconds from the start of the lifetime to its end.
+  Each sample is the field `pti_resident_size`, in bytes, that `proc_pidinfo`
+  returns for the flavor `PROC_PIDTASKINFO`. This call needs no entitlement
+  for a process of the same user. A `ps` without the task-port entitlement
+  refuses its `rss` keyword, so the harness does not use `ps`. The sampler
+  stops before the harness stops the manager. The peak is the largest
+  sample, and the harness refuses a peak when more than one sample in a
+  hundred failed. Worker processes are not counted.
 - **Latency.** The harness takes `time.monotonic()` before it writes a
   request and after it reads the complete response body. Each credential
-  keeps one persistent TLS connection for its ordinary requests. The p50 and
-  p95 values use the nearest-rank method: for n sorted samples, the q
-  percentile is the sample at position ceil(q n), counted from 1.
+  keeps one persistent TLS connection for its ordinary requests. Before a
+  request, the harness opens a new connection when the connection has been
+  idle for ten seconds, before the 15-second connection timeout of the
+  server closes it. The latency of a command does not include the opening
+  of a connection. A read that receives 503 `storage-unavailable` or 429
+  `storage-quota` is sent again within five seconds, and the latency of a
+  named read runs from before its first attempt to the end of the body of
+  its answer. The p50 and p95 values use the nearest-rank method: for n
+  sorted samples, the q percentile is the sample at position ceil(q n),
+  counted from 1.
+- **Responsiveness under saturation.** At the saturation point of the
+  workload at sixteen, of the queue workload and of the safety path, the
+  harness sends one `GET /v1/capabilities` with no further attempt. It must
+  answer 200 within 5000 milliseconds, the five-second read budget, timed
+  from before the request, including the opening of a connection, to the end
+  of its body. A failure ends the mode. The record keeps each time under the
+  key `<workload>.capabilities-saturated-ms`, which names no ceiling, so the
+  summary lists it as unchecked.
 - **Refusals.** A refusal is the HTTP status and the problem `code` of the
   response. Its timing is the latency of that one request.
 - **Growth.** File sizes come from `stat` of the regular files under the
@@ -92,6 +112,13 @@ Every workload starts from the base configuration of
 `safetyControlsPerMinute` 100 and `executionReservations` 1. A workload
 section names each value that it changes.
 
+The `capacity-admission` mode of `manager/test/service_http.py` runs the
+workloads of the four sections that follow. The two reservation workloads,
+the cohort part of the section at sixteen and the queue workload each run in
+their own manager lifetime with their own manager root, and the safety path
+continues the lifetime of the queue workload. The mode writes the file `capacity-admission.json` in its fixture
+directory.
+
 The capacity profiles are `cap_01` to `cap_20`. Each one names the runner of
 `routing-fixed-point-probe` with the target arguments `--scripted`,
 `personAnswering` `local-control`, and its own resource key, `cap_key_01` to
@@ -111,9 +138,12 @@ The configuration sets `executionReservations` to 1 and installs the profiles
 approves each review as it appears, waits until its run waits at its person
 question, and answers the question with `true`. The run then succeeds, the
 cleanup of its worker releases the reservation, and the next request reaches
-review. The release-to-review time runs from the first read that shows the
-run terminal to the first read that shows the next review. The harness reads
-`GET /v1/runs` every 250 milliseconds to count the runs that are not terminal.
+review. The harness reads `GET /v1/requests`, `GET /v1/runs` and
+`GET /v1/decisions` in rounds, with a pause of 50 milliseconds between
+rounds, to find each review, each person question and each terminal run, and
+to count the runs that are not terminal. The k-th release-to-review time runs
+from the first read that shows the k-th run terminal to the first read that
+shows the k-th waiting request in review or later.
 
 | Key | Ceiling | Unit | Basis |
 | --- | --- | --- | --- |
@@ -138,7 +168,24 @@ the blocking reasons of requests 17 to 20, which hold no resource key in
 common with a run, and each of them must name capacity. The harness then
 answers the runs in the order 1 to 16, one answer each second, and approves
 each later review as it appears. Requests 17 to 20 must reach review in their
-queue order.
+queue order. The harness reads the collections as in the workload at one,
+and the release-to-review times pair the first four terminal runs with
+requests 17 to 20.
+
+After this workload, the mode starts one more lifetime with its own manager
+root. It sets `executionReservations` to 16 and installs four cohort profiles
+with the runner and target of the capacity profiles. `cap_shared_a` and
+`cap_shared_b` share the resource key `cap_key_shared`. `cap_plain_a` and
+`cap_plain_b` have no resource key, so they share the unclassified resource.
+One credential enqueues one request on `cap_shared_a` and waits for its
+review, and then enqueues one on `cap_shared_b`. It does the same for
+`cap_plain_a` and `cap_plain_b`. The requests of `cap_shared_b` and
+`cap_plain_b` must wait queued with exactly the blocking reason
+`profile-busy`. The manager names `capacity` first when no reservation is
+free, so this reason also shows a free reservation. The harness then
+discards each holding review, and the waiting request of its pair must reach
+review without a client command that names it. The harness discards that
+review too. This part has no ceiling key.
 
 | Key | Ceiling | Unit | Basis |
 | --- | --- | --- | --- |
@@ -184,8 +231,9 @@ This workload continues the lifetime of the queue workload, with the queue
 full and the first run at its person question. A thirteenth credential `S`,
 which has not yet issued a command, waits for the start of a UTC minute and
 then creates 30 draft requests. Its 31st create in that minute is the refusal under test. In the same
-minute `S` sends a whole-run cancel of the first run. The harness then reads
-the run until it is cancelled.
+minute, after a read of `GET /v1/requests` shows 100 requests still queued,
+`S` sends a whole-run cancel of the first run. The harness then reads the
+run until it is cancelled.
 
 | Key | Ceiling | Unit | Basis |
 | --- | --- | --- | --- |

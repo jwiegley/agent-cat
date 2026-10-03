@@ -367,7 +367,7 @@ The command layer and the transport then record their own lines, such as
 | `store-admission`, `store-worker-registry` | A second Store admission, or a seventeenth Store worker. |
 | `store-manager-log-prune` | The configuration guard was not acquired for a prune round. |
 | `state-*`, `drafts-*`, `history-*`, `artifacts-*`, `overview-*` | A concurrent commit changed a revision that the owner read before. |
-| `state-control-surface`, `state-decision`, `state-control-availability` | Concurrent commits kept changing a repeated read for its whole allowance. |
+| `state-control-surface`, `state-decision`, `state-control-availability`, `drafts-request-revision` | Concurrent commits kept changing a repeated read for its whole allowance. |
 | `service-ingestion-head` | Ingestion of the retained head met contention for its whole allowance. |
 
 SQLite reports busy after its 100 ms busy timeout. That refusal is
@@ -381,9 +381,13 @@ revision, the supervision and the projection boundary. The decision read of
 `GET /v1/decisions/{id}` reads the pending queue, the projection and the
 question, and then reads the queue again. Before a control or an answer
 reserves anything, the availability read takes the projection and then the
-projection boundary and the control revision. An ingestion commit can fall
-between the parts of each of these reads. Each of them is safe to repeat and
-changes no state, so `repeatChangedRead` starts it again after a pause of
+projection boundary and the control revision. The request read of
+`GET /v1/requests/{id}`, and of each request member of a collection or an
+overview, reads the request revision and then reads it again after the inputs.
+An ingestion or admission commit can fall between the parts of each of these
+reads. Each of them is safe to repeat. The only write of a request read is
+its readiness error record, and that write commits only with the revision of
+its attempt. So `repeatChangedRead` starts the read again after a pause of
 10 ms. The read uses the admission deadline of the request of its store
 value: the deadline of the route for the control and decision reads of a GET
 route, and a fresh deadline for the availability read of a command

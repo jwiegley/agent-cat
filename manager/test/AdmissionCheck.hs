@@ -671,11 +671,15 @@ lifecycleChecks work native=withFixture work native "lifecycle" 2 [("a",[]),("b"
     assertion "queue position is visible before preparation" (draftPosition queuedView==Just 2)
     first<-admit controller
     preparedA<-await(awaitReview first)>>=right
+    -- The poll that reserves a slot computes the reasons of the other
+    -- queued requests with that reservation counted.
+    sharing<-viewNow fixture 1(draftId b)
+    assertion "the poll that reserves A names profile-busy for B, which shares its unclassified cohort" (draftReasons sharing==["profile-busy"])
     second<-admit controller
     preparedC<-await(awaitReview second)>>=right
     assertion "native oldest eligible bypasses blocked shared cohort" (reviewRequest preparedA==draftId a && reviewRequest preparedC==draftId c)
     blocked<-viewNow fixture 1(draftId b)
-    assertion "blocked reasons remain visible" ("profile-busy" `elem` draftReasons blocked)
+    assertion "the poll that reserves the last free slot names capacity for B" (draftReasons blocked==["capacity"])
     number owner "SELECT count(*) FROM reservations WHERE state='held'" >>=assertion "review occupies both global slots" . (==2)
     number owner "SELECT count(*) FROM preparations" >>=assertion "native observation is not a fabricated public review" . (==0)
     forM_ [preparedA,preparedC] $ \review->doesDirectoryExist(root </> "runs" </> "runs" </> T.unpack(runIdText(preparedRunId(reviewNative review)))) >>=assertion "review has no started native run directory" . not

@@ -135,14 +135,15 @@ schedule service = loop False
 -- proven unentered configuration callback keeps that notification pending.
 -- Opaque failures are recorded in the fault cell and the private log. They
 -- are never retried by the timer or made cancellation.
+--
+-- With sixteen owned preparations the poll reserves nothing. It still brings
+-- the blocking reasons of the queue up to date, so that a request queued
+-- behind sixteen reservations names capacity.
 fill :: Service -> IO Bool
 fill service = do
-  room <- atomically $ do
-    closing <- readTVar (stopping service)
-    count <- Map.size <$> readTVar (owned service)
-    pure (not closing && count < 16)
-  if not room then pure False else do
-    outcome <- try @SomeException (A.pollAdmission (admission service))
+  (closing, count) <- atomically $ (,) <$> readTVar (stopping service) <*> (Map.size <$> readTVar (owned service))
+  if closing then pure False else do
+    outcome <- try @SomeException (A.refreshAdmission (count < 16) (admission service))
     case outcome of
       Left failure | Just asynchronous <- (fromException failure :: Maybe SomeAsyncException) -> throwIO asynchronous
       Left failure -> faulted (classifyFault failure)

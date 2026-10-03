@@ -364,6 +364,26 @@ draftChecks work source=withFixture work source "drafts" 5 8 134217728 $ \fixtur
   current2<-readDraft store proof(draftId view)>>=right
   _<-setLiteral store proof current2 "last" "third" "last\n"
   ready<-readDraft store proof(draftId view)>>=right
+  -- A read has no precondition. Commits that change the request revision
+  -- while reads run start those reads again, and no read answers
+  -- StaleRevision. The last commit restores the revision of ready.
+  churning<-newIORef True
+  churn<-async $ do
+    forM_ [1..60::Int] $ \index->do
+      mutate store(execute "UPDATE requests SET revision=? WHERE id=?" [txt("churn-"<>T.pack(show index)),txt(draftId view)])
+      threadDelay 8000
+    mutate store(execute "UPDATE requests SET revision=? WHERE id=?" [txt(draftRevision ready),txt(draftId view)])
+    writeIORef churning False
+  let readLoop=do
+        result<-readDraft store proof(draftId view)
+        going<-readIORef churning
+        if going then (result:)<$>readLoop else pure[result]
+  concurrent<-readLoop
+  wait churn
+  let refused=[failure | Left failure<-concurrent]
+  check ("a request read during revision commits is repeated and never answers stale-revision ("<>show(length concurrent)<>" reads, refusals "<>show refused<>")")
+    (length concurrent>1 && null refused)
+  readDraft store proof(draftId view)>>=right>>=check "the read after the revision commits equals the read before them" . (==ready)
   BS.writeFile(work </> "actual-ready.json")(encoded ready)
   (setup,frame)<-assembleDraft store proof(draftId view)>>=right
   check "actual shared frontend codec round-trip and declaration order" (decodeFrontendSetupRequest frame==Right setup && case setup of RootSetup request->setupInputs request==[("first",Literal ""),("second",Literal "雪\r\n"),("third",Literal "last\n")];_->False)

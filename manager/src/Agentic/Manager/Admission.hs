@@ -6,7 +6,7 @@
 -- | Explicit oldest-eligible admission and retained native preparation ownership.
 module Agentic.Manager.Admission
   ( Admission, LivePreparation, ReviewContext (..), MonotonicClock (..),
-    withAdmission, withAdmissionClock, enqueueRequest, admitOldest, AdmissionPoll (..), pollAdmission,
+    withAdmission, withAdmissionClock, enqueueRequest, admitOldest, AdmissionPoll (..), pollAdmission, refreshAdmission,
     editRequestInput, withdrawRequest, awaitReview, withReviewAcceptance,
     retryAdmissionCleanup, awaitAdmissionCleanup, closeAdmission, ShutdownMode (..), ShutdownResult (..), shutdownAdmission, reservationIdentity, observeLivePreparation, ownsHistoryRun,
     awaitAdmissionWork, notifyAdmission, preparationRequestIdentity, awaitAcceptedStart, requestPreparationStop,
@@ -316,7 +316,14 @@ admitOldest controller = do
 -- | Only Deferred proves that the selection callback never ran. Other failures
 -- can follow an admitted transaction and never license automatic replay.
 pollAdmission :: Admission -> IO (Either CommandFailure AdmissionPoll)
-pollAdmission controller = operation controller $ locked controller $ do
+pollAdmission = refreshAdmission True
+
+-- | One admission poll. Its transaction brings the blocking reasons of each
+-- queued request up to date. With admit, it also reserves the oldest eligible
+-- request. Without admit, because the owner holds no room for another
+-- preparation, it reserves nothing and returns 'AdmissionIdle'.
+refreshAdmission :: Bool -> Admission -> IO (Either CommandFailure AdmissionPoll)
+refreshAdmission admit controller = operation controller $ locked controller $ do
   attempted <- tryWithStoreCatalogues (store controller) $ \limits _ catalogues -> do
     ensureController controller
     pruneCompleted controller
@@ -336,14 +343,20 @@ pollAdmission controller = operation controller $ locked controller $ do
             (maybe False id(lookup ident ready)) (resourcesFor catalogues profile)
           candidates=map candidate rows
           held=[heldLease | (_,heldLease)<-occupancy]
-          choice=oldestEligible (limitExecutionReservations limits) held candidates
-      events <- forM rows $ \row@(QueueRow ident _ _ _ _ _ _) -> do
+          choice=if admit then oldestEligible (limitExecutionReservations limits) held candidates else Nothing
+          chosen=fmap (candidateRequest . fst) choice
+          -- The reasons of the other queued requests count the reservation
+          -- that this poll takes, so that the poll that takes the last free
+          -- reservation already names capacity. The reservation update below
+          -- clears the reasons of the chosen request.
+          claimed=held<>[Held slot (candidateResources facts) | Just(facts,slot)<-[choice]]
+      events <- forM [row | row@(QueueRow ident _ _ _ _ _ _)<-rows, Just ident/=chosen] $ \row@(QueueRow ident _ _ _ _ _ _) -> do
         let facts=candidate row
             reasons :: [Text]
             reasons=if not(candidateEnabled facts) then ["quarantined"] else
               if not(candidateReady facts) then ["missing-inputs"] else
-              if length held>=limitExecutionReservations limits then ["capacity"] else
-              if any (\(Held _ keys)->not(Set.disjoint keys(candidateResources facts))) held then ["profile-busy"] else []
+              if length claimed>=limitExecutionReservations limits then ["capacity"] else
+              if any (\(Held _ keys)->not(Set.disjoint keys(candidateResources facts))) claimed then ["profile-busy"] else []
         previous<-query "SELECT blocking_reasons FROM requests WHERE id=?" [text ident]
         if previous==[[SQL.SQLBlob(encoded reasons)]] then pure [] else do
           let changed=revision

@@ -597,8 +597,24 @@ withDraft store proof ident respond = do
 readDraft :: CoordinationStore -> CredentialProof -> Text -> IO (Either CommandFailure DraftView)
 readDraft store proof ident = draftIO $ withStoreRequest store $ \scoped -> withStoreFiles scoped $ \root -> readDraftAt scoped root proof ident
 
+-- | A request read. Its parts compare the request revision with the revision
+-- of the first part. A read has no precondition, so a concurrent commit that
+-- changes the revision does not refuse it with 'StaleRevision'. The read is
+-- safe to repeat, and 'repeatChangedRead' starts it again at the site
+-- @drafts-request-revision@. The only write of an attempt is the readiness
+-- error record, and that write commits only with the revision of its
+-- attempt.
 readDraftAt :: CoordinationStore -> PrivateRoot -> CredentialProof -> Text -> IO DraftView
-readDraftAt store root proof ident = timed 5000000 $ do
+readDraftAt store root proof ident = timed 5000000 $
+  repeatChangedRead store "drafts-request-revision" $ \reading -> do
+    attempt <- try @CommandFailure (readDraftAttempt reading root proof ident)
+    case attempt of
+      Left StaleRevision -> pure Nothing
+      Left failure -> throwIO failure
+      Right view -> pure (Just view)
+
+readDraftAttempt :: CoordinationStore -> PrivateRoot -> CredentialProof -> Text -> IO DraftView
+readDraftAttempt store root proof ident = do
   snapshot@(RequestState view _ _) <- runRead store (requestState proof ident [Observe])
   inputs <- runRead store (inputStates ident)
   lower <- pure (sum [n | InputState _ _ (Just "literal") (Just n) _ _ _ _ <- inputs])

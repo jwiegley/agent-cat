@@ -198,8 +198,12 @@ capture. Completed retries consume no slot. Reservations require an existing
 authorized durable request, whose creation is globally draft/ledger bounded.
 
 Literal chunks are read through short bounded transactions. Request revision and
-current authority are checked before and after materialization, with explicit
-refusal on concurrent change. No network writer receives a live cursor. Public
+current authority are checked before and after materialization. A request read
+has no precondition. When a concurrent commit changes the request revision
+during the read, the read starts again at the site `drafts-request-revision`
+within the admission deadline of its route. When the revision keeps changing
+until that deadline ends, the read refuses with `storage-unavailable`. A read
+never answers `stale-revision`. No network writer receives a live cursor. Public
 views are measured against the one-MiB bound and refuse rather than truncate.
 Capture verification uses retained private traversal, regular private single-link
 files, exact byte count, UTF-8 and fresh digest checks. Missing or changed committed

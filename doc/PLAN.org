@@ -12739,6 +12739,30 @@ Non-blocking findings of fess pf-PF16-r1 (fess/pf-PF16-r1.md) on subtask PF16 (t
 7. (low) manager/CAPACITY.md lines 392-398: the document names storage "case 1" and "case 2", but the harness PASS lines number the same steps 1-2 and 5-6 (manager/test/service_http.py lines 16087, 16095, 16153, 16161). Fix: name the PASS line numbers.
 8. (low) manager/CAPACITY.md line 186 is longer than 80 columns. Fix: rewrap the paragraph.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF17
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf17-fess-followup-3xb3
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 18:21]
+:MODIFIED: [2026-10-02 Fri 18:21]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF17-r2 (fess/pf-PF17-r2.md) on subtask PF17 (the WM-041 mode capacity-admission of manager/test/service_http.py, and the repeated request read of readDraftAt in manager/src/Agentic/Manager/Drafts.hs at the busy site drafts-request-revision).
+
+1. (medium) manager/test/service_http.py read() with the manager busy site overview-cursor: during the reservation workloads, GET /v1/runs and GET /v1/requests answer 503 storage-unavailable at once from overview-cursor (StoreBusy elapsed=0ms). The r1 lifetime has 13 such busy records and the r16 lifetime has 3. read() retries them within 5 s, so capacity-admission.json does not show them. The fault predates PF17. Fix: the Overview owner makes the cursor read repeat as the other changed-read sites do, or the harness records the count of 503 retries per workload in capacity-admission.json.
+2. (medium) Verification gap: the WM-040 history and refusals lanes (bisim/ci/manager.sh history and refusals) did not run after the change to the admission reasons and the request read (manager/src/Agentic/Manager/Admission.hs, Service.hs, Drafts.hs). Fix: run both lanes in WM-040 scope on the current source.
+3. (low) manager/test/service_http.py header comment and the docstring of capacity_admission_checks say "in three lifetimes". The mode runs four lifetimes (r1, r16, cohorts, and queue with safety). Fix: say four lifetimes in both places.
+4. (low) Spec drift: the PF17 task text asks for eight harness credentials. The mode issues 5, 5, 1 and 14 credentials over its four lifetimes, as manager/CAPACITY.md states. Each credential stays under 30 ordinary mutations per minute. Fix: none in code. This record states the reconciliation.
+5. (low) manager/test/capacity-ceilings.json: the keys *.capabilities-saturated-ms have no ceiling and show as UNCHECKED. The 5000 ms bound (CAPACITY_PROBE_MS) is enforced only inside the mode. Fix: add ceiling keys in a later ceiling revision, without a change to the ceilings that were already measured.
+6. (low) manager/src/Agentic/Manager/Service.hs line 150: while the service owns sixteen preparations, fill now runs refreshAdmission False. When that poll returns AdmissionIdle, fill clears faultCell, which it did not touch before. The Haddock does not say this. Fix: state it in the comment of fill, or keep faultCell unchanged on a poll that does not admit.
+7. (low, implementer limitation) ext-pi binds its bridge socket under the Pi state directory. When that path is longer than the macOS sun_path limit of 104 bytes, the bind fails with EADDRINUSE, because the truncated path names an existing directory. A cross-client-lifecycle attempt with a fixture tag one character longer than that of PF7 failed this way (kept root /Users/johnw/Products/k.M0a5ItPm/tmp/pf17-cross-client-lifecycle.UYfWXUdr). Fix: ext-pi binds the socket at a short path, or refuses a path longer than the limit with a clear message.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PF2
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -23644,7 +23668,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 16:58]
+:MODIFIED: [2026-10-02 Fri 18:21]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -23786,6 +23810,13 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "PF16 (2026-10-02): the WM-041 workloads and accepted ceilings are published before any measurement. manager/CAPACITY.md states each workload with exact parameters, the tested platform (macOS 27.0 arm64, M3 Ultra, GHC 9.10.3, manager at -N8) and the deterministic workers (routing-fixed-point-probe --scripted and the ACP fixture adapters), and says the ceilings were set from advertised bounds and stated allowances before measurement. manager/test/capacity-ceilings.json holds the same 129 ceilings under stable keys, and manager/test/capacity_summary.py compares the document with the JSON (ceilings) and measurements with the ceilings (summary). Evidence (private, PF/PF16/impl-r1): py_compile exit 0, ceilings exit 0 with 129 keys in agreement, summary on an empty measurement file exit 1 with 129 MISSING lines, make -C doc check exit 0. No manager, harness mode, build or binary ran in this subtask. Fess pf-PF16-r1 is not blocking; its findings are filed as acat-pf16-fess-followup-7p0l. The package stays open: PF17 to PF20 measure against these ceilings.",
     "created_at": "2026-10-02T23:58:31Z"
+  },
+  {
+    "id": 672,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PF17 (2026-10-02): the mode capacity-admission of manager/test/service_http.py measures the admission part of WM-041 in four lifetimes. At 1 and 16 execution reservations, concurrent runs are created and approved through HTTP, queued requests show FIFO eligibility, and cleanup admits the next queued request without a client command. A cohorts lifetime shows that profiles that share a resource key, and profiles without keys, wait with exactly profile-busy and are admitted after the discard of the holding review. The queue holds 100 requests and refuses the 101st with the advertised code. A credential at its ordinary rate, with the queue full, sends a cancel that the safety-control capacity accepts, and the run ends cancelled. GET /v1/capabilities answers within 5000 ms during saturation. Manager fix in the same change: readDraftAt in manager/src/Agentic/Manager/Drafts.hs refused a GET with 412 stale-revision when a concurrent commit changed the request revision. It now repeats the read at the busy site drafts-request-revision. A new DraftCheck case fails on the old code (54 of 437 reads refused) and passes at N1 and N8. Evidence (private, PF/PF17/impl-r2): py_compile exit 0, build exit 0, capacity-admission at N8 exit 0, capacity_summary.py summary 36 PASS, 0 FAIL, 93 MISSING for the other parts, 3 UNCHECKED, DraftCheck exit 0, AdmissionCheck N8 exit 0, tui-journey N8 exit 0, cross-client-lifecycle exit 0, make -C doc check exit 0. Fess pf-PF17-r2 reran the mode independently and passed, and is not blocking. Its findings are filed as acat-pf17-fess-followup-3xb3. Reconciliation: the mode issues 5, 5, 1 and 14 credentials over its four lifetimes, as manager/CAPACITY.md states, in place of the eight of the task text. The package stays open: PF18 to PF20 measure the other parts.",
+    "created_at": "2026-10-03T01:21:25Z"
   }
 ]
 #+end_src

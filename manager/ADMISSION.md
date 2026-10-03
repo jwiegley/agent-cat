@@ -34,6 +34,11 @@ including retained slots outside a later reduced slot range. Its default is one
 and its maximum is sixteen. The transaction reserves the slot and every resource
 key before any file wait or native construction, and failed insertion rolls back
 all claims. Queue position and blocking reasons remain visible through Drafts.
+Each poll computes the blocking reasons of the other queued requests with its
+own reservation counted, so the poll that takes the last free reservation
+already gives them `capacity`. While the service owns sixteen preparations, a
+poll reserves nothing and only brings the blocking reasons up to date, so a
+request queued behind sixteen reservations also names `capacity`.
 
 After a manager loss, a restart quarantines each reservation that the lost
 lifetime held, with its slot and resource keys. A quarantined reservation
