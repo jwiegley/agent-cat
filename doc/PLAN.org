@@ -13835,7 +13835,7 @@ Findings of the Phase E end-of-phase review (two lenses, range 33f84fe4..841ce0c
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-03 Sat 00:15]
-:MODIFIED: [2026-10-03 Sat 01:16]
+:MODIFIED: [2026-10-03 Sat 01:45]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -13865,6 +13865,13 @@ Findings of the Phase F end-of-phase review (two lenses, packages and working, r
     "author": "johnw",
     "text": "Phase G subtask PG1 (2026-10-03): manager/test/service_http.py records the host load in every capacity mode (capacity-admission, capacity-inputs, capacity-streams, faults-io) and in the measure output of storage, routes, failures-worker, failures-manager, failures-launched and tui-failures. Each workload writes the unchecked keys <prefix>.host-load-1m-start, -1m-end, -5m-start, -5m-end and <prefix>.other-managers-start. manager/CAPACITY.md section 'Measurement rules' states the host-load rule (a run of record starts at a one-minute load of at most 16 with no other manager process) and the cleanup rule. CapacityHarness.serve, reap and reaping now terminate and reap every '--manager serve' process that the harness starts, on every exit path including an exception after Popen and SIGTERM. No ceiling row and no capacity-ceilings.json value changed. Evidence: py_compile, capacity_summary.py ceilings (129 keys agree), BUILD, all ten modes at N8 exit 0, capacity_summary.py lists the new keys as UNCHECKED, CAPACITY_HARNESS_FAULT=after-start leaked a manager before the fix and leaves none after it, the SIGTERM run exits 143 with no manager left, make -C doc check exit 0. No run of record: the orphan precondition did not hold (PIDs 61004, 111 and 9444 alive, orphans.log and orphans-after.log) and the load was above 16. Evidence (private): PG/PG1. Fess pg-PG1-r1 is not blocking; its findings are filed as a follow-up issue.\n",
     "created_at": "2026-10-03T08:16:55Z"
+  },
+  {
+    "id": 709,
+    "issue_id": "acat-phase-f-review-findings-4e23",
+    "author": "johnw",
+    "text": "PG2 (2026-10-03): read-path saturation diagnosis recorded in doc/research/workflow-manager-read-path-diagnosis-2026-10.md (finding 1). Dominant cost: the full-prefix projection replay in State.ingestValidated (restoreProjectionCut, readEnvelope) inside one of the two reader places. With counters at N8: 3208 ingestions replayed 326377 envelopes, at least 652754 of 689919 SQL reads, 36.3 s of the 40.4 s of ingestion reader-place time. Revalidations per SSE write 3.06, facts-read retries about 1.7 per SSE write (secondary). Baseline (uninstrumented): catch-up p50 1713.4 ms and p95 17392.6 ms, reader-complete true, dropped 0, refused 15, terminal observed late (44841.6 ms). PG3 decision: resume replay from a checkpoint first, then split the authorization revision. No run of record: the orphan manager PID 61004 ran during every run. No product source change. Evidence: PG/PG2/impl-r1 in the private evidence directory, fess pg-PG2-r1. Finding 1 stays open until PG3.\n",
+    "created_at": "2026-10-03T08:45:27Z"
   }
 ]
 #+end_src
@@ -14893,6 +14900,28 @@ Observed during the heavy review's validated pass: every mcp__pal__chat call fai
 :END:
 
 Found by the haskell-question analysis (§6.3 item 8, acat-haskell-surface-ygy): RawAsk.model is Option String and askShape applies atModel unconditionally when it is some, so a hand-built Raw with model := some m on a tool or person addressee elaborates instead of being refused — the surface invariant ('served by names the model that serves a model addressee') is parser-only. One site: askShape or a checkBlock-side guard, plus a hand-built battery case in the exception-2 style (check_panel_nil precedent). Notable because it is the ONLY thing the hypothetical Haskell type discipline would catch that the Lean checker does not — closing it makes the redundancy argument unconditional.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG2
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-sicz
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 01:45]
+:MODIFIED: [2026-10-03 Sat 01:45]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG2-r1 (fess/pg-PG2-r1.md) on subtask PG2 (read-path saturation diagnosis, doc/research/workflow-manager-read-path-diagnosis-2026-10.md).
+
+1. (medium) The record lines 14-15 say the host load was 'within the rule', but the PG1 host-load rule also requires no other manager process, and the stale PF17 manager PID 61004 ran during every run. Fix: reword to say only the load limit held, and stop PID 61004 (operator or Integrator) before the PG3 confirmation run.
+2. (low) Record lines 209-211 say the restores made '95 percent of the SQL reads and Store gate acquisitions'. The counters give 94.6 percent of SQL reads (652754 of 689919) and 82.8 percent of gate acquisitions (652754 of 788514). Fix: state 95 and 83 percent.
+3. (low) Record lines 90-104: the revalidations-per-write values (3.06, 1.64, 1.0) come from call-site counters, the 'Of which fresh' column is fitted to reval.fresh 3928, and the 8095 borrowed-loan revalidations are assigned to no site. Fix: state the derivation and account for the unassigned revalidations.
+4. (low) Owner items not yet in the tracker: (a) doc/api/README.md advertises at most 1048576 pending transport bytes per SSE reader, but manager/src keeps no pending-byte count, and only the five-second write deadline enforces the bound (experiment B reached 1665640 bytes); (b) the reader-admission wakeup herd in Store.withStoreReaderLoan, where every wakeup takes a new configuration loan. Fix at the owners (manager SSE writer and Store).
+5. (low) Experiments A, B and A-and-B added three builds and three capacity runs beyond the check list. They stayed temporary and the sources are restored. Experiment A ended at load 18.1, above the rule. No change needed; noted for the ledger.
 
 * DONE [#C] Tooling: PAL cross-model verification unavailable — OpenAI key unexpanded, Gemini key invalid, gemini CLI absent
 :PROPERTIES:
@@ -24040,7 +24069,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 01:16]
+:MODIFIED: [2026-10-03 Sat 01:45]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -24245,6 +24274,13 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "Phase G subtask PG1 (2026-10-03): manager/test/service_http.py records the host load in every capacity mode (capacity-admission, capacity-inputs, capacity-streams, faults-io) and in the measure output of storage, routes, failures-worker, failures-manager, failures-launched and tui-failures. Each workload writes the unchecked keys <prefix>.host-load-1m-start, -1m-end, -5m-start, -5m-end and <prefix>.other-managers-start. manager/CAPACITY.md section 'Measurement rules' states the host-load rule (a run of record starts at a one-minute load of at most 16 with no other manager process) and the cleanup rule. CapacityHarness.serve, reap and reaping now terminate and reap every '--manager serve' process that the harness starts, on every exit path including an exception after Popen and SIGTERM. No ceiling row and no capacity-ceilings.json value changed. Evidence: py_compile, capacity_summary.py ceilings (129 keys agree), BUILD, all ten modes at N8 exit 0, capacity_summary.py lists the new keys as UNCHECKED, CAPACITY_HARNESS_FAULT=after-start leaked a manager before the fix and leaves none after it, the SIGTERM run exits 143 with no manager left, make -C doc check exit 0. No run of record: the orphan precondition did not hold (PIDs 61004, 111 and 9444 alive, orphans.log and orphans-after.log) and the load was above 16. Evidence (private): PG/PG1. Fess pg-PG1-r1 is not blocking; its findings are filed as a follow-up issue.\n",
     "created_at": "2026-10-03T08:16:54Z"
+  },
+  {
+    "id": 708,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PG2 (2026-10-03): read-path saturation diagnosis recorded in doc/research/workflow-manager-read-path-diagnosis-2026-10.md (finding 1). Dominant cost: the full-prefix projection replay in State.ingestValidated (restoreProjectionCut, readEnvelope) inside one of the two reader places. With counters at N8: 3208 ingestions replayed 326377 envelopes, at least 652754 of 689919 SQL reads, 36.3 s of the 40.4 s of ingestion reader-place time. Revalidations per SSE write 3.06, facts-read retries about 1.7 per SSE write (secondary). Baseline (uninstrumented): catch-up p50 1713.4 ms and p95 17392.6 ms, reader-complete true, dropped 0, refused 15, terminal observed late (44841.6 ms). PG3 decision: resume replay from a checkpoint first, then split the authorization revision. No run of record: the orphan manager PID 61004 ran during every run. No product source change. Evidence: PG/PG2/impl-r1 in the private evidence directory, fess pg-PG2-r1. Finding 1 stays open until PG3.\n",
+    "created_at": "2026-10-03T08:45:26Z"
   }
 ]
 #+end_src
