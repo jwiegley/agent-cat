@@ -7616,7 +7616,7 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 09:40]
+:MODIFIED: [2026-10-03 Sat 15:14]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G5
 :SOURCE_REPO: agent-cat
@@ -7785,6 +7785,55 @@ Full failure/capacity evidence, operational procedures, reproducible packages, r
     "author": "johnw",
     "text": "PG10: failures.backup.passed now has passing evidence through the failures-backup mode of service_http.py at N8 (see acat-wm-041-17ax). Not a run of record under the PG1 rule.",
     "created_at": "2026-10-03T16:40:15Z"
+  },
+  {
+    "id": 740,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "PG22 review (doc/research/reviews/workflow-manager-phase-g-review-2026-10.md): the only fix-list item is R3 (medium evidence gap): WM-041 has no capacity run of record while PIDs 61004, 111 and 9444 run and host load exceeds the PG1 rule. Owning checks capacity-streams and capacity-inputs at N8, tracked by acat-n50o and acat-jkas. Other open G5 conditions: PG18 authorization, the procedure exercise by another person, the Phase G gate and the closure review.",
+    "created_at": "2026-10-03T19:41:59Z"
+  },
+  {
+    "id": 748,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "PG24 (G5 functional gate part 1) on 9f40bd9e plus the agentic.cabal module-list fix: ALLBUILD, make -C doc check, check-haskell then ALLBUILD, tui-model-test at N1 and N8, and JOURNEY-PAIR(pg24) exited 0. The controls tui-journey-broken-answer, tui-consent-control and tui-flow-approve-fault at N8 each exited 1 with their literal message. First ALLBUILD failed with GHC-32850 in manager-admission-check (kept as 01-allbuild-attempt1). Evidence and gate summary: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PG/PG24/impl-r1/g5-summary.md. Stale PIDs 61004, 111, 9444 ran during the gate (no capacity measurement taken). Follow-up: acat-pg24-fess-followup-p5aw.",
+    "created_at": "2026-10-03T20:03:05Z"
+  },
+  {
+    "id": 750,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "G5 functional gate part 2 (PG25) on 1ac80da968, tree clean at every step. bisim/ci/manager.sh steps closure, lean (prebuilt artifacts reused), build, cases (45, 0 mismatches), admission (seed 20261002, 500 situations, 0 mismatches), vertical (N8, 20 comparisons), history (40 roots, 576 entries, 0 mismatches), refusals (271 variants, 0 mismatches) and corpus each exited 0. Controls control-oracle, control-model and control-case each exited 1 with the detected line. git status --short bisim/corpus is empty. openapi-additive.py 88d999b7..HEAD exits 0: 24 paths and 107 schemas in both, the only additions are the 9 optional LocalAdminResponse status-result properties, equal to the accepted list in doc/api/README.md; the reversed control exits 1. Broker.hs is unchanged since 88d999b7, so DataBroker keeps nine operations. Gate summary: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PG/PG25/impl-r1/g5-summary.md. Limitations: stale PIDs 61004, 111 and 9444 ran throughout (load 8.0 to 22.1 at step start). The PG24 follow-up action to rerun manager-admission-check and manager-artifact-check (acat-pg24-fess-followup-p5aw) was not part of PG25 and stays open. Gate not closed by a subtask.",
+    "created_at": "2026-10-03T20:13:31Z"
+  },
+  {
+    "id": 752,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "PG26 (2026-10-03), G5 functional gate part 3, round 2. Harness change only: CapacityHarness waits per workload for a one-minute load of at most 16 (at most 600 s, LOAD-WAIT lines, <workload>.host-load-wait-ms), capacity-inputs records pages.legacy-setup-ms and its loads, and capacity_summary.py summary takes --exclude-section NAME. No manager source and no ceiling changed. capacity-admission, capacity-inputs, capacity-streams, faults-io, storage and routes exit 0 at N8, all 13 workloads started at load 15.58 or less, summary 115 PASS 0 FAIL (14 failures.* MISSING without the filter, 0 with --exclude-section failures). Not a run of record: PID 61004 ran throughout. Gated rerun: acat-pg26-capacity-run-of-record-2z6q. Fess findings: acat-pg26-fess-followup-6g9t. Evidence (private): PG/PG26/impl-r2.",
+    "created_at": "2026-10-03T20:53:59Z"
+  },
+  {
+    "id": 756,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "PG27 (2026-10-03, G5 functional gate part 4): failures-worker, failures-manager, failures-launched, tui-failures and failures-backup each ran once at N8 under the PG1 load rule (start loads 7.22 to 15.55) and exited 0 with passed true. capacity_summary.py summary over the six PG26 round-2 files and the five PG27 files: 129 PASS, 0 FAIL, 0 MISSING, host-load keys UNCHECKED. capacity_summary.py ceilings (129 keys agree) and make -C doc check passed. manager/CAPACITY.md has the section 'Measured values of 2026-10-03 at e8c04cd4 on macOS 27.0 arm64'; no ceiling row changed. Not a run of record: PID 61004 ran during all 22 workloads; gated in acat-pg27-run-of-record-21e9. Evidence: PG/PG27/impl-r1 and PG/PG27/integrator in the private evidence directory; fess pg-PG27-r1 not blocking, findings in acat-pg27-fess-followup-0xbw.",
+    "created_at": "2026-10-03T21:30:39Z"
+  },
+  {
+    "id": 759,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "PG28 (G5 functional gate part 5) at e898b8b9de: rebuild up to date; nix build .#agentic-run (substitution off, lock unchanged) gave output /nix/store/yc3zvavs19s6d1ywixzhchiszhiqy2vh-agentic-run-0.1.0.0, bin/agentic-run SHA-256 dcc773bd...009991 (new derivation because 1ac80da9 changed agentic.cabal); sdist 1902882 bytes, SHA-256 7b0031be...be76. At N8, exit 0: operations cases 1-7, credential-lifecycle, schema-fixtures, package and rollback with PACKAGE_RUNNER at the recorded output path, store-check 225 PASS, command-check 483 PASS, admission-check 146 PASS, make -C doc check. Release evidence updated with the PG28 identities. Evidence: $R/PG/PG28/impl-r1. Fess non-blocking, filed as acat-pg28-fess-followup-pbd5.",
+    "created_at": "2026-10-03T21:55:22Z"
+  },
+  {
+    "id": 762,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "PG29 (2026-10-03), G5 functional gate part 6, on agent-cat 381875e7f5 and emacs-native db7d212, both trees clean, no source change. BUILD(-ftui-tests agentic-run routing-fixed-point-probe) exit 0. At N8 in the PF23 form (EMACS, WF_EMACS_DIR, WF_EMACS_UI set): cross-client, cross-client-lifecycle, cross-client-lineage, emacs-service, emacs-service-lifecycle and emacs-service-controls exit 0. Control cross-client-broken-answer exit 1 with 'CROSS-ASSERT the cross-client answer is JSON false', and emacs-service-broken-answer exit 1 with 'JOURNEY-ASSERT Emacs answer is JSON false'. In the Emacs worktree with a temporary HOME: ci/emacs.sh exit 0 (smoke 38 of 38, transport 97 of 97) and ci/emacs-ui.py exit 0 (8 PASS lines). Each step is in the gate summary PG/PG29/impl-r1/g5-summary.md, part 6, with both commits. Evidence (private): PG/PG29/impl-r1. Fess pg-PG29-r1 non-blocking, findings in acat-pg29-fess-followup-w9y7. Limitation: stale PID 61004 and frontends 111 and 9444 ran throughout; no step is a capacity measurement. The Emacs steps used the PD7 wf binary.\n",
+    "created_at": "2026-10-03T22:14:13Z"
   }
 ]
 #+end_src
@@ -7841,6 +7890,57 @@ Non-blocking findings of fess audit fess/pd-PD24-r1.md (2026-10-02) on subtask P
 5. (low) emacs/wf.el (docstring-only diff). Requirement (c), the explicit v3 invocation compatibility behavior in local mode, has no targeted check. The evidence is that the wf.el code is unchanged apart from docstrings and that the 8 local emacs-ui cases pass. Fix: name the existing local case that covers the v3 lineage invocation, or add one when a later change touches wf--lineage.
 
 Implementer limitations recorded with PD24: the offline fork ERT test replaces wf-service--open-review with a stub, so the real child review and its approval are proved only by the live lineage step; a lineage request sent while a run view retrieves the verified result of that run receives 412 stale-revision and is not sent again; after an uncertain send whose effect one collection read observes, wf-lineage and wf-export report the effect but do not continue, as ext-pi does; security, hostile-input and authorization negatives for the lineage and export routes are deferred under the 2026-09-30 direction.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG19
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-gbh8
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 11:58]
+:MODIFIED: [2026-10-03 Sat 12:12]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pg-PG19-r1.md (2026-10-03) on subtask PG19 (WM-044 manual, public inventories, API and version matrix).
+
+1. (medium) manager/README.md:259-260 still says that the minimum supported targets for the version 1 manager clients are GNU Emacs 30.2 and Pi coding-agent 0.85.1. ext-pi/README.md and test/host-versions.test.ts support only the Pi fork at 0.99.1. Restate the client baseline as the Pi fork 0.99.1, and reconcile the Emacs 30.2 minimum with the 29.1 that Package-Requires declares.
+2. (low) manager/README.md:279-280: "No older-version compatibility or manager service-mode test is implied by these records" reads as a denial that service-mode checks exist. Restate or remove it.
+3. (low) doc/api/README.md, section "Truncated responses under Store contention": the client behavior comes from source reading only. Add a fixture that truncates a GET mid-body and confirms each client re-reads, or record the verification gap.
+4. (low) doc/api/README.md, section "Version and compatibility matrix": the Emacs client commit 6e8eac0bc0fc and Pi fork commit 7857926ee are hardcoded prose. Update them in the final WM-044 reconciliation, or add a check against git rev-parse.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-gbh8",
+    "depends_on_id": "acat-wm-044-6utw",
+    "type": "discovered-from",
+    "created_at": "2026-10-03T18:59:02.811386Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 736,
+    "issue_id": "acat-gbh8",
+    "author": "johnw",
+    "text": "PG20 resolves items 1 and 2: manager/README.md names Emacs 30.2 and the Pi fork 0.99.1 as targets, records the Emacs 29.1 Package-Requires minimum as open, and replaces the service-mode sentence. Items 3 and 4 (truncation fixture, hardcoded client commits in the matrix) remain open. Fess: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/pg-PG20-r1.md.",
+    "created_at": "2026-10-03T19:12:57Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Prose refuted by code: HANDOFF 4.6 elaboration claim, 'nineteen' kernel proofs, stale cost figures
 :PROPERTIES:
@@ -9149,7 +9249,7 @@ Replace the remaining /workflow command namespace in the Pi extension with /wf n
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-03 Sat 06:15]
-:MODIFIED: [2026-10-03 Sat 06:15]
+:MODIFIED: [2026-10-03 Sat 13:54]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -9163,6 +9263,27 @@ Gated change: stop the stale PF17 manager PID 61004 ('routing-fixed-point-probe 
 Acceptance: pages.other-managers-start 0, every start load at most 16, pages.first-page-p50-ms at most 500, no capacity-inputs ceiling key outside its ceiling, ceilings, workload, page-set bound and window of 1024 members unchanged.
 
 Current values (not a run of record, PID 61004 present, start loads 5.66 to 12.44): first-page p50 131.2 ms, p95 968 ms, 0 of 43 keys outside their ceilings.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 742,
+    "issue_id": "acat-jkas",
+    "author": "johnw",
+    "text": "PG22 review finding R3 (doc/research/reviews/workflow-manager-phase-g-review-2026-10.md): this capacity run of record is the only item on the review fix list. It needs PIDs 111, 9444 and 61004 ended (operator or Integrator action) and host load within the manager/CAPACITY.md rule, then one run at -N8.",
+    "created_at": "2026-10-03T19:42:00Z"
+  },
+  {
+    "id": 754,
+    "issue_id": "acat-jkas",
+    "author": "johnw",
+    "text": "PG26 round 2 (2026-10-03) hit the same gate: PID 61004 ran during all capacity workloads. The combined run of record is acat-pg26-capacity-run-of-record-2z6q.",
+    "created_at": "2026-10-03T20:54:03Z"
+  }
+]
+#+end_src
 
 * DONE [#D] Ordered-carrier class: resource semiring with monotone +,*,csum
 :PROPERTIES:
@@ -10207,7 +10328,7 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-03 Sat 03:16]
-:MODIFIED: [2026-10-03 Sat 03:16]
+:MODIFIED: [2026-10-03 Sat 13:54]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -10221,6 +10342,27 @@ Gated change: stop the stale PF17 manager PID 61004 ('routing-fixed-point-probe 
 Acceptance: streams.other-managers-start 0, host load within the PG1 rule at start and end, events.catch-up-p50-ms at most 1000, events.catch-up-p95-ms at most 5000, events.reader-complete true, dropped-reads 0, no ceiling key outside its ceiling, ceilings and mode configuration unchanged.
 
 Current values (not a run of record, PID 61004 present, load 5.6 to 6.7): catch-up p50 3.4 ms, p95 128.8 ms, reader-complete true, dropped-reads 0, 0 of 14 keys outside their ceilings.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 741,
+    "issue_id": "acat-n50o",
+    "author": "johnw",
+    "text": "PG22 review finding R3 (doc/research/reviews/workflow-manager-phase-g-review-2026-10.md): this capacity run of record is the only item on the review fix list. It needs PIDs 111, 9444 and 61004 ended (operator or Integrator action) and host load within the manager/CAPACITY.md rule, then one run at -N8.",
+    "created_at": "2026-10-03T19:41:59Z"
+  },
+  {
+    "id": 755,
+    "issue_id": "acat-n50o",
+    "author": "johnw",
+    "text": "PG26 round 2 (2026-10-03) hit the same gate: PID 61004 ran during all capacity workloads. The combined run of record is acat-pg26-capacity-run-of-record-2z6q.",
+    "created_at": "2026-10-03T20:54:05Z"
+  }
+]
+#+end_src
 
 * DONE [#E] Prove the classical Kleene-algebra identities now that KleeneStar makes them theorems
 :PROPERTIES:
@@ -12049,7 +12191,7 @@ Implementer limitations recorded with PD29: the 'class=unexpected InvalidRequest
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 22:06]
-:MODIFIED: [2026-10-01 Thu 22:06]
+:MODIFIED: [2026-10-03 Sat 12:12]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -12077,6 +12219,20 @@ Non-blocking findings of fess audit fess/pd-PD3-r1.md (2026-10-01) on subtask PD
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 735,
+    "issue_id": "acat-pd3-fess-followup-uo4y",
+    "author": "johnw",
+    "text": "PG20 records item 1 as an accepted limitation: manager/STORAGE.md now states the bound of each POST route deadline as the code sets it (15-second JSON body read, 30-second capture read and publish, five-second Store waits per owner and per database action) and that no check measures the worst case. Items 3 to 6 remain open. Fess: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/pg-PG20-r1.md.",
+    "created_at": "2026-10-03T19:12:57Z"
   }
 ]
 #+end_src
@@ -13207,7 +13363,7 @@ Non-blocking findings of fess pf-PF24-r1 (fess/pf-PF24-r1.md) on subtask PF24 (P
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-02 Fri 11:28]
-:MODIFIED: [2026-10-02 Fri 11:28]
+:MODIFIED: [2026-10-03 Sat 12:12]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -13233,6 +13389,27 @@ Non-blocking findings of fess audit fess/pf-PF3-r1.md (2026-10-02) on subtask PF
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 733,
+    "issue_id": "acat-pf3-fess-followup-ann7",
+    "author": "johnw",
+    "text": "PG19 resolves item 1: manager/README.md now states that the Pi extension develops against the built Pi fork 0.99.1 and that the development pins are not version floors. Items 2 to 4 (handoff pin statements, the ext-pi lock sentence, manager/test/__pycache__) remain open. Fess /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/pg-PG19-r1.md notes that the 0.85.1 minimum sentence on manager/README.md:259-260 still stands; that is filed in the PG19 follow-up.",
+    "created_at": "2026-10-03T18:58:50Z"
+  },
+  {
+    "id": 737,
+    "issue_id": "acat-pf3-fess-followup-ann7",
+    "author": "johnw",
+    "text": "PG20 resolves item 3: ext-pi/README.md names the stale lock entries and states that npm ci is not supported with this lock file. Item 4 is resolved: manager/test/__pycache__ no longer exists. Item 2 (PE27 statements in earlier handoff sections) remains open. Fess: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/pg-PG20-r1.md.",
+    "created_at": "2026-10-03T19:12:58Z"
   }
 ]
 #+end_src
@@ -13643,6 +13820,442 @@ Open:
    in the release evidence.
 5. (low) doc/workflow-manager-release-evidence.md:11-14: the base revision recorded is eca320c9
    with the change uncommitted. PG21 restates the commit revision when it completes the record.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG15
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg15-fess-followup-rkvc
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 11:12]
+:MODIFIED: [2026-10-03 Sat 11:12]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG15-r1 (report fess/pg-PG15-r1.md in the private evidence
+directory). PG15 added the package mode to manager/test/service_http.py, which runs the Nix-built
+agentic-run from PACKAGE_RUNNER as the manager and the runner, and recorded the identities in
+doc/workflow-manager-release-evidence.md.
+
+Open:
+
+1. (low) manager/test/service_http.py:146: in package mode the runner argument argv[3] is
+   replaced by PACKAGE_RUNNER without a warning, so a different argv[3] is discarded silently.
+   Assert that Path(sys.argv[3]).resolve() equals the PACKAGE_RUNNER path, or stop with a fixed
+   message when they differ.
+2. (low) doc/workflow-manager-handoff.md:5: the current-state section at the top still describes
+   Phase F part 3 and has no Phase G progress. Add a Phase G current-state paragraph that covers
+   PG1 to PG15.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG16
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg16-fess-followup-aeqn
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 11:26]
+:MODIFIED: [2026-10-03 Sat 11:26]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG16-r1 (report fess/pg-PG16-r1.md in the private evidence
+directory). PG16 added the schema-fixtures lane to manager-store-check and a schema step to the
+package mode of manager/test/service_http.py, which upgrades schema 1 to 11 roots to 12 through
+the packaged binary and checks the refusal of a schema 13 root.
+
+Open:
+
+1. (medium) doc/workflow-manager-release-evidence.md:126: the schema step is called "The run of
+   record", but the implementer states it is not a PG1 run of record, because the PID 61004
+   orphan was not checked. Decide whether the PG1 orphan rule applies to functional package runs,
+   then reword the line or correct the limitation.
+2. (low) doc/workflow-manager-release-evidence.md:67-68: the documented command runs
+   $(bash test/cabal.sh list-bin manager-store-check) schema-fixtures with no build step before
+   it. Add "bash test/cabal.sh build manager-store-check" before the list-bin line.
+3. (low) manager/test/StoreCheck.hs (schemaUpgradeChecks, about line 846): the term
+   storeSchemaVersion identity == schemaVersion always passes, because Store.hs builds
+   StoreIdentity with the constant schemaVersion. Drop the term, or replace it with a raw
+   PRAGMA user_version read inside the lifetime.
+4. (low) manager/test/service_http.py (package_schema_checks, schema 13 block): assert that
+   server-13.stderr contains "manager service is unavailable", as STORAGE.md states.
+5. (low) manager/STORAGE.md:146,149: rewrap the new lines (105 and 100 columns) to the
+   surrounding width of about 80.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG17
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg17-fess-followup-ngjm
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 11:39]
+:MODIFIED: [2026-10-03 Sat 11:39]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG17-r1 (report fess/pg-PG17-r1.md in the private evidence
+directory). PG17 added the rollback mode to manager/test/service_http.py and the rollback
+procedure to manager/OPERATIONS.md.
+
+Open:
+
+1. (low) manager/test/service_http.py:6190-6193: the roll-forward check asserts only that no
+   (log, replyTo) pair has more than one receipt. It does not check that every command has a
+   receipt, although OPERATIONS.md and the release evidence say "one receipt for each command".
+   Assert that the set of receipt replyTo values equals the set of command record ids.
+2. (low) manager/OPERATIONS.md:747: the runbook says agentic-run --tui --local "reads neither
+   the manager root nor the configuration files". The test proves only that no file of the
+   manager root changes. Reword to "changes no file of the manager root", or cite the code path.
+3. (low) manager/test/service_http.py:6168, manager/OPERATIONS.md:763-766: the roll forward
+   needs an exact approval POST, so the queued request does not run "without another client
+   command". The consent rule justifies this and the runbook states it. Accept the
+   reinterpretation or record it against WM-043.
+4. (low) manager/test/service_http.py:5915: stop() in a finally block asserts exit 0, so after
+   an earlier failure a second AssertionError becomes the top-level error. Skip the exit
+   assertion while an exception propagates, or assert after the try block.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG20
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg20-fess-followup-km5k
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 12:12]
+:MODIFIED: [2026-10-03 Sat 12:12]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pg-PG20-r1.md (2026-10-03) on subtask PG20 (WM-044 client documentation, examples, owner documents and handoff).
+
+1. (low) tui/README.md:749-786: the drain, shutdown and restore behavior of the TUI comes from reading tui/src/Agentic/Tui/ServiceLane.hs and App.hs. No service-mode check drives the TUI through these operations, and the README does not say so, unlike runtime/BROKER.md:576 and manager/CONTROLS.md. Fix: add one sentence stating that no service-mode check drives the TUI through a drain, a shutdown or a restore, or add such a check.
+2. (low) doc/examples/manager-serve.json: only the offline reference file was validated (offline reload-profiles). No check starts the serve file with --manager serve, so the manager/OPERATIONS.md:39-59 statements that it listens on 127.0.0.1:8443 and admits that Host and peer are untested. Fix (optional): start a fixture copy with --manager serve, read GET /v1/capabilities once, then shut it down. Otherwise record the gap.
+3. (low) doc/workflow-manager-handoff.md:135-136: the fess follow-up issues are given as the range "acat-pg8-fess-followup-8x8u to acat-pg17-fess-followup-ngjm". The identifiers are not sequential, so a reader cannot list the covered issues. Fix: list the PG8 to PG17 follow-up identifiers explicitly.
+4. (low, cosmetic) tui/README.md:776 and manager/STORAGE.md:115 run past the wrap width of the surrounding paragraphs. Fix: rewrap.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-pg20-fess-followup-km5k",
+    "depends_on_id": "acat-wm-044-6utw",
+    "type": "discovered-from",
+    "created_at": "2026-10-03T19:12:47.946462Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG21
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg21-fess-followup-e2n5
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 12:27]
+:MODIFIED: [2026-10-03 Sat 12:27]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/pg-PG21-r1.md (2026-10-03) on subtask PG21 (WM-044 requirement-by-requirement release evidence matrix).
+
+1. (medium) doc/workflow-manager-release-evidence.md:74,77,78,80: four aggregate rows of the release requirement matrix say "Met for function" although rows they cite are Partial (section 4 cites A02 and A05, section 7 cites A19, section 6 covers WM-028, the outputs row cites A12). Fix: set the four rows to Partial and name the missing parts (A02 post-capture change and large-file path, A05 crash boundaries, A12 root replacement, A19 true ENOSPC and the capacity runs of record, WM-028 database-full case).
+2. (low) doc/workflow-manager-release-evidence.md:101,113: the latest-run paths are stale for WM-009 and WM-021. Fix: cite $R/PG/PG16/impl-r1/store-main-N8.log and store-quotas-N8.log, and state that PF21 is the latest N1+N8 journey pair.
+3. (low) doc/workflow-manager-release-evidence.md:79: the section 8 row does not list WM-028, WM-037 or WM-041 in its implementation evidence, although plan section 12 lists them. Fix: add them.
+4. (low) doc/Makefile:41-46: the new check does not test that every WM-001..044, G0..G5 and A01..A24 row is present. Fix (optional): grep for each identifier at the start of a row.
+5. (low) doc/workflow-manager-release-evidence.md:115: the WM-023 cell has status "Met" and also a deferred security item, which mixes the Met and Met-for-function definitions. Fix: reword the cell or note the exception in the status definitions.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-pg21-fess-followup-e2n5",
+    "depends_on_id": "acat-wm-044-6utw",
+    "type": "discovered-from",
+    "created_at": "2026-10-03T19:27:08.951302Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG22
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg22-fess-followup-in07
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 12:41]
+:MODIFIED: [2026-10-03 Sat 12:41]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking fess findings of subtask PG22 (fess report pg-PG22-r1.md).
+
+- Low: the comment of advanceAuthorizationRevision (manager/src/Agentic/Manager/Store.hs:1602-1607) is false since PG5. Folded into the R1 item of the PG22 review-lows issue.
+- Low: doc/research/README.md did not list the new review record. Resolved at the integration commit (index row added).
+- Low: make -C doc check ran before the last one-cell edit of the record. Resolved: the Integrator reran make -C doc check at the integration commit, exit 0.
+- Low: R1, R2 and R4 come from code reading with no reproducing test, and the failure-lens checks rest on earlier PASS lines. File R1, R2 and R4 with their owning checks (done in the PG22 review-lows issue) and add a reproducing case at each fix.
+
+* TODO [#D] Resolve the low findings of the PG22 Phase G review
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg22-review-lows-ncss
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 12:41]
+:MODIFIED: [2026-10-03 Sat 12:46]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Low functional findings of the PG22 Phase G review (doc/research/reviews/workflow-manager-phase-g-review-2026-10.md). None blocks a functional G5 criterion.
+
+- R1 (low): reloadServing advances the authorization revision after the probes of every profile, not at the install. For up to one second a view can keep writing under the old profile revision. Fix: advance as soon as reloadConfiguration succeeds, and rewrite the comment of advanceAuthorizationRevision (manager/src/Agentic/Manager/Store.hs:1602-1607), whose sentence "The manager has no such change today" is false since PG5 (LocalAdmin.hs:157). Owning checks: manager-artifact-check, operations mode.
+- R2 (low): the held run projections are bounded by 64 MiB of original record bytes, not by resident memory. State or measure the resident size. Owning check: capacity-streams.
+- R4 (low): the local administration channel serves one connection at a time and a reload probes before it replies, so slow probes can push a completed reload past the 15-second client deadline (reported as storage-unavailable). Owning check: operations mode.
+- Triage: the synthetic dispatch fold of a second live redirect. Owning check: test/control_probe.py.
+- Triage: the reader and engine gaps. Owning check: engine/acp/ci/acp.sh.
+
+Add a reproducing case when each item is fixed.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 747,
+    "issue_id": "acat-pg22-review-lows-ncss",
+    "author": "johnw",
+    "text": "PG23 left R1, R2, R4 and the two triage items unfixed by design, because the fix round covers only critical, high and medium findings. Owners and owning checks are as listed in this issue.",
+    "created_at": "2026-10-03T19:46:17Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG23
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg23-fess-followup-auc5
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 12:46]
+:MODIFIED: [2026-10-03 Sat 12:46]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking fess findings of subtask PG23 (fess report pg-PG23-r1.md).
+
+- Medium: WM-041 has no capacity run of record (PG22 R3). Orphan PIDs 111, 9444 and 61004 and host load exclude a run under the PG1 rule. Owner: operator or Integrator. Action: end the three PIDs, then run capacity-streams and capacity-inputs once each at -N8 and record them in manager/CAPACITY.md and doc/workflow-manager-release-evidence.md. Tracked by acat-n50o and acat-jkas.
+- Low: R1, R2, R4 and the triage lows stay unfixed by design. Tracked with owners and owning checks in acat-pg22-review-lows-ncss.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG24
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg24-fess-followup-p5aw
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 13:02]
+:MODIFIED: [2026-10-03 Sat 13:02]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking fess findings of subtask PG24 (fess report pg-PG24-r1.md).
+
+- Medium: from PG12 (3bf6e8cb) until the PG24 cabal fix, manager-admission-check and manager-artifact-check did not build under -Werror (GHC-32850, missing home modules). doc/workflow-manager-release-evidence.md (lines 76, 105, 109, 112, 155, 163) cites runs of these executables from PG3 and PG11, made before the breakage. Action: in G5 part 2, run manager-admission-check (main and restart-native) and manager-artifact-check at N8 on the committed tree and update the cited evidence paths, or record the gap in the matrix.
+- Low: the static closure check of the other-modules lists of every stanza is not saved as evidence. Fess reproduced it independently. Action: save the script beside the gate evidence or record its command in g5-summary.md.
+- Low: the gate ran on 9f40bd9e plus the uncommitted cabal fix. Resolved by the PG24 commit, which holds exactly fix-agentic-cabal.diff (SHA-256 f3173eea192a).
+- Low: stale PID 61004 and frontends PID 111 and 9444 ran during the gate, with load up to 17.1 at step start. The gate takes no capacity measurement. Action: stop them before any capacity run of record (see acat-n50o and acat-jkas).
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG25
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg25-fess-followup-7vpx
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 13:13]
+:MODIFIED: [2026-10-03 Sat 13:13]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking fess findings of subtask PG25 (fess report pg-PG25-r1.md).
+
+- Low: PG25/impl-r1/openapi-additive.py reads the accepted list from doc/api/README.md in the working tree, not from the NEW revision. Action: read it with git show NEW:doc/api/README.md.
+- Low: the two PLAIN steps (13-corpus-status and 15-broker-diff) did not go through run-step.sh, so their .commit records have no end time and no load. Action: record the end time and load for PLAIN steps too.
+
+* TODO [#B] Run the PG26 capacity modes as runs of record inside the PG1 rule
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg26-capacity-run-of-record-2z6q
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 13:53]
+:MODIFIED: [2026-10-03 Sat 14:30]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Subtask PG26 (G5 functional gate part 3, capacity modes) stopped at an authorization gate. Every other acceptance item passed in round 2.
+
+Gated change: end the stale PF17 manager PID 61004 ('routing-fixed-point-probe --manager serve --config /Users/johnw/Products/k.M0a5ItPm/tmp/pf17-capacity.ocD2VsSb/N8/configuration.json +RTS -N8') and the stopped frontends PID 111 and PID 9444 ('routing-fixed-point-probe' frontend, state Ts). This is an operator or Integrator action. The same gate holds acat-jkas and acat-n50o. Then run capacity-admission, capacity-inputs (with ARTIFACT_CHECK), capacity-streams, faults-io, storage and routes once each at N8 through the evidence script PG/PG26/impl-r2/step.sh (private evidence directory), one at a time, recording uptime and pgrep before and after. Then run manager/test/capacity_summary.py summary manager/test/capacity-ceilings.json over the six measurement files, with --exclude-section failures as the gate form.
+
+Acceptance: other-managers-start 0 in every workload, every workload start load at most 16 (the harness now waits per lifetime), every mode exits 0, no key of these modes outside its ceiling, no ceiling changed. Also record whether pages.first-page-p50-ms returns toward the PG4 value of 131.2 ms without PID 61004.
+
+Current values (round 2, not a run of record, PID 61004 present): all six modes exit 0, 13 workloads started at load 15.58 or less, summary 115 PASS, 0 FAIL, 14 MISSING (all failures.* keys of modes not in this part), and 0 MISSING with --exclude-section failures. pages.first-page-p50-ms 399.8 ms (ceiling 500).
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 758,
+    "issue_id": "acat-pg26-capacity-run-of-record-2z6q",
+    "author": "johnw",
+    "text": "PG27 round 1 hit the same gate (PID 61004 during all five failure modes). The combined rerun of all eleven modes is acat-pg27-run-of-record-21e9.",
+    "created_at": "2026-10-03T21:30:40Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG26
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg26-fess-followup-6g9t
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 13:53]
+:MODIFIED: [2026-10-03 Sat 13:53]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the fess audit of PG26 round 2 (fess/pg-PG26-r2.md in the private evidence directory).
+
+1. (medium) pages.first-page-p50-ms is 399.8 ms against 131.2 ms at PG4, and the cause is not established. The key passes its ceiling of 500 by 100 ms. Round 2 refutes the load-average explanation. Fix: measure capacity-inputs again after PID 61004 has stopped (acat-pg26-capacity-run-of-record-2z6q). If the gap remains, profile the /v1/runs first-page path at its owner (History.observeLegacy).
+2. (medium) Acceptance item 1 of PG26 is met only vacuously, because no run is a run of record while PID 61004 runs. Tracked by acat-pg26-capacity-run-of-record-2z6q.
+3. (low) manager/test/capacity_summary.py: the summary step as specified exits 1 by construction because of the 14 failures.* MISSING keys, and --exclude-section also removes FAIL lines of an excluded section. Fix: state the gate form of the summary and allow the filter only for sections whose modes the part does not run, for example only failures.
+4. (low) manager/test/service_http.py CapacityHarness.wait_for_load: each workload can wait 600 s, so the four workloads of capacity-admission can wait 2400 s, more than the 900 s timeout of the mode. Fix: bound the total wait of a mode below its timeout, or record an expired wait and continue, and document the bound.
+5. (low) manager/CAPACITY.md line 92 says one LOAD-WAIT line is printed for each reading above 16, but the last reading at the deadline is not printed. Line 115 is not wrapped. Fix: print the final reading or reword the line, and rewrap line 115.
+
+* TODO [#D] Address the PG27 fess findings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg27-fess-followup-0xbw
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 14:30]
+:MODIFIED: [2026-10-03 Sat 14:30]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG27-r1 (2026-10-03):
+
+1. (medium) No WM-041 capacity run of record exists. All 22 workloads of PG26 round 2 and PG27 recorded other-managers-start 1 because PID 61004 ran. Tracked as the gated rerun acat-pg27-run-of-record-21e9.
+2. (low) manager/CAPACITY.md said each mode ran "on the tree of commit e8c04cd4", while the PG26 round-2 modes ran on 1ac80da968 plus an uncommitted diff equal in content to e8c04cd4. Fixed by the Integrator in the PG27 commit: the text now says "on a tree whose content equals commit e8c04cd4".
+3. (low) The G5 gate summary exists only as copies in the stage directories PG24 to PG27 (newest: PG/PG27/impl-r1/g5-summary.md in the private evidence directory). Pick one canonical gate-summary location for the closeout and copy the part 4 rows into it.
+
+* TODO [#B] Run the PG26 and PG27 modes as runs of record without PID 61004
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg27-run-of-record-21e9
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 14:30]
+:MODIFIED: [2026-10-03 Sat 14:30]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Subtask PG27 (G5 functional gate part 4, failure modes and the WM-041 summary) stopped at an authorization gate. Every other acceptance item passed in round 1.
+
+Gated change: end the stale PF17 manager PID 61004 ('--manager serve --config /Users/johnw/Products/k.M0a5ItPm/tmp/pf17-capacity.ocD2VsSb/N8/configuration.json +RTS -N8') with `kill -TERM 61004`, then `kill -KILL 61004` after 25 seconds if it still runs. If the operator agrees, also end the stopped frontends PID 111 and PID 9444 with `kill -CONT` and then `kill -TERM`. This is an operator or Integrator action. The same gate holds acat-pg26-capacity-run-of-record-2z6q, acat-jkas and acat-n50o.
+
+After that: run all eleven modes once at N8 under the PG1 load rule, one at a time, with uptime and pgrep before and after (the six capacity modes of PG26: capacity-admission, capacity-inputs with ARTIFACT_CHECK, capacity-streams, faults-io, storage, routes; and the five failure modes of PG27: failures-worker, failures-manager, failures-launched, tui-failures, failures-backup). Run capacity_summary.py summary over the eleven files and update the "Measured values" section of manager/CAPACITY.md.
+
+Acceptance: every workload records other-managers-start 0 and a start load of at most 16, 0 FAIL and 0 MISSING over the 129 ceiling keys, no ceiling row changed, make -C doc check passes.
+
+Current values (not a run of record, PID 61004 present): 129 PASS, 0 FAIL, 0 MISSING; largest start load 15.58; every mode exited 0. Evidence: PG/PG27/impl-r1 in the private evidence directory.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG28
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg28-fess-followup-pbd5
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 14:55]
+:MODIFIED: [2026-10-03 Sat 14:55]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG28-r1 (2026-10-03), all low, in doc/workflow-manager-release-evidence.md:
+
+1. Line 176, row A24: the package evidence moved to PG28, but the rollback evidence still cites $R/PG/PG17/impl-r1/rollback.log. Change it to $R/PG/PG28/impl-r1/07-rollback.log.
+2. Line 389: "Each packaging subtask ran on an uncommitted working copy, and the Integrator then committed it" is now false for the PG28 row (line 399), which ran on a clean commit with no change of its own. Reword the introduction.
+3. Line 82: the operational row cites make -C doc check at $R/PG/PG21/impl-r1/doc-check.log. Optionally point it to $R/PG/PG28/impl-r1/11-doc-check.log.
+4. Line 408: the Emacs client identity names commit 6e8eac0, but the emacs-native branch is at db7d212. Update it when the release is closed.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PG29
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pg29-fess-followup-w9y7
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 15:14]
+:MODIFIED: [2026-10-03 Sat 15:14]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pg-PG29-r1 (report fess/pg-PG29-r1.md in the private evidence directory), both low:
+
+1. PG/PG29/impl-r1/g5-summary.md lines 359-361: the Emacs steps used the PD7 wf binary (built 2026-10-02 09:21). The summary justifies this only by the unchanged Emacs worktree sources. wf also links the agentic library of the tui worktree. wf imports only Agentic.Runtime modules, and runtime/, src/ and engine/ have not changed since the PD7 build. Add that sentence to the part 6 section of the gate summary.
+2. The stale pf17-capacity manager PID 61004 (-N8) and the stopped frontends PID 111 and 9444 still run. They raised the host load during the PG29 journeys (1-minute load 6.96 to 11.01). The operator or the Integrator ends them before the capacity runs of record (see acat-pg26-capacity-run-of-record-2z6q and acat-pg27-run-of-record-21e9).
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PG8
 :PROPERTIES:
@@ -14210,7 +14823,7 @@ Deferred security stage for Phase E, Pi service mode (WM-036 to WM-038), under t
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 20:45]
-:MODIFIED: [2026-10-03 Sat 00:16]
+:MODIFIED: [2026-10-03 Sat 12:42]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -14306,6 +14919,13 @@ Findings of the Phase E end-of-phase review (two lenses, range 33f84fe4..841ce0c
     "author": "johnw",
     "text": "Phase F closeout (2026-10-03): PE27 is met. PF3 (67d1b234) sets the four @earendil-works devDependency strings in ext-pi/package.json and the lock-file root entry to 0.99.1, and both lenses rate it met. The node_modules entries of the lock file and manager/README.md still state the old versions (acat-phase-f-review-findings-4e23 item 9, acat-pf3-fess-followup-ann7). The other items of this issue stay open. Source: doc/workflow-manager-handoff.md, section 'Phase F part 3 of 2026-10-03'.",
     "created_at": "2026-10-03T07:16:01Z"
+  },
+  {
+    "id": 744,
+    "issue_id": "acat-phase-e-review-findings-0l73",
+    "author": "johnw",
+    "text": "PG22 triage (doc/research/reviews/workflow-manager-phase-g-review-2026-10.md): the snapshot supervision label is not stated in manager/CONTROLS.md. Low, does not block a functional G5 criterion. Owning check: tui-history.",
+    "created_at": "2026-10-03T19:42:03Z"
   }
 ]
 #+end_src
@@ -24586,7 +25206,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 09:40]
+:MODIFIED: [2026-10-03 Sat 15:14]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -24819,6 +25439,41 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "PG10 (2026-10-03, WM-041 interrupted backup and restore): new mode failures-backup in manager/test/service_http.py drives agentic-run --manager admin with the offline configuration against a disposable fixture holding a 64 MiB capture. Case 1 (of record): a backup under RLIMIT_FSIZE between the database size and the capture size refused storage-unavailable, left no complete file, a restore naming it refused with no change and no marker, check-store reported valid with the same epoch and stream id, the next serve lifetime served the committed state, and an unlimited backup into a new destination completed. Case 2 (SIGKILL during the capture copy) and case 3 (SIGKILL of a restore after restore-in-progress appeared: serve exits 2, offline status refuses storage-unavailable, the marker remains) were both reached and passed. failures-backup-measure.json reports failures.backup.passed true, and capacity_summary.py summary reports PASS for that key. capacity_summary.py ceilings, the Phase A journey at N8 and make -C doc check passed. manager/CAPACITY.md now names failures-backup as the basis, and the restart-interruption case of manager-admission-check keeps its private boundary. Not a run of record under the PG1 rule (PID 61004 was running). Fess pg-PG10-r1 not blocking; findings in acat-pg10-fess-followup-aurz.",
     "created_at": "2026-10-03T16:40:14Z"
+  },
+  {
+    "id": 743,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PG22 review finding R3 (doc/research/reviews/workflow-manager-phase-g-review-2026-10.md): this capacity run of record is the only item on the review fix list. It needs PIDs 111, 9444 and 61004 ended (operator or Integrator action) and host load within the manager/CAPACITY.md rule, then one run at -N8.",
+    "created_at": "2026-10-03T19:42:01Z"
+  },
+  {
+    "id": 746,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PG23: review finding R3 stays open. At 12:45 on 2026-10-03, PIDs 111 and 9444 (state Ts) and 61004 (pf17-capacity --manager serve at -N8) still ran with parent 1, and the load average was 10.0 to 16.7. The PG1 host rule therefore excludes a capacity run of record. Action: end the three PIDs (kill -CONT, then kill -KILL) with operator direction, then run capacity-streams and capacity-inputs once each at -N8 on a host within the manager/CAPACITY.md rule, and record them in manager/CAPACITY.md and doc/workflow-manager-release-evidence.md. Tracked by acat-n50o and acat-jkas.",
+    "created_at": "2026-10-03T19:46:17Z"
+  },
+  {
+    "id": 753,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PG26 (2026-10-03), G5 functional gate part 3, round 2. Harness change only: CapacityHarness waits per workload for a one-minute load of at most 16 (at most 600 s, LOAD-WAIT lines, <workload>.host-load-wait-ms), capacity-inputs records pages.legacy-setup-ms and its loads, and capacity_summary.py summary takes --exclude-section NAME. No manager source and no ceiling changed. capacity-admission, capacity-inputs, capacity-streams, faults-io, storage and routes exit 0 at N8, all 13 workloads started at load 15.58 or less, summary 115 PASS 0 FAIL (14 failures.* MISSING without the filter, 0 with --exclude-section failures). Not a run of record: PID 61004 ran throughout. Gated rerun: acat-pg26-capacity-run-of-record-2z6q. Fess findings: acat-pg26-fess-followup-6g9t. Evidence (private): PG/PG26/impl-r2.",
+    "created_at": "2026-10-03T20:54:01Z"
+  },
+  {
+    "id": 757,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PG27 (2026-10-03, G5 functional gate part 4): failures-worker, failures-manager, failures-launched, tui-failures and failures-backup each ran once at N8 under the PG1 load rule (start loads 7.22 to 15.55) and exited 0 with passed true. capacity_summary.py summary over the six PG26 round-2 files and the five PG27 files: 129 PASS, 0 FAIL, 0 MISSING, host-load keys UNCHECKED. capacity_summary.py ceilings (129 keys agree) and make -C doc check passed. manager/CAPACITY.md has the section 'Measured values of 2026-10-03 at e8c04cd4 on macOS 27.0 arm64'; no ceiling row changed. Not a run of record: PID 61004 ran during all 22 workloads; gated in acat-pg27-run-of-record-21e9. Evidence: PG/PG27/impl-r1 and PG/PG27/integrator in the private evidence directory; fess pg-PG27-r1 not blocking, findings in acat-pg27-fess-followup-0xbw.",
+    "created_at": "2026-10-03T21:30:40Z"
+  },
+  {
+    "id": 763,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PG29 (2026-10-03), G5 functional gate part 6, on agent-cat 381875e7f5 and emacs-native db7d212, both trees clean, no source change. BUILD(-ftui-tests agentic-run routing-fixed-point-probe) exit 0. At N8 in the PF23 form (EMACS, WF_EMACS_DIR, WF_EMACS_UI set): cross-client, cross-client-lifecycle, cross-client-lineage, emacs-service, emacs-service-lifecycle and emacs-service-controls exit 0. Control cross-client-broken-answer exit 1 with 'CROSS-ASSERT the cross-client answer is JSON false', and emacs-service-broken-answer exit 1 with 'JOURNEY-ASSERT Emacs answer is JSON false'. In the Emacs worktree with a temporary HOME: ci/emacs.sh exit 0 (smoke 38 of 38, transport 97 of 97) and ci/emacs-ui.py exit 0 (8 PASS lines). Each step is in the gate summary PG/PG29/impl-r1/g5-summary.md, part 6, with both commits. Evidence (private): PG/PG29/impl-r1. Fess pg-PG29-r1 non-blocking, findings in acat-pg29-fess-followup-w9y7. Limitation: stale PID 61004 and frontends 111 and 9444 ran throughout; no step is a capacity measurement. The Emacs steps used the PD7 wf binary.\n",
+    "created_at": "2026-10-03T22:14:13Z"
   }
 ]
 #+end_src
@@ -24991,7 +25646,7 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 10:47]
+:MODIFIED: [2026-10-03 Sat 14:55]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-042
 :SOURCE_REPO: agent-cat
@@ -25223,6 +25878,13 @@ recipe that ignores WAL or unresolved effects.
     "author": "johnw",
     "text": "PG13: manager/OPERATIONS.md states the operator procedures of the local manager (two-configuration rule, diagnostics, validation and reload, credentials, drain, cancel and shutdown, offline backup and restore with fencing evidence, completion of an interrupted restoration, manager-log pruning, quarantine release, and the failure procedures). manager/README.md and doc/api/README.md link to it. Case 7 of the operations mode of manager/test/service_http.py executes the procedures in runbook order on one disposable fixture and cites failures-manager, credential-lifecycle, routes and failures-backup for the steps they own. Evidence: BUILD of agentic-run and routing-fixed-point-probe with -ftui-tests, operations at N8 (cases 1 to 7 pass), make -C doc check (exit 0). Runbook bodies match the bodies the operations mode sends, checked by reading. The exercise of the procedures by another human operator is pending and has not run. WM-042 stays open. Fess findings: acat-pg13-fess-followup-xyew.",
     "created_at": "2026-10-03T17:47:05Z"
+  },
+  {
+    "id": 761,
+    "issue_id": "acat-wm-042-sdg9",
+    "author": "johnw",
+    "text": "PG28 (G5 functional gate part 5) at e898b8b9de: rebuild up to date; nix build .#agentic-run (substitution off, lock unchanged) gave output /nix/store/yc3zvavs19s6d1ywixzhchiszhiqy2vh-agentic-run-0.1.0.0, bin/agentic-run SHA-256 dcc773bd...009991 (new derivation because 1ac80da9 changed agentic.cabal); sdist 1902882 bytes, SHA-256 7b0031be...be76. At N8, exit 0: operations cases 1-7, credential-lifecycle, schema-fixtures, package and rollback with PACKAGE_RUNNER at the recorded output path, store-check 225 PASS, command-check 483 PASS, admission-check 146 PASS, make -C doc check. Release evidence updated with the PG28 identities. Evidence: $R/PG/PG28/impl-r1. Fess non-blocking, filed as acat-pg28-fess-followup-pbd5.",
+    "created_at": "2026-10-03T21:55:24Z"
   }
 ]
 #+end_src
@@ -25234,7 +25896,7 @@ recipe that ignores WAL or unresolved effects.
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 11:03]
+:MODIFIED: [2026-10-03 Sat 14:55]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-043
 :SOURCE_REPO: agent-cat
@@ -25351,6 +26013,34 @@ explicitly authorized operation.
     "author": "johnw",
     "text": "PG14: flake.nix adds packages.<system>.agentic-run and packages.<system>.default, a stdenv.mkDerivation whose src is a lib.fileset.toSource limited to agentic.cabal, cabal.project, the three nix/ files and the .hs, .c and .h files of the source and cbits directories that exe:agentic-run needs. The build runs cabal-install offline (--active-repositories=:none) against the devShell GHC with -O1, -j$NIX_BUILD_CORES and --ghc-options=-j, and installs bin/agentic-run. No new input, flake.lock unchanged. bash test/cabal.sh sdist no longer passes --offline (Cabal refused it), with a regression case in test/cabal_env_probe.py. Documentation: 'Building the runner package' in doc/agent-cat.texi and README.md; new doc/workflow-manager-release-evidence.md with 'Package identities' for PG21. Evidence (PG/PG14): nix build .#agentic-run --option substitute false succeeded in 330 s (aarch64-darwin, load 6.3 to 14.6); result/bin/agentic-run list and run hello --scripted gave the documented output; drvPath /nix/store/6y76igrq76s9g2byl8wdjimbc4vsrn9h-agentic-run-0.1.0.0.drv equal from the worktree, from a tracked-file copy (path:) and after a documentation-only edit; output /nix/store/lc8qfj9nwxrlm4582wswn9vk3h48zigv-agentic-run-0.1.0.0; bin sha256 6ad55c59c69d57923b2ec929d3cd937405ada1fe430f36ef0f056dbfa995e4fc; sdist agentic-0.1.0.0.tar.gz sha256 471817ca146cfb0192b3dbcd0d0ab45c5d03799b9b549bfc686e192af1decbce lists the three nix files; BUILD, Phase A journey at N8 and make -C doc check passed. Only aarch64-darwin was built. Upgrade and rollback remain open. WM-043 stays open. Fess findings: acat-pg14-fess-followup-zqb4.",
     "created_at": "2026-10-03T18:03:17Z"
+  },
+  {
+    "id": 729,
+    "issue_id": "acat-wm-043-zm3d",
+    "author": "johnw",
+    "text": "PG15 (acceptance of the packaged artifact): the package mode of manager/test/service_http.py runs the Nix-built agentic-run (/nix/store/lc8qfj9nwxrlm4582wswn9vk3h48zigv-agentic-run-0.1.0.0, binary SHA-256 6ad55c59...e4fc) as the manager and the runner at N8. A hello request completed, the verified result digest matched, live status answered serving, and shutdown answered {state: stopped} with exit status 0. Identities recorded in doc/workflow-manager-release-evidence.md. Checks passed: BUILD, nix build with substitution off (no rebuild), package mode at N8, PACKAGE_RUNNER-unset control, JOURNEY-ONCE(pg15, 8), make -C doc check. Upgrade and rollback remain. Fess non-blocking findings: acat-pg15-fess-followup-rkvc.",
+    "created_at": "2026-10-03T18:12:25Z"
+  },
+  {
+    "id": 730,
+    "issue_id": "acat-wm-043-zm3d",
+    "author": "johnw",
+    "text": "PG16 (schema upgrade fixtures and newer-schema refusal): manager-store-check gains the schema-fixtures lane (roots for schema 1 to 11 and a schema 13 root) and schemaUpgradeChecks in the main suite. The package mode of manager/test/service_http.py adds a schema step through the Nix-built agentic-run: every schema 1 to 11 root upgrades to 12 by offline status, passes check-store, serves 200 on GET /v1/capabilities and stops through shutdown with status 0. The schema 13 root is refused by offline status (storage-unavailable) and by serve (exit 2), and stays at 13. Checks passed: BUILD, nix build with substitution off, the schema-fixtures lane, the package mode at N8, the store main suite at N8, JOURNEY-ONCE at N8 and make -C doc check. Scope: fixtures are built from current Schema.hs prefixes, not byte copies of historical databases. Only aarch64-darwin. Not a PG1 run of record (PID 61004 not checked). Rollback has not started. Fess non-blocking findings filed in acat-pg16-fess-followup-aeqn.",
+    "created_at": "2026-10-03T18:26:42Z"
+  },
+  {
+    "id": 731,
+    "issue_id": "acat-wm-043-zm3d",
+    "author": "johnw",
+    "text": "PG17 (rollback, scenario A24): manager/test/service_http.py adds a rollback mode. With the Nix-built agentic-run as the manager, it builds history (one verified hello run, one harden run cancelled at its person question, one queued request), drains, cancels, shuts down and takes an offline backup. It records lstat facts of 37 paths of the manager root, runs agentic-run --tui --local in a PTY with isolated XDG directories to completion, reads the manager log, both run logs and the verified result read-only, and finds the record unchanged with no manager process left. Offline status is read only afterward and its write is detected. A second serve lifetime prepares the review of the queued request before any command and runs it once after its exact approval. manager/OPERATIONS.md states the rollback procedure and its limits. Checks passed: BUILD, nix build with substitution off, rollback at N8, JOURNEY-ONCE at N8, make -C doc check. Limits: roll forward still needs the exact approval (consent rule); Emacs and Pi local modes are recorded as covered by their own suites, not run by this mode; not a PG1 run of record (PID 61004 orphan present). The WM-043 package stays open for the closeout.",
+    "created_at": "2026-10-03T18:39:37Z"
+  },
+  {
+    "id": 760,
+    "issue_id": "acat-wm-043-zm3d",
+    "author": "johnw",
+    "text": "PG28 (G5 functional gate part 5) at e898b8b9de: rebuild up to date; nix build .#agentic-run (substitution off, lock unchanged) gave output /nix/store/yc3zvavs19s6d1ywixzhchiszhiqy2vh-agentic-run-0.1.0.0, bin/agentic-run SHA-256 dcc773bd...009991 (new derivation because 1ac80da9 changed agentic.cabal); sdist 1902882 bytes, SHA-256 7b0031be...be76. At N8, exit 0: operations cases 1-7, credential-lifecycle, schema-fixtures, package and rollback with PACKAGE_RUNNER at the recorded output path, store-check 225 PASS, command-check 483 PASS, admission-check 146 PASS, make -C doc check. Release evidence updated with the PG28 identities. Evidence: $R/PG/PG28/impl-r1. Fess non-blocking, filed as acat-pg28-fess-followup-pbd5.",
+    "created_at": "2026-10-03T21:55:23Z"
   }
 ]
 #+end_src
@@ -25362,7 +26052,7 @@ explicitly authorized operation.
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-09-09 Wed 22:34]
+:MODIFIED: [2026-10-03 Sat 13:13]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-044
 :SOURCE_REPO: agent-cat
@@ -25825,6 +26515,62 @@ is ready, not that an operator has deployed it.
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 732,
+    "issue_id": "acat-wm-044-6utw",
+    "author": "johnw",
+    "text": "PG19 (manual, public inventories, API and version matrix): doc/agent-cat.texi gains the Runner Reference section 'Workflow manager service' (--manager serve with --legacy-history, --manager admin with all thirteen operations, the two-configuration rule, pointer to manager/OPERATIONS.md); doc/check-manual-cli.py checks the documented manager refusal lines and the operation-null admin answer (fails on the HEAD manual); doc/api/README.md gains the version and compatibility matrix, the truncated-GET and SSE 429 reconnection rules and the additive fields since 88d999b7; manager/README.md corrects the 0.85.1 pin sentence. Evidence /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PG/PG19/impl-r1: make -C doc check 0, check-haskell 0, BUILD 0, doc/research diff empty. Fess /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/pg-PG19-r1.md non-blocking. Package stays open for the closeout.",
+    "created_at": "2026-10-03T18:58:49Z"
+  },
+  {
+    "id": 734,
+    "issue_id": "acat-wm-044-6utw",
+    "author": "johnw",
+    "text": "PG20 (client documentation, examples, owner documents and handoff): tui/README.md and doc/tui-design.md state service-mode behavior under drain, shutdown and restore and the SSE 429 retry rule. ext-pi/README.md records the stale lock entries (npm ci not supported, PG18 pending) and the 429 rule. The Emacs client README (emacs-native, local commit) records the open service-mode limits and the 429 rule. manager/STORAGE.md and manager/CAPACITY.md state that a disk write failure stops the Store until a restart. manager/STORAGE.md gives the POST route bound as the code sets it. runtime/BROKER.md and manager/CONTROLS.md state the late-redirect order. doc/examples has the serve and offline reference pair, linked from manager/OPERATIONS.md. The handoff has the 'Phase G of 2026-10' current-state section (gate results pending). Checks: make -C doc check exit 0, offline reload-profiles on a private copy of the offline reference answered ok:true with profileIds [scripted] and exit 0, Emacs worktree diff is README.md only. Fess non-blocking: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/pg-PG20-r1.md, findings filed as acat-pg20-fess-followup-km5k. WM-044 stays open for the gate and closeout.",
+    "created_at": "2026-10-03T19:12:56Z"
+  },
+  {
+    "id": 738,
+    "issue_id": "acat-wm-044-6utw",
+    "author": "johnw",
+    "text": "PG21: doc/workflow-manager-release-evidence.md now holds the requirement-by-requirement release evidence matrix: 11 rows for plan section 12, WM-001 to WM-044, G0 to G5 and A01 to A24, each with implementation evidence, executable evidence and its latest private run path, the I16 evidence ceiling and a status. It adds the PG14 to PG17 source identities, the accepted additive OpenAPI fields, the tested platform (macOS 27.0 arm64), the conditional and unavailable checks, and the statement that production activation is not authorized. doc/Makefile check greps the matrix header, the section headings and the activation sentence. make -C doc check passed (exit 0). Fess: non-blocking, one medium and four low findings filed as acat-pg21-fess-followup-e2n5. WM-044 stays open for the integrated review.",
+    "created_at": "2026-10-03T19:27:10Z"
+  },
+  {
+    "id": 739,
+    "issue_id": "acat-wm-044-6utw",
+    "author": "johnw",
+    "text": "PG22 integrated architecture, correctness and failure review recorded in doc/research/reviews/workflow-manager-phase-g-review-2026-10.md (range 88d999b7..b94421c6 and emacs-native db7d212). Both lenses hold. No critical or high finding. One medium evidence gap (R3, capacity runs of record) and three lows (R1, R2, R4), filed as acat-pg22-review-lows-ncss. All 16 listed section-4 lows triaged, none blocks a functional G5 criterion. Journey sample at N8 passed (exit 0, 23 PASS lines, fixture pg22.VqoFywfF). make -C doc check exit 0. No source change. Fess non-blocking: acat-pg22-fess-followup-in07. WM-044 stays open for the closeout.",
+    "created_at": "2026-10-03T19:41:55Z"
+  },
+  {
+    "id": 745,
+    "issue_id": "acat-wm-044-6utw",
+    "author": "johnw",
+    "text": "PG23 (fix round for the PG22 integrated review): no source change. PG22 lists no critical or high finding. Its only medium finding, R3 (no WM-041 capacity run of record), needs no source change and is an operator or Integrator action. Checks on 9f40bd9e: build of the touched targets with -ftui-tests (exit 0, up to date), Phase A journey at N8 (exit 0, 23 PASS, fixture pg23.6uKwpG5j/N8), make -C doc check (exit 0). Fess pg-PG23-r1 not blocking. No commit, because the tree did not change.",
+    "created_at": "2026-10-03T19:46:16Z"
+  },
+  {
+    "id": 749,
+    "issue_id": "acat-wm-044-6utw",
+    "author": "johnw",
+    "text": "PG24: G5 part 1 gate passed (builds, doc checks, model tests, journey pair, three controls). The release-evidence matrix cites pre-breakage runs of manager-admission-check and manager-artifact-check; rerun tracked in acat-pg24-fess-followup-p5aw. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PG/PG24/impl-r1/g5-summary.md.",
+    "created_at": "2026-10-03T20:03:06Z"
+  },
+  {
+    "id": 751,
+    "issue_id": "acat-wm-044-6utw",
+    "author": "johnw",
+    "text": "PG25 (G5 part 2) confirmed the /v1 contract is additive only from 88d999b7 to 1ac80da968 and matches the accepted additive-field list in doc/api/README.md. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PG/PG25/impl-r1/g5-summary.md and openapi-additive.log.",
+    "created_at": "2026-10-03T20:13:32Z"
   }
 ]
 #+end_src
