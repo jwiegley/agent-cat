@@ -7286,7 +7286,7 @@ Request, approval, control, export, and lineage routes pass hostile-input, repla
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 18:57]
+:MODIFIED: [2026-10-02 Fri 21:46]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G4
 :SOURCE_REPO: agent-cat
@@ -7490,6 +7490,13 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
     "author": "johnw",
     "text": "Phase F part 2 closeout (2026-10-02): open. WM-039 witness modes pass for function at N8; G4 needs the gate run of the witness and the client suites (PF21 to PF24).",
     "created_at": "2026-10-03T01:57:01Z"
+  },
+  {
+    "id": 688,
+    "issue_id": "acat-g4-pech",
+    "author": "johnw",
+    "text": "PF21 (2026-10-02), Phase F gate part 1, on the final tree at 537f1795: ALLBUILD exit 0, make -C doc check exit 0, tui-model-test at +RTS -N1 and -N8 exit 0, JOURNEY-PAIR(pf-gate) at N1 and N8 exit 0 (PASS flow line on both), the three journey controls at N8 failed with their literal messages, and the six N8 owner checks with the PD28 gate arguments exited 0. One command-check attempt failed on the gate invocation (credential_cli.py requires a work directory named N1 or N8) and passed on rerun; both runs are kept. No source change. Evidence (private): PF/PF21/impl-r1. Fess pf-PF21-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open: PF22 to PF24 run the rest of the Phase F gate.\n",
+    "created_at": "2026-10-03T04:46:34Z"
   }
 ]
 #+end_src
@@ -12873,6 +12880,25 @@ Non-blocking findings of fess pf-PF20-r1 (fess/pf-PF20-r1.md) on subtask PF20 (t
 6. (low) manager/test/AdmissionCheck.hs: a test-only busy_timeout was added after one SQLITE_BUSY failure, with one passing run after it. The PF20 commit message records it. Watch for a recurrence.
 7. (low) Process 61004, a routing-fixed-point-probe from an earlier stage, is still running. Fix: stop it.
 
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF21
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf21-fess-followup-nak8
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 21:46]
+:MODIFIED: [2026-10-02 Fri 21:46]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF21-r1 (fess/pf-PF21-r1.md) on subtask PF21 (Phase F gate, part 1).
+
+1. (low) PF/PF21/impl-r1/*.log: the step logs do not record the invoked command lines, so the +RTS -N1 and -N8 settings of the model test and the owner checks rest on the implementer's statement. model-test-N1.log and model-test-N8.log are byte-identical. The fess rerun of tui-model-test at -N8 passed with 976 PASS lines. Fix: make the gate runner write the exact command line at the top of each step log.
+2. (low) manager/ci/commands.sh:19 runs manager/test/proof_opacity.py after command_contract.py and credential_cli.py. PF21 did not run it, and its limitations do not name it. The PD28 gate also left it out. Fix: name proof_opacity.py among the steps that did not run, or run it in a later gate if the operator wants it.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PF3
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -13427,7 +13453,7 @@ The other review findings are held by acat-70ll (unresolved approve after a rest
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-02 Fri 09:55]
-:MODIFIED: [2026-10-02 Fri 13:16]
+:MODIFIED: [2026-10-02 Fri 21:46]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -13473,6 +13499,13 @@ Findings of the two Phase D reviews (agent-cat a17a015b..91fb0ad4, emacs-native 
     "author": "johnw",
     "text": "Evidence scope: Phase F part 1 closeout (handoff section 'Phase F part 1 of 2026-10-02', remaining-scope report revision 2; evidence under resume-20260923/PF and Z/CLOSEOUT-pf). Both medium WM-032 findings are fixed by PF1 (214f3ff0) and PF2 (2d02134f).",
     "created_at": "2026-10-02T20:16:22Z"
+  },
+  {
+    "id": 684,
+    "issue_id": "acat-phase-d-review-findings-raxi",
+    "author": "johnw",
+    "text": "Subtask PF21 (2026-10-02) closes item 3 of this issue. On the tree at 537f1795, which contains the PD29 Runtime fix, the three journey controls ran at N8 and each exited 1 with its literal message: tui-journey-broken-answer (\"JOURNEY-ASSERT typed answer is not JSON false\"), tui-consent-control (\"detail-view key approved a review\") and tui-flow-approve-fault (\"FLOW-FAULT the approve append failed and the manager refused the approval with storage-unavailable\"). The N8 owner checks with the PD28 gate arguments (manager-admission-check, manager-approval-check binary only, manager-command-check, manager-draft-check, manager-history-check, manager-store-check) each exited 0. Evidence (private): PF/PF21/impl-r1, one log and exit file per step, fixture roots kept under the private TMPDIR (pfgate-*). Fess pf-PF21-r1 is not blocking.\n",
+    "created_at": "2026-10-03T04:46:29Z"
   }
 ]
 #+end_src
@@ -23358,7 +23391,7 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Adopt the shared root-role r
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 18:56]
+:MODIFIED: [2026-10-02 Fri 21:46]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-039
 :SOURCE_REPO: agent-cat
@@ -23523,6 +23556,13 @@ configuration is changed.
     "author": "johnw",
     "text": "Phase F part 2 closeout (2026-10-02): status recorded in doc/workflow-manager-handoff.md, section 'Phase F part 2 of 2026-10-02'. Met for function as local single-machine evidence: cross-client, cross-client-lifecycle and cross-client-lineage pass at N8 (PF4 to PF8), and the cross-client-broken-answer control fails with its literal message. The gate run (PF23) has not run, so the package stays open. Deferred security items of 2026-09-30 carry forward unchanged.",
     "created_at": "2026-10-03T01:56:58Z"
+  },
+  {
+    "id": 685,
+    "issue_id": "acat-wm-039-0vfi",
+    "author": "johnw",
+    "text": "PF21 (2026-10-02), Phase F gate part 1, on the final tree at 537f1795: ALLBUILD exit 0, make -C doc check exit 0, tui-model-test at +RTS -N1 and -N8 exit 0, JOURNEY-PAIR(pf-gate) at N1 and N8 exit 0 (PASS flow line on both), the three journey controls at N8 failed with their literal messages, and the six N8 owner checks with the PD28 gate arguments exited 0. One command-check attempt failed on the gate invocation (credential_cli.py requires a work directory named N1 or N8) and passed on rerun; both runs are kept. No source change. Evidence (private): PF/PF21/impl-r1. Fess pf-PF21-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open: PF22 to PF24 run the rest of the Phase F gate.\n",
+    "created_at": "2026-10-03T04:46:31Z"
   }
 ]
 #+end_src
@@ -23534,7 +23574,7 @@ configuration is changed.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 18:56]
+:MODIFIED: [2026-10-02 Fri 21:46]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-040
 :SOURCE_REPO: agent-cat
@@ -23760,6 +23800,13 @@ legacy workflow build cannot conceal an unchecked manager development.
     "author": "johnw",
     "text": "Phase F part 2 closeout (2026-10-02): met for function. The ManagerConformance Lean library with proved deciders, manager-oracle with 45 retained cases, manager-conformance-check with the admission, cases, history and refusals lanes, and bisim/ci/manager.sh with three controls landed as PF9 to PF15. The gate run (PF22) has not run, so the package stays open. Open limits: the history and refusals lanes did not rerun after later changes. See the handoff section 'Phase F part 2 of 2026-10-02'.",
     "created_at": "2026-10-03T01:56:59Z"
+  },
+  {
+    "id": 686,
+    "issue_id": "acat-wm-040-3olb",
+    "author": "johnw",
+    "text": "PF21 (2026-10-02), Phase F gate part 1, on the final tree at 537f1795: ALLBUILD exit 0, make -C doc check exit 0, tui-model-test at +RTS -N1 and -N8 exit 0, JOURNEY-PAIR(pf-gate) at N1 and N8 exit 0 (PASS flow line on both), the three journey controls at N8 failed with their literal messages, and the six N8 owner checks with the PD28 gate arguments exited 0. One command-check attempt failed on the gate invocation (credential_cli.py requires a work directory named N1 or N8) and passed on rerun; both runs are kept. No source change. Evidence (private): PF/PF21/impl-r1. Fess pf-PF21-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open: PF22 to PF24 run the rest of the Phase F gate.\n",
+    "created_at": "2026-10-03T04:46:32Z"
   }
 ]
 #+end_src
@@ -23771,7 +23818,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 21:19]
+:MODIFIED: [2026-10-02 Fri 21:46]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -23948,6 +23995,13 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "PF20 (WM-041 failure evidence): new mode faults-io in manager/test/service_http.py runs three manager lifetimes with RLIMIT_FSIZE in lifetime 2. Under the limit, a write past the limit refused with 503 storage-unavailable and left no command row, the Store was poisoned so every later read and the safety withdraw refused with storage-unavailable, and no run or preparation was added. Lifetime 3 without the limit served the committed state with no command replayed. Timing prints in failures-worker (147.8 ms, ceiling 10000), failures-manager (1011.2 ms, ceiling 30000), failures-launched (303.2 ms, ceiling 5000) and tui-failures (1389.5 ms and 1336.0 ms, ceilings 50000 and 35000); all four passed at N8 with unchanged assertions. manager-admission-check with the PD28 gate arguments passed (146 PASS lines), but it has no interrupted-backup case, so failures.backup.passed is a diagnosed FAIL (the case needs admission_audit.py restore-interruption, which waits on operator approval). Combined capacity_summary.py summary over PF17 to PF20: 126 PASS, 3 diagnosed FAIL, 0 MISSING of 129 keys. manager/CAPACITY.md records the values; make -C doc check passed. Evidence is in the private stage directory. Follow-up findings: acat-pf20-fess-followup-nb2n.",
     "created_at": "2026-10-03T04:19:09Z"
+  },
+  {
+    "id": 687,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PF21 (2026-10-02), Phase F gate part 1, on the final tree at 537f1795: ALLBUILD exit 0, make -C doc check exit 0, tui-model-test at +RTS -N1 and -N8 exit 0, JOURNEY-PAIR(pf-gate) at N1 and N8 exit 0 (PASS flow line on both), the three journey controls at N8 failed with their literal messages, and the six N8 owner checks with the PD28 gate arguments exited 0. One command-check attempt failed on the gate invocation (credential_cli.py requires a work directory named N1 or N8) and passed on rerun; both runs are kept. No source change. Evidence (private): PF/PF21/impl-r1. Fess pf-PF21-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open: PF22 to PF24 run the rest of the Phase F gate.\n",
+    "created_at": "2026-10-03T04:46:34Z"
   }
 ]
 #+end_src
