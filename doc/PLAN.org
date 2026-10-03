@@ -7169,7 +7169,7 @@ Protected HTTP access exposes authorized catalogue, history, snapshots, verified
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 18:57]
+:MODIFIED: [2026-10-03 Sat 00:16]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G3
 :SOURCE_REPO: agent-cat
@@ -7275,6 +7275,13 @@ Request, approval, control, export, and lineage routes pass hostile-input, repla
     "author": "johnw",
     "text": "Phase F part 2 closeout (2026-10-02): open. Needs the rest of WM-041 (PF18 owner answer, PF19, PF20) and the Phase F gate (PF21 to PF24).",
     "created_at": "2026-10-03T01:57:00Z"
+  },
+  {
+    "id": 703,
+    "issue_id": "acat-g3-v1iz",
+    "author": "johnw",
+    "text": "Phase F closeout (2026-10-03): G3 stays open. It needs the rest of WM-041 (acat-phase-f-review-findings-4e23 items 1 to 3) and the deferred security stage. Source: doc/workflow-manager-handoff.md, section 'Phase F part 3 of 2026-10-03'.",
+    "created_at": "2026-10-03T07:16:02Z"
   }
 ]
 #+end_src
@@ -7286,7 +7293,7 @@ Request, approval, control, export, and lineage routes pass hostile-input, repla
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 00:05]
+:MODIFIED: [2026-10-03 Sat 00:16]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G4
 :SOURCE_REPO: agent-cat
@@ -7518,6 +7525,13 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
     "author": "johnw",
     "text": "PF24 (2026-10-03), Phase F gate part 4, each step once at N8 with a log and an exit file. Capacity and failure modes: capacity-admission, capacity-inputs, capacity-streams and faults-io exit 0. Touched existing modes with unchanged assertions: storage, routes, failures-worker, failures-manager, failures-launched and tui-failures exit 0. capacity_summary.py summary over the seven measurement files of the CAPACITY.md record against manager/test/capacity-ceilings.json: 124 PASS, 5 FAIL, 0 MISSING, each FAIL diagnosed in gate-summary.md (events.catch-up-p50-ms and p95-ms saturate during the burst round, as PF20 recorded; two load-caused FAILs in the first capacity-admission and capacity-inputs files, with pages.first-page-p50-ms at 535.6 ms even in the diagnostic rerun; failures.backup.passed needs the restore-marker boundary of the excluded admission_audit.py private copy). bash tui/ci/tui.sh exit 0, and the BUILD of agentic-run and routing-fixed-point-probe after it exit 0. One harness fix: CapacityHarness.read also counts http.client.IncompleteRead (a body cut off after a 16 KiB write by the later view check of Transport.respondBytes) as a dropped read within the 30-second bound, and manager/CAPACITY.md describes it. capacity-streams attempt 1 failed on the truncated body, attempt 2 failed under host load 47 with no truncation, and attempt 3 passed at load 13 with no further fix. gate-summary.md lists every step of PF21 to PF24 with its exit status and evidence path. Evidence (private): PF/PF24/impl-r1. Fess pf-PF24-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open for the closeout.\n",
     "created_at": "2026-10-03T07:05:14Z"
+  },
+  {
+    "id": 702,
+    "issue_id": "acat-g4-pech",
+    "author": "johnw",
+    "text": "Phase F closeout (2026-10-03): G4 has its gate evidence for the three clients and the cross-client witness (PF21 to PF24), but stays open: WM-039 stays open for its cross-machine and client-gap items, and the Phase D low findings stay open. Source: doc/workflow-manager-handoff.md, section 'Phase F part 3 of 2026-10-03'.",
+    "created_at": "2026-10-03T07:16:01Z"
   }
 ]
 #+end_src
@@ -13535,7 +13549,7 @@ The other review findings are held by acat-70ll (unresolved approve after a rest
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-02 Fri 09:55]
-:MODIFIED: [2026-10-02 Fri 21:46]
+:MODIFIED: [2026-10-03 Sat 00:16]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -13588,6 +13602,13 @@ Findings of the two Phase D reviews (agent-cat a17a015b..91fb0ad4, emacs-native 
     "author": "johnw",
     "text": "Subtask PF21 (2026-10-02) closes item 3 of this issue. On the tree at 537f1795, which contains the PD29 Runtime fix, the three journey controls ran at N8 and each exited 1 with its literal message: tui-journey-broken-answer (\"JOURNEY-ASSERT typed answer is not JSON false\"), tui-consent-control (\"detail-view key approved a review\") and tui-flow-approve-fault (\"FLOW-FAULT the approve append failed and the manager refused the approval with storage-unavailable\"). The N8 owner checks with the PD28 gate arguments (manager-admission-check, manager-approval-check binary only, manager-command-check, manager-draft-check, manager-history-check, manager-store-check) each exited 0. Evidence (private): PF/PF21/impl-r1, one log and exit file per step, fixture roots kept under the private TMPDIR (pfgate-*). Fess pf-PF21-r1 is not blocking.\n",
     "created_at": "2026-10-03T04:46:29Z"
+  },
+  {
+    "id": 700,
+    "issue_id": "acat-phase-d-review-findings-raxi",
+    "author": "johnw",
+    "text": "Phase F closeout (2026-10-03): both lenses rate the Phase D review findings met for function. PF1 and PF2 closed the two medium findings (steer-editor and prompt resize, fail-over, abandon and redirect by keys), and PF21 and PF22 closed the low finding about unrun checks. The other low findings stay open (503 on GET /v1/snapshot, uncertain Emacs send without reconciliation, the 120-second foreground wait, the first-page-only snapshot read, the missing service lineage and observer commands, unmeasured POST route deadlines, the Emacs 29.1 check, and the review of another client's request in Emacs), so this issue stays open. Source: doc/workflow-manager-handoff.md, section 'Phase F part 3 of 2026-10-03'.",
+    "created_at": "2026-10-03T07:16:00Z"
   }
 ]
 #+end_src
@@ -13599,7 +13620,7 @@ Findings of the two Phase D reviews (agent-cat a17a015b..91fb0ad4, emacs-native 
 :LABELS:   ["deferred","security","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 20:45]
-:MODIFIED: [2026-10-02 Fri 09:56]
+:MODIFIED: [2026-10-03 Sat 00:16]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -13653,6 +13674,13 @@ Deferred security stage for Phase E, Pi service mode (WM-036 to WM-038), under t
     "author": "johnw",
     "text": "Phase D adds these deferred security items (operator direction of 2026-09-30): url.el hardening beyond the functional bindings (cookie jar isolation, proxy environment probes, network security manager policy, redirect and cross-origin credential negatives); revocation matrices during an Emacs poll and an ext-pi stream; redaction projections of manager data in Emacs buffers and Pi transcript entries; an analysis of a spoofed owner lock for the owner-never-locked evidence and the PD4 release fence; security negatives for the lineage and export routes from Emacs and hostile-input and transport negatives for the Emacs client; a threat model for Emacs service mode and a security gate for WM-030 to WM-032. Source: handoff section 'Phase D of 2026-10', deferred security items.",
     "created_at": "2026-10-02T16:56:15Z"
+  },
+  {
+    "id": 704,
+    "issue_id": "acat-phase-e-deferred-security-5jl4",
+    "author": "johnw",
+    "text": "Phase F closeout (2026-10-03): Phase F did no security work under the operator direction of 2026-09-30. The items it defers are listed in doc/workflow-manager-handoff.md, section 'Phase F part 3 of 2026-10-03', subsection 'Deferred security items': WM-039 authorization matrices across the three credentials, revocation and rotation during POST, download, pagination and streams (A16), authority fencing after an older restore (A17), disclosure scans of identities and the witness record, TLS hardening of the witness (Name Constraints parity, per-response credential checks, wrong-CA negatives), the security part of WM-041 (hostile and slow input, malformed frames, boundary framing-limit negatives, the high-impact finding review), WM-041 root replacement under a running manager, WM-040 conformance of authorization and credential transitions, and a threat model and security gate for the witness with the G2 observation-only witness.",
+    "created_at": "2026-10-03T07:16:02Z"
   }
 ]
 #+end_src
@@ -13664,7 +13692,7 @@ Deferred security stage for Phase E, Pi service mode (WM-036 to WM-038), under t
 :LABELS:   ["review","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-01 Thu 20:45]
-:MODIFIED: [2026-10-02 Fri 11:28]
+:MODIFIED: [2026-10-03 Sat 00:16]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -13753,9 +13781,43 @@ Findings of the Phase E end-of-phase review (two lenses, range 33f84fe4..841ce0c
     "author": "johnw",
     "text": "Subtask PF3 (2026-10-02) applies operator decision PE27 of 2026-10-02 and fixes item 13. In ext-pi/package.json and packages[\"\"].devDependencies of ext-pi/package-lock.json, pi-client, pi-coding-agent, pi-server and pi-tui now read 0.99.1 (were 0.84.3, 0.85.1, 0.84.3, 0.84.3). peerDependencies stay \"*\". Every node_modules/@earendil-works lock entry is unchanged (JSON comparison against HEAD). No npm install, ci or update ran, and the readlink listings of node_modules/@earendil-works are identical before and after, all pointing into ~/src/fork/pi/packages. ext-pi/README.md states the current behavior. npm run check exit 0, npm test exit 0 with 219 passed and 29 skipped, the Phase D gate count. Evidence: PF/PF3/impl-r1 in the private resume-20260923 directory. Non-blocking fess notes (documentation drift in manager/README.md and the handoff): acat-pf3-fess-followup-ann7.",
     "created_at": "2026-10-02T18:28:13Z"
+  },
+  {
+    "id": 701,
+    "issue_id": "acat-phase-e-review-findings-0l73",
+    "author": "johnw",
+    "text": "Phase F closeout (2026-10-03): PE27 is met. PF3 (67d1b234) sets the four @earendil-works devDependency strings in ext-pi/package.json and the lock-file root entry to 0.99.1, and both lenses rate it met. The node_modules entries of the lock file and manager/README.md still state the old versions (acat-phase-f-review-findings-4e23 item 9, acat-pf3-fess-followup-ann7). The other items of this issue stay open. Source: doc/workflow-manager-handoff.md, section 'Phase F part 3 of 2026-10-03'.",
+    "created_at": "2026-10-03T07:16:01Z"
   }
 ]
 #+end_src
+
+* TODO [#C] Phase F end-of-phase review findings    :review:
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-phase-f-review-findings-4e23
+:LABELS:   ["review","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 00:15]
+:MODIFIED: [2026-10-03 Sat 00:16]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Findings of the Phase F end-of-phase review (two lenses, packages and working, ranges 77b256fd..88d999b7 and emacs-native c839f75..6e8eac0, both "approve with notes", no critical or high finding). The section "Open findings" under "Phase F part 3 of 2026-10-03" in doc/workflow-manager-handoff.md is the source. The next run fixes the functional items at their owners.
+
+1. (Medium, both lenses) Event read path under burst. Runtime ingestion, stream batch reads, the view check before each stream write and the page reads share one configuration guard and two database readers (globalDatabaseReaders). events.catch-up-p50-ms measured 1065.4 and 3253.9 ms against 1000, and events.catch-up-p95-ms 19521.6 and 27230.6 ms against 5000 (PF20, PF24). The owner decides between a separate reader budget for stream checks and ingestion and a revised ceiling with a stated reason. (manager/src/Agentic/Manager/Store.hs, the SSE route)
+2. (Medium, packages lens) Interrupted backup. failures.backup.passed is false, because the case needs the restore-marker boundary of the admission_audit.py copy, and that case covers an interrupted restore. Make an interrupted-backup boundary reachable from manager-admission-check or a service_http.py mode, or obtain operator permission to run that one subcommand of admission_audit.py once. (WM-042 owns offline backup and restore.)
+3. (Medium, working lens) Measurements depend on host load. The capacity-streams pass of record came from a rerun at load average 13 after a failure at 47 with no fix. pages.first-page-p50-ms measured 1716.4 and 535.6 ms against 500 at high load, and 281.1 ms in PF18. Record host load as a measurement condition in manager/CAPACITY.md, take one idle-host measurement, or revise the ceiling with a stated reason.
+4. (Low) Truncated GET bodies under Store contention: the manager cuts off a non-streaming GET body or closes with no response where a 503 is expected. The harness retries. No check shows that the TUI, Emacs and Pi clients do so.
+5. (Low) readDraftAt repeats while it holds the file slot: repeatChangedRead sleeps 10 ms between attempts with the slot held, up to the five-second allowance, once for each member of a collection or overview read. (manager/src/Agentic/Manager/Drafts.hs)
+6. (Low) Disk write failure stops the safety path: after the first EFBIG the Store refuses every later read and command, cancel and withdraw included, until a restart. manager/CAPACITY.md (safety-path section) and manager/STORAGE.md do not state this.
+7. (Low) SSE reconnection after a drop inside a batch meets 429 storage-quota more often, because the subscription stays until the next write fails. No client documents a retry bound for this 429.
+8. (Low) Orphaned managers: CapacityHarness.begin does not end its manager when a step after Popen fails. PID 61004 (PF17) and the stopped PIDs 111 and 9444 (Phase E) were present at 2026-10-03T07:10Z.
+9. (Low) Pin statements: the node_modules/@earendil-works/* entries of ext-pi/package-lock.json still name 0.84.3 and 0.85.1 with registry URLs, and manager/README.md still states coding-agent 0.85.1 (see acat-pf3-fess-followup-ann7).
+10. (Low) Emacs witness search: service_history_open in ci/emacs-ui.py (emacs-native) passes the run id to re-search-forward without regexp-quote, and only a batch check covers a child row listed first.
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PD25
 :PROPERTIES:
@@ -23473,7 +23535,7 @@ WM-008 completed handoff 2026-09-12T02:36:23+00:00: Adopt the shared root-role r
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 22:48]
+:MODIFIED: [2026-10-03 Sat 00:15]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-039
 :SOURCE_REPO: agent-cat
@@ -23652,6 +23714,13 @@ configuration is changed.
     "author": "johnw",
     "text": "PF23 (2026-10-02), Phase F gate part 3, after the build of agentic-run and routing-fixed-point-probe with -ftui-tests (exit 0). Cross-client modes at N8 with real TUI, Emacs and Pi processes: cross-client exit 0 (15 numbered PASS lines, 82 s), cross-client-lifecycle exit 0 (171 s), cross-client-lineage exit 0 (131 s), and cross-client-broken-answer exit 1 with exactly 'CROSS-ASSERT the cross-client answer is JSON false'. Emacs client: ci/emacs.sh exit 0 (97 of 97 transport tests), the local cases of ci/emacs-ui.py passed at 40x12, 80x24 and 140x36, emacs-service, emacs-service-lifecycle and emacs-service-controls exit 0 at N8, and emacs-service-broken-answer exit 1 with exactly 'JOURNEY-ASSERT Emacs answer is JSON false'. ext-pi: npm run check exit 0, npm test exit 0, npm run test:integration exit 0 (9 of 9), and the pi-host mode at N8 exit 0. Fixes made before the failed checks were run again: the ext-pi current-session bridge moves its socket to a private mkdtemp directory when the path in the state directory is longer than 103 bytes (the cause of a Pi EADDRINUSE in cross-client-lifecycle), three supervisor restore tests set a current createdAt so that the 30-day retention does not prune them, and the Emacs witness script (emacs-native 6e8eac0) anchors the history search to the row that starts with the run id and waits 60 s for Emacs -Q to start. Evidence (private): PF/PF23/impl-r1. Fess pf-PF23-r1 is not blocking; its findings are filed as a follow-up issue. Limitation: cross-client passed before the bridge fix and did not run again after it. The package stays open for the closeout.\n",
     "created_at": "2026-10-03T05:48:44Z"
+  },
+  {
+    "id": 696,
+    "issue_id": "acat-wm-039-0vfi",
+    "author": "johnw",
+    "text": "Phase F closeout (2026-10-03): both review lenses rate WM-039 met for function as local single-machine evidence. The gate run PF23 passed cross-client, cross-client-lifecycle and cross-client-lineage at N8 with real TUI, Emacs and Pi processes, and the cross-client-broken-answer control failed with its literal message. The package stays open because functional items remain, not only deferred security items: cross-machine evidence and the proxy test (the run is local macOS only), an approval in Emacs of a request that another client created, and two truly simultaneous UI answers. cross-client passed before the PF23 bridge fix and did not run again. Deferred security items (credential authorization matrices, revocation and rotation during streams, A16, A17, disclosure scans, TLS hardening of the witness, threat model) are listed in doc/workflow-manager-handoff.md, section 'Phase F part 3 of 2026-10-03' and stay with the deferred security stage. Review findings: acat-phase-f-review-findings-4e23. Source: doc/workflow-manager-handoff.md, section 'Phase F part 3 of 2026-10-03'.",
+    "created_at": "2026-10-03T07:15:58Z"
   }
 ]
 #+end_src
@@ -23663,7 +23732,7 @@ configuration is changed.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 22:01]
+:MODIFIED: [2026-10-03 Sat 00:15]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-040
 :SOURCE_REPO: agent-cat
@@ -23903,6 +23972,13 @@ legacy workflow build cannot conceal an unchecked manager development.
     "author": "johnw",
     "text": "PF22 (2026-10-02), Phase F gate part 2, on the clean tree at bd721ffb, each step once and alone (no Lean build beside a cabal build): the nine subcommands of bisim/ci/manager.sh exited 0 (closure holds only Agentic.Manager, Lean core and Mathlib.Data.Finmap; lean 1379 jobs; build; cases 45 cases, 0 mismatches; admission seed 20261002, 500 situations, 4286 submissions, 0 mismatches; vertical N8 with 20 managed/direct comparisons; history 40 manager roots, 277 ledger entries, 577 accepted entries, 0 mismatches; refusals 271 variants, 0 mismatches; corpus unchanged). The controls failed as required: control-oracle exit 1 with 'MANAGER-CONFORMANCE mismatch' (4 cases and 10 history entries, 14 counterexamples kept), control-model exit 1 at Exec.lean:161 (answerExec_eq), control-case exit 1 with the literal byte-for-byte mismatch. git status --short bisim/corpus is empty. git diff 91fb0ad4 -- doc/api/openapi.yaml is empty, so additive only. DataBroker in runtime/src/Agentic/Runtime/Broker.hs keeps its nine operations (PD30 broker-check approach). No source change. Evidence (private): PF/PF22/impl-r1. Fess pf-PF22-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open for the closeout.\n",
     "created_at": "2026-10-03T05:01:32Z"
+  },
+  {
+    "id": 697,
+    "issue_id": "acat-wm-040-3olb",
+    "author": "johnw",
+    "text": "Phase F closeout (2026-10-03): both review lenses rate WM-040 met for function. The gate run PF22 passed the nine steps of bisim/ci/manager.sh (closure, lean, build, cases, admission, vertical, history, refusals, corpus) with 45 retained cases and no mismatch, and control-oracle, control-case and control-model failed at their named gates. git status --short bisim/corpus is empty. The package stays open because functional items remain, not only deferred security items: randomized store-backed histories, the implementation-guard refusals that need a live worker, and the full default model build with bisim tier 0 and tier 1 did not run. The conformance of the authorization and credential transitions stays with the deferred security stage. Source: doc/workflow-manager-handoff.md, section 'Phase F part 3 of 2026-10-03'.",
+    "created_at": "2026-10-03T07:15:58Z"
   }
 ]
 #+end_src
@@ -23914,7 +23990,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 00:05]
+:MODIFIED: [2026-10-03 Sat 00:15]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -24105,6 +24181,13 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "PF24 (2026-10-03), Phase F gate part 4, each step once at N8 with a log and an exit file. Capacity and failure modes: capacity-admission, capacity-inputs, capacity-streams and faults-io exit 0. Touched existing modes with unchanged assertions: storage, routes, failures-worker, failures-manager, failures-launched and tui-failures exit 0. capacity_summary.py summary over the seven measurement files of the CAPACITY.md record against manager/test/capacity-ceilings.json: 124 PASS, 5 FAIL, 0 MISSING, each FAIL diagnosed in gate-summary.md (events.catch-up-p50-ms and p95-ms saturate during the burst round, as PF20 recorded; two load-caused FAILs in the first capacity-admission and capacity-inputs files, with pages.first-page-p50-ms at 535.6 ms even in the diagnostic rerun; failures.backup.passed needs the restore-marker boundary of the excluded admission_audit.py private copy). bash tui/ci/tui.sh exit 0, and the BUILD of agentic-run and routing-fixed-point-probe after it exit 0. One harness fix: CapacityHarness.read also counts http.client.IncompleteRead (a body cut off after a 16 KiB write by the later view check of Transport.respondBytes) as a dropped read within the 30-second bound, and manager/CAPACITY.md describes it. capacity-streams attempt 1 failed on the truncated body, attempt 2 failed under host load 47 with no truncation, and attempt 3 passed at load 13 with no further fix. gate-summary.md lists every step of PF21 to PF24 with its exit status and evidence path. Evidence (private): PF/PF24/impl-r1. Fess pf-PF24-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open for the closeout.\n",
     "created_at": "2026-10-03T07:05:13Z"
+  },
+  {
+    "id": 698,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "Phase F closeout (2026-10-03): both review lenses rate WM-041 partial. Every capacity and failure mode passed at N8 in PF24, and capacity_summary.py reported 0 MISSING of 129 ceilings, but four fail: events.catch-up-p50-ms, events.catch-up-p95-ms, pages.first-page-p50-ms and failures.backup.passed (reservations.r16.release-to-review-p50-ms failed only at high host load). No idle-host measurement exists. The open functional items are in acat-phase-f-review-findings-4e23 (items 1 to 3). The security part of WM-041 and the root replacement under a running manager stay deferred. The package stays open. Source: doc/workflow-manager-handoff.md, section 'Phase F part 3 of 2026-10-03'.",
+    "created_at": "2026-10-03T07:15:59Z"
   }
 ]
 #+end_src
@@ -24116,7 +24199,7 @@ workloads rather than extrapolating unmeasured capacity.
 :LABELS:   ["p9","wm-checkpoint","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 00:05]
+:MODIFIED: [2026-10-03 Sat 00:16]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041-core
 :SOURCE_REPO: agent-cat
@@ -24259,6 +24342,13 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
     "author": "johnw",
     "text": "PF24 (2026-10-03), Phase F gate part 4, each step once at N8 with a log and an exit file. Capacity and failure modes: capacity-admission, capacity-inputs, capacity-streams and faults-io exit 0. Touched existing modes with unchanged assertions: storage, routes, failures-worker, failures-manager, failures-launched and tui-failures exit 0. capacity_summary.py summary over the seven measurement files of the CAPACITY.md record against manager/test/capacity-ceilings.json: 124 PASS, 5 FAIL, 0 MISSING, each FAIL diagnosed in gate-summary.md (events.catch-up-p50-ms and p95-ms saturate during the burst round, as PF20 recorded; two load-caused FAILs in the first capacity-admission and capacity-inputs files, with pages.first-page-p50-ms at 535.6 ms even in the diagnostic rerun; failures.backup.passed needs the restore-marker boundary of the excluded admission_audit.py private copy). bash tui/ci/tui.sh exit 0, and the BUILD of agentic-run and routing-fixed-point-probe after it exit 0. One harness fix: CapacityHarness.read also counts http.client.IncompleteRead (a body cut off after a 16 KiB write by the later view check of Transport.respondBytes) as a dropped read within the 30-second bound, and manager/CAPACITY.md describes it. capacity-streams attempt 1 failed on the truncated body, attempt 2 failed under host load 47 with no truncation, and attempt 3 passed at load 13 with no further fix. gate-summary.md lists every step of PF21 to PF24 with its exit status and evidence path. Evidence (private): PF/PF24/impl-r1. Fess pf-PF24-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open for the closeout.\n",
     "created_at": "2026-10-03T07:05:14Z"
+  },
+  {
+    "id": 699,
+    "issue_id": "acat-wm-041-core-3vvz",
+    "author": "johnw",
+    "text": "Phase F closeout (2026-10-03): both review lenses rate WM-041 partial. Every capacity and failure mode passed at N8 in PF24, and capacity_summary.py reported 0 MISSING of 129 ceilings, but four fail: events.catch-up-p50-ms, events.catch-up-p95-ms, pages.first-page-p50-ms and failures.backup.passed (reservations.r16.release-to-review-p50-ms failed only at high host load). No idle-host measurement exists. The open functional items are in acat-phase-f-review-findings-4e23 (items 1 to 3). The security part of WM-041 and the root replacement under a running manager stay deferred. The package stays open. Source: doc/workflow-manager-handoff.md, section 'Phase F part 3 of 2026-10-03'.",
+    "created_at": "2026-10-03T07:16:00Z"
   }
 ]
 #+end_src

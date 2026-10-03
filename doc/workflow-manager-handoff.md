@@ -2,6 +2,324 @@
 
 <!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
 
+## Phase F part 3 of 2026-10-03
+
+The resume workflow completed its Phase F plan of 24 subtasks. After the
+PF18 commit `89bd367e` it landed PF19 and PF20 and ran the Phase F gate,
+PF21 to PF24, as commits `9e329971` to `88d999b7`. The run kept the
+operator directions of 2026-09-29 for fast validation and of 2026-09-30
+for functionality first, and the operator decisions of 2026-10-01 for the
+Emacs client and of 2026-10-02 for the Lean builds of WM-040 and the
+`ext-pi` pins. The run did not stop early, and it added no pending
+authorization.
+
+PF23 has the matching local commit `6e8eac0` on the `emacs-native` branch
+of agent-workflows in `~/src/agent-workflows-emacs-native`, after
+`cc56b94`. That branch now holds 31 local commits, `1efebf9` to
+`6e8eac0`, and none of them is pushed. The operator decision of
+2026-10-01 permits no push. The Phase F commits of this repository,
+`214f3ff0` to `88d999b7`, are not pushed either, and
+`origin/workflow-manager-checkpoint-20260923` reads `77b256fd`.
+
+This section describes the current state. Where any section below differs,
+this section supersedes it, and the sections below remain as chronology.
+The evidence of each subtask is under `PF/<subtask>/impl-r1` in the resume
+directory, and the audits are `fess/pf-PF19-r1.md`, `fess/pf-PF19-r2.md`
+and `fess/pf-PF20-r1.md` to `fess/pf-PF24-r1.md`. No audit blocked a
+commit. The gate summary of PF21 to PF24 is
+`PF/PF24/impl-r1/gate-summary.md`. It lists each step with its exit status
+and its evidence path.
+
+Accepted state is unchanged at WM-001 to WM-022 and G0 and G1. This run
+closes no package and no gate. The Integrator closes tracker items.
+
+### Delivered behavior of this part
+
+| Subtask | agent-cat commit | `emacs-native` commit | Delivered behavior |
+| --- | --- | --- | --- |
+| PF19 | `9e329971` | None | The `capacity-streams` mode. Two SSE readers and one route reader for each client read `/v1/events` and the route streams while deterministic runs emit events, and every reader matches its reference. A burst round of 15 runs of the new probe workflow `event-burst` fills the stream of a stopped reader. The manager ends that stream at the five-second write deadline, and the reader reconnects with no lost event. The manager now packs the SSE blocks of one batch into writes of at most 16384 bytes and checks the view once for each write. The `storage` and `routes` modes write their measurements to `storage-measure.json` and `routes-measure.json` with unchanged assertions. |
+| PF20 | `537f1795` | None | The `faults-io` mode. A manager that runs under a file-size limit (EFBIG, with SIGXFSZ ignored) accepts seven commands and refuses the eighth with 503 `storage-unavailable` and no command row. The write failure stops the Store for the rest of that lifetime, so every later read and the safety withdraw also refuse. The next lifetime without the limit serves the committed state, and no command runs again. The failure modes `failures-worker`, `failures-manager`, `failures-launched` and `tui-failures` print their timings. `manager/CAPACITY.md` records every measured value with the date, the commit and the platform. |
+| PF21 | `bd721ffb` | None | Gate part 1. Tracker records only. |
+| PF22 | `4bf4a802` | None | Gate part 2. Tracker records only. |
+| PF23 | `870c7b8b` | `6e8eac0` | Gate part 3. The `ext-pi` current-session bridge puts its socket in a private `mkdtemp` directory when the path in the state directory is longer than 103 bytes, removes that directory on close, and fails with an error that names the path when the short path is also too long. Before this fix Node truncated the long path with no error, and a second Pi failed with EADDRINUSE. Three supervisor restore tests set a current `createdAt`. The Emacs witness script anchors its history search and waits longer for Emacs to start. |
+| PF24 | `88d999b7` | None | Gate part 4. `CapacityHarness.read` counts a truncated response body as a dropped read and sends the read again within the same 30-second bound. |
+
+### What Phase F delivers for function
+
+- **Phase D review findings.** PF1 (`214f3ff0` with `f9be31a`) makes the
+  open control prompt and the steer editor of `emacs-service-lifecycle`
+  pass through 40x12, 140x36 and 80x24 with the typed text kept. PF2
+  (`2d02134f` with `281c5d6`) adds the `emacs-service-controls` mode, which
+  sends a fail-over, an abandon and a redirect to the second of two
+  candidates by keys at 80x24. PF21 ran the three journey controls and the
+  six N8 owner checks on a tree with the Runtime fix of PD29, and PF22 ran
+  the WM-040 `history` and `refusals` lanes after the PF17 change of
+  `readDraftAt`. The two medium findings and the low finding about unrun
+  checks are closed. The other low findings stay open.
+- **PE27.** PF3 (`67d1b234`) sets the four `@earendil-works`
+  devDependency strings of `ext-pi/package.json` and of the root entry of
+  its lock file to 0.99.1, the release of the fork. No install ran, and
+  `node_modules` links to `~/src/fork/pi`.
+- **WM-039.** PF4 to PF8 (`2ccc38fd` to `2a89ef55`, with `360adc1`,
+  `6656266`, `613d70e`, `4f0f5a4` and `cc56b94`) give the cross-client
+  witness on one local TLS manager with real TUI, Emacs and Pi processes
+  and a distinct credential for each client. The `cross-client` mode
+  creates in the TUI, approves in Pi and observes in Emacs, races the
+  answers of the clients, retries in the TUI and verifies the result in
+  each client. The `cross-client-lifecycle` mode disconnects and
+  reconnects the clients, rotates and revokes credentials, restarts the
+  manager by the termination signal and releases a quarantine after a
+  SIGKILL loss. The `cross-client-lineage` mode shows history and lineage
+  in the three clients. This is local single-machine evidence.
+- **WM-040.** PF9 to PF15 (`7d57a9b0` to `5cda60da`) give the Lean library
+  `ManagerConformance` with deciders proved equal to the model
+  transitions, the pinned encoding `agent-cat-manager-conformance/1`, the
+  `manager-oracle` executable with 45 retained cases, the Haskell
+  `manager-conformance-check` with the `admission`, `cases`, `history` and
+  `refusals` lanes, the direct-versus-managed comparison with lineage, and
+  the gate script `bisim/ci/manager.sh` with three controls.
+- **WM-041.** PF16 to PF20 (`2808c7ac` to `537f1795`) publish 129 ceilings
+  before measurement and measure them through the `capacity-admission`,
+  `capacity-inputs`, `capacity-streams` and `faults-io` modes, the
+  measurement prints of six existing modes and the
+  `manager-artifact-check capacity-readers` check below HTTP. PF17 fixed a
+  412 `stale-revision` answer of `readDraftAt` under a concurrent commit.
+  Four ceilings fail (see "Open findings").
+
+### Gate of Phase F
+
+Each step ran once, in order and one at a time, with a `<step>.log` and a
+`<step>.exit` under `PF/PF21/impl-r1` to `PF/PF24/impl-r1`. A first
+attempt that failed is kept as `<step>-attempt<n>`.
+
+- PF21, on `537f1795`: ALLBUILD, `make -C doc check`, `tui-model-test` at
+  N1 and N8 (976 PASS lines each), the journey pair at N1 and N8, the
+  controls `tui-journey-broken-answer`, `tui-consent-control` and
+  `tui-flow-approve-fault` at N8 with their literal messages, and
+  `manager-admission-check`, `manager-approval-check`,
+  `manager-command-check`, `manager-draft-check`, `manager-history-check`
+  and `manager-store-check` at N8 with the PD28 gate arguments. One
+  command-check attempt failed on the gate invocation and passed with a
+  work directory named `N8`.
+- PF22, on `bd721ffb`: the nine steps of `bisim/ci/manager.sh` (closure,
+  lean, build, cases, admission, vertical, history, refusals and corpus)
+  with 45 cases and no mismatch. `control-oracle` and `control-case`
+  failed with `MANAGER-CONFORMANCE mismatch`, and `control-model` failed
+  in `answerExec_eq`. `git status --short bisim/corpus` is empty. The
+  diff of `doc/api/openapi.yaml` against `91fb0ad4` is empty, and
+  `DataBroker` keeps its nine operations. No Lean build ran beside a cabal
+  build.
+- PF23: `cross-client`, `cross-client-lifecycle` and `cross-client-lineage`
+  at N8, and the control `cross-client-broken-answer` with
+  `CROSS-ASSERT the cross-client answer is JSON false`. `ci/emacs.sh`
+  (97 of 97), the local cases of `ci/emacs-ui.py` at three sizes, and
+  `emacs-service`, `emacs-service-lifecycle` and `emacs-service-controls`
+  at N8, with the control `emacs-service-broken-answer` and its literal
+  message. In `ext-pi`, `npm run check`, `npm test` (220 passed),
+  `npm run test:integration` (9 of 9) and the `pi-host` mode at N8. The
+  first `cross-client-lifecycle` attempt found the socket-path defect, two
+  `cross-client-lineage` attempts found the Emacs script defects, and the
+  first `npm test` attempt found the expired fixture dates. Each check
+  passed after its fix.
+- PF24: `capacity-admission`, `capacity-inputs`, `capacity-streams` and
+  `faults-io` at N8, and the touched modes `storage`, `routes`,
+  `failures-worker`, `failures-manager`, `failures-launched` and
+  `tui-failures` at N8 with unchanged assertions. `capacity_summary.py
+  summary` against `manager/test/capacity-ceilings.json` gave 124 PASS,
+  5 FAIL and 0 MISSING, and 125 PASS, 4 FAIL and 0 MISSING with the
+  diagnostic reruns at lower host load. `bash tui/ci/tui.sh`, the rebuild
+  after it and `make -C doc check` exited 0. The first `capacity-streams`
+  attempt found the truncated read. The second failed at a host load
+  average of 47 after the fix, and the pass of record is a third run at a
+  load average of 13 with no further fix.
+
+The closeout ran `make -C doc check` after its edit
+(`Z/CLOSEOUT-pf3`).
+
+### Checks not run
+
+- The plan drops these items as functionality: the cross-machine evidence
+  and the proxy test of WM-039 (local only), an approval in Emacs of a
+  request that another client created, two truly simultaneous UI answers,
+  a restore and the page and event expiry inside the witness, randomized
+  store-backed histories and the implementation-guard refusals that need a
+  live worker (WM-040), the full default build of the model with bisim
+  tier 0 and tier 1, and in WM-041 the root replacement, partial frames
+  beyond the loss of worker pipes, a separate checkpoint workload, a new
+  interrupted-backup mode, randomized schedules, SQLite busy injection,
+  credential changes under load, a true ENOSPC disk-full (replaced by a
+  file-size limit), Linux containment, repeated measurements and new
+  capacity cases for the `storage` and `routes` modes.
+- The interrupted-backup case of `manager-admission-check` did not pass.
+  It waits at the `restore-marker` boundary, which exists only in the
+  private copy that `admission_audit.py` builds, and the operator direction
+  of 2026-09-29 excludes those audits. `failures.backup.passed` therefore
+  reads `false`.
+- No measurement ran on an idle host. Each workload ran once.
+- The Emacs 29.1 minimum-version check stays open, because no Emacs 29.1
+  is available locally.
+- The checks that the operator directions remove from routine validation
+  (`cli/ci/policies.sh`, `manager/ci/approval.sh`, `manager/ci/controls.sh`,
+  the `admission_audit.py` mutation audits, mutant suites, `-fforce-recomp`
+  builds and stability samples), `manager/test/proof_opacity.py`, and
+  `cli/ci/routing-config.sh`, `cli/ci/examples.sh`,
+  `engine/agent-deck/ci/deck.sh`, `manager/ci/supervision.sh`,
+  `engine/acp/ci/acp.sh` and `ci/emacs-tramp.py`, because Phase F changes
+  no engine, CLI or TRAMP code apart from `withManagerSignals`.
+- `cross-client` passed before the PF23 bridge fix and did not run again.
+  `cross-client-lifecycle`, `cross-client-lineage` and `pi-host` ran after
+  it. The Emacs checks used the `wf` binary built in stage PD7.
+
+### Deferred security items
+
+No item of the security stage was done. Phase F defers these items, and
+the items of the earlier sections and of section 8 of the remaining-scope
+report stay deferred:
+
+- The WM-039 negative matrices of the differences in authorization across
+  the three client credentials, on each route and each scope.
+- The WM-039 revocation and rotation matrices during a POST, an artifact
+  download, a pagination and an event stream (A16).
+- The WM-039 authority fencing after a restore from an older backup
+  (A17).
+- The WM-039 scans that show that the client, server and runner identities
+  and the witness record disclose no content and no credential.
+- The TLS hardening of the witness: Name Constraints parity in the
+  TypeScript and Emacs clients, the credential checks on each response,
+  and negatives with a wrong CA.
+- The security part of WM-041: hostile and slow input, partial and
+  malformed frames, the framing-limit negatives of the `boundary` mode,
+  and the review that no unresolved security finding of high impact hides
+  behind a passing throughput result.
+- The WM-041 root replacement under a running manager, a confinement
+  property that `manager/STORAGE.md` does not guarantee.
+- The WM-040 conformance of the authorization and credential transitions.
+- A threat model and a security gate for the cross-client witness, and the
+  G2 observation-only witness.
+
+### Authorizations and stop reason
+
+No authorization is pending, and no owner question is open. The Lean and
+oracle builds of PF9 to PF15 and PF22 ran under the operator decision of
+2026-10-02, one at a time and never beside a cabal build. No dependency
+changed. The run did not stop early.
+
+### End-of-phase review
+
+Two lenses reviewed `77b256fd..88d999b7` and `c839f75..6e8eac0`, a
+packages lens and a working lens. Both returned "approve with notes" with
+no critical or high finding. The working lens ran the journey pair again
+after an incremental build, and it passed at N1 and N8 (fixture root
+`/Users/johnw/Products/k.M0a5ItPm/tmp/review-pf.G4XGGiAM`). No fix round
+ran. Both lenses rate the Phase D review findings, PE27, WM-039 and
+WM-040 met for function and WM-041 partial. Their findings are in "Open
+findings" below and in `acat-phase-f-review-findings-4e23`.
+
+### Package status and open tracker items
+
+| Package or item | Status | Tracker |
+| --- | --- | --- |
+| Phase D review findings | Met for function. Both medium findings and the low finding about unrun checks are closed. The other low findings stay open. | `acat-phase-d-review-findings-raxi` open for the Integrator |
+| PE27 | Met. The lock file entries of the packages are stale (see "Open findings"). | `acat-phase-e-review-findings-0l73` |
+| WM-030, WM-031, WM-032 | Met for function. The Emacs 29.1 check stays open. | `acat-wm-030-t2l4`, `acat-wm-031-5yxo`, `acat-wm-032-eh4r` |
+| WM-039 | Met for function as local single-machine evidence, with the gate run of PF23. | `acat-wm-039-0vfi` open for the Integrator |
+| WM-040 | Met for function, with the gate run of PF22. | `acat-wm-040-3olb` open for the Integrator |
+| WM-041 | Partial. Every mode passes, and the summary has 0 MISSING keys. `events.catch-up-p50-ms`, `events.catch-up-p95-ms`, `pages.first-page-p50-ms` and `failures.backup.passed` fail, and `reservations.r16.release-to-review-p50-ms` failed only at high host load. | `acat-wm-041-17ax`, `acat-wm-041-core-3vvz` |
+| G3, G4 | Open. G4 has its gate evidence for the three clients and the witness. G3 needs the rest of WM-041 and the deferred security stage. | `acat-g4-pech`, `acat-g3-v1iz` |
+| WM-042 to WM-044, G5 | Not started, apart from the quarantine release of WM-042. | `acat-wm-042-sdg9`, `acat-wm-043-zm3d`, `acat-wm-044-6utw`, `acat-g5-u0w2` |
+
+The fess follow-up issues of this part are `acat-pf19-fess-followup-ewpu`,
+`acat-pf20-fess-followup-nb2n`, `acat-pf21-fess-followup-nak8`,
+`acat-pf22-fess-followup-q7zc`, `acat-pf23-fess-followup-d1ok` and
+`acat-pf24-fess-followup-o03v`. The follow-ups of PF2 to PF18 that the
+sections below list stay open.
+
+### Open findings
+
+- **Event read path under burst (medium, both lenses).** In the burst
+  round of `capacity-streams`, runtime ingestion, stream batch reads, the
+  view check before each stream write and the page reads share one
+  configuration guard and two database readers
+  (`globalDatabaseReaders`). Stream reads meet the five-second allowance,
+  some responses that have started close with no bytes, and the manager
+  observes a terminal run status tens of seconds late.
+  `events.catch-up-p50-ms` measured 1065.4 and 3253.9 ms against 1000, and
+  `events.catch-up-p95-ms` 19521.6 and 27230.6 ms against 5000, in PF20
+  and PF24. The two rounds without the burst pass. The owner decides
+  whether to give stream checks and ingestion their own reader budget or
+  to revise the ceilings with a stated reason.
+- **Interrupted backup (medium, packages lens).**
+  `failures.backup.passed` is `false`, because the case needs the
+  `restore-marker` boundary of the `admission_audit.py` copy, and that
+  case covers an interrupted restore, not an interrupted backup. Make an
+  interrupted-backup boundary reachable from `manager-admission-check` or
+  a mode of `service_http.py`, or obtain operator permission to run only
+  that subcommand of `admission_audit.py` once.
+- **Measurements depend on host load (medium, working lens).** The
+  `capacity-streams` pass of record came from a rerun at a load average of
+  13 after a failure at 47 with no further fix.
+  `pages.first-page-p50-ms` measured 1716.4 ms and 535.6 ms against 500 at
+  load averages of 43 to 56 and 11 to 15, and 281.1 ms in PF18. No
+  idle-host measurement exists. Record the host load as a measurement
+  condition in `manager/CAPACITY.md`, take one idle-host measurement, or
+  revise the ceiling with a stated reason.
+- **Truncated GET bodies under Store contention (low).** When the view
+  check before a later 16 KiB chunk meets the Store allowance, the manager
+  cuts off a non-streaming GET body or closes the connection with no
+  response, where a 503 is expected. The harness now sends such a read
+  again. No check shows that the TUI, Emacs and Pi clients do so.
+- **`readDraftAt` repeats while it holds the file slot (low).** Between
+  attempts `repeatChangedRead` sleeps for 10 ms with the file slot held,
+  up to the five-second allowance, once for each member of a collection
+  or overview read.
+- **Disk write failure stops the safety path (low).** After the first
+  EFBIG the Store refuses every later read and command, cancel and
+  withdraw included, until a restart. The measurement record states this,
+  but the safety-path section of `manager/CAPACITY.md` and
+  `manager/STORAGE.md` do not.
+- **SSE reconnection after a drop inside a batch (low).** The client
+  keeps its subscription until the next write fails, so an immediate
+  reconnection meets 429 `storage-quota` more often. No client documents a
+  retry bound for this 429.
+- **Orphaned managers (low).** `CapacityHarness.begin` does not end its
+  manager when a step after `Popen` fails. The PF17 manager, PID 61004,
+  runs with parent 1, and the stopped PIDs 111 and 9444 from Phase E
+  remain. All three were present at 2026-10-03T07:10Z.
+- **Pin statements (low).** The `node_modules/@earendil-works/*` entries
+  of `ext-pi/package-lock.json` still name 0.84.3 and 0.85.1 with registry
+  URLs, so the lock file disagrees with its root entry, and `npm ci` must
+  not use it. `manager/README.md` still states that the Pi package pins
+  coding-agent 0.85.1 (`acat-pf3-fess-followup-ann7`).
+- **Emacs witness search (low).** `service_history_open` in
+  `ci/emacs-ui.py` sends the run id to `re-search-forward` without
+  `regexp-quote`, and only a batch check covers a child row listed first.
+- **Phase D review lows that stay open.** The 503 `unexpected
+  InvalidRequest` on `GET /v1/snapshot`, the uncertain send in Emacs with
+  no reconciliation, the foreground wait of up to 120 seconds, the
+  first-page-only snapshot read in Emacs and `ext-pi`, the missing service
+  equivalents of `wf-lineage-compare` and the observer commands, the
+  unmeasured POST route deadlines and the Emacs 29.1 check. The client
+  gap that Emacs cannot open the review of a request of another client
+  also stays open.
+- The open findings of the sections "Phase F part 2 of 2026-10-02" and
+  "Phase F part 1 of 2026-10-02" stay open where this section does not
+  close them.
+
+### Next action
+
+1. The closeout keeps WM-039, WM-040 and WM-041 open. WM-039 and WM-040
+   are met for function, but functional items remain that the plan
+   dropped (see "Checks not run"), not only deferred security items.
+2. The operator or the Integrator ends PIDs 61004, 111 and 9444 with
+   `kill -CONT` and then `kill -KILL`.
+3. The next run takes Phase G, WM-042 to WM-044 and G5, under the
+   functionality-first and fast rules. It starts with the WM-041 items
+   that belong to function: the owner decision on the event read path or
+   its ceilings, an interrupted-backup case that the gate can run (WM-042
+   owns offline backup and restore), and one idle-host measurement or a
+   revised `pages.first-page-p50-ms` ceiling.
+4. The security stage waits for the operator to schedule it.
+
 ## Phase F part 2 of 2026-10-02
 
 The resume workflow continued its Phase F plan of 24 subtasks after the
