@@ -7286,7 +7286,7 @@ Request, approval, control, export, and lineage routes pass hostile-input, repla
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 21:46]
+:MODIFIED: [2026-10-02 Fri 22:01]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G4
 :SOURCE_REPO: agent-cat
@@ -7497,6 +7497,13 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
     "author": "johnw",
     "text": "PF21 (2026-10-02), Phase F gate part 1, on the final tree at 537f1795: ALLBUILD exit 0, make -C doc check exit 0, tui-model-test at +RTS -N1 and -N8 exit 0, JOURNEY-PAIR(pf-gate) at N1 and N8 exit 0 (PASS flow line on both), the three journey controls at N8 failed with their literal messages, and the six N8 owner checks with the PD28 gate arguments exited 0. One command-check attempt failed on the gate invocation (credential_cli.py requires a work directory named N1 or N8) and passed on rerun; both runs are kept. No source change. Evidence (private): PF/PF21/impl-r1. Fess pf-PF21-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open: PF22 to PF24 run the rest of the Phase F gate.\n",
     "created_at": "2026-10-03T04:46:34Z"
+  },
+  {
+    "id": 690,
+    "issue_id": "acat-g4-pech",
+    "author": "johnw",
+    "text": "PF22 (2026-10-02), Phase F gate part 2, on the clean tree at bd721ffb, each step once and alone (no Lean build beside a cabal build): the nine subcommands of bisim/ci/manager.sh exited 0 (closure holds only Agentic.Manager, Lean core and Mathlib.Data.Finmap; lean 1379 jobs; build; cases 45 cases, 0 mismatches; admission seed 20261002, 500 situations, 4286 submissions, 0 mismatches; vertical N8 with 20 managed/direct comparisons; history 40 manager roots, 277 ledger entries, 577 accepted entries, 0 mismatches; refusals 271 variants, 0 mismatches; corpus unchanged). The controls failed as required: control-oracle exit 1 with 'MANAGER-CONFORMANCE mismatch' (4 cases and 10 history entries, 14 counterexamples kept), control-model exit 1 at Exec.lean:161 (answerExec_eq), control-case exit 1 with the literal byte-for-byte mismatch. git status --short bisim/corpus is empty. git diff 91fb0ad4 -- doc/api/openapi.yaml is empty, so additive only. DataBroker in runtime/src/Agentic/Runtime/Broker.hs keeps its nine operations (PD30 broker-check approach). No source change. Evidence (private): PF/PF22/impl-r1. Fess pf-PF22-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open for the closeout.\n",
+    "created_at": "2026-10-03T05:01:32Z"
   }
 ]
 #+end_src
@@ -12898,6 +12905,25 @@ Non-blocking findings of fess pf-PF21-r1 (fess/pf-PF21-r1.md) on subtask PF21 (P
 
 1. (low) PF/PF21/impl-r1/*.log: the step logs do not record the invoked command lines, so the +RTS -N1 and -N8 settings of the model test and the owner checks rest on the implementer's statement. model-test-N1.log and model-test-N8.log are byte-identical. The fess rerun of tui-model-test at -N8 passed with 976 PASS lines. Fix: make the gate runner write the exact command line at the top of each step log.
 2. (low) manager/ci/commands.sh:19 runs manager/test/proof_opacity.py after command_contract.py and credential_cli.py. PF21 did not run it, and its limitations do not name it. The PD28 gate also left it out. Fix: name proof_opacity.py among the steps that did not run, or run it in a later gate if the operator wants it.
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PF22
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pf22-fess-followup-q7zc
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-02 Fri 22:01]
+:MODIFIED: [2026-10-02 Fri 22:01]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess pf-PF22-r1 (fess/pf-PF22-r1.md) on subtask PF22 (Phase F gate, part 2).
+
+1. (low) PF/PF22/impl-r1 (control-model.log, control-case.log): the counterexamples of control-model and control-case are kept only in temporary copies under the private TMPDIR (manager-control-model.5kKfMk, manager-control-case.pbQytp). Only the control-oracle counterexamples were copied into the gate directory. Fix: copy both counterexample directories into the gate directory so that the evidence survives a cleanup of the temporary directory.
+2. (low) PF/PF22/impl-r1/openapi-additive.log: the additive-only contract result is trivially true, because the diff against 91fb0ad4 is empty. The check cannot detect a non-additive change made before that base. Fix: if a stronger contract check is wanted, also compare against the frozen /v1 origin commit.
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PF3
 :PROPERTIES:
@@ -23574,7 +23600,7 @@ configuration is changed.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-02 Fri 21:46]
+:MODIFIED: [2026-10-02 Fri 22:01]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-040
 :SOURCE_REPO: agent-cat
@@ -23807,6 +23833,13 @@ legacy workflow build cannot conceal an unchecked manager development.
     "author": "johnw",
     "text": "PF21 (2026-10-02), Phase F gate part 1, on the final tree at 537f1795: ALLBUILD exit 0, make -C doc check exit 0, tui-model-test at +RTS -N1 and -N8 exit 0, JOURNEY-PAIR(pf-gate) at N1 and N8 exit 0 (PASS flow line on both), the three journey controls at N8 failed with their literal messages, and the six N8 owner checks with the PD28 gate arguments exited 0. One command-check attempt failed on the gate invocation (credential_cli.py requires a work directory named N1 or N8) and passed on rerun; both runs are kept. No source change. Evidence (private): PF/PF21/impl-r1. Fess pf-PF21-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open: PF22 to PF24 run the rest of the Phase F gate.\n",
     "created_at": "2026-10-03T04:46:32Z"
+  },
+  {
+    "id": 689,
+    "issue_id": "acat-wm-040-3olb",
+    "author": "johnw",
+    "text": "PF22 (2026-10-02), Phase F gate part 2, on the clean tree at bd721ffb, each step once and alone (no Lean build beside a cabal build): the nine subcommands of bisim/ci/manager.sh exited 0 (closure holds only Agentic.Manager, Lean core and Mathlib.Data.Finmap; lean 1379 jobs; build; cases 45 cases, 0 mismatches; admission seed 20261002, 500 situations, 4286 submissions, 0 mismatches; vertical N8 with 20 managed/direct comparisons; history 40 manager roots, 277 ledger entries, 577 accepted entries, 0 mismatches; refusals 271 variants, 0 mismatches; corpus unchanged). The controls failed as required: control-oracle exit 1 with 'MANAGER-CONFORMANCE mismatch' (4 cases and 10 history entries, 14 counterexamples kept), control-model exit 1 at Exec.lean:161 (answerExec_eq), control-case exit 1 with the literal byte-for-byte mismatch. git status --short bisim/corpus is empty. git diff 91fb0ad4 -- doc/api/openapi.yaml is empty, so additive only. DataBroker in runtime/src/Agentic/Runtime/Broker.hs keeps its nine operations (PD30 broker-check approach). No source change. Evidence (private): PF/PF22/impl-r1. Fess pf-PF22-r1 is not blocking; its findings are filed as a follow-up issue. The package stays open for the closeout.\n",
+    "created_at": "2026-10-03T05:01:32Z"
   }
 ]
 #+end_src
