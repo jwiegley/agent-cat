@@ -427,7 +427,10 @@ includes the three files under `nix/`.
 The `package` mode of `manager/test/service_http.py` accepts the built
 executable. It runs the file that `PACKAGE_RUNNER` names as the manager and as
 the runner of a scripted profile, completes one `hello` request with a verified
-result, and stops the manager through `shutdown`.
+result, and stops the manager through `shutdown`. It then upgrades a copy of
+each older schema root that `manager-store-check schema-fixtures DIR` writes,
+with `DIR` in `SCHEMA_FIXTURES`, and refuses the schema 13 root, as
+[the storage document](manager/STORAGE.md#database-and-schema) states.
 
 Never run two full model builds at once. The module
 `model/Agentic/Core/DslFlagship.lean` proves its theorems by running the

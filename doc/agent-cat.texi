@@ -2303,6 +2303,17 @@ compares its digest, reads @code{status} through the live administration
 channel, and stops the manager through @code{shutdown} with exit status 0.  The
 release evidence also records the identities of that run.
 
+The mode then checks schema upgrade and refusal.  The command
+@code{manager-store-check schema-fixtures @var{dir}} writes one manager root for
+each older schema version from 1 to 11, and one root whose database has
+@code{user_version} 13.  The mode reads @var{dir} from the environment variable
+@env{SCHEMA_FIXTURES} and works on a copy of each root.  For each older root,
+offline @code{status} migrates the database to version 12, @code{check-store}
+reports @code{valid}, and @code{RUNNER --manager serve} answers 200 on
+@code{GET /v1/capabilities} and stops through @code{shutdown}.  For the version
+13 root, offline @code{status} refuses with @code{storage-unavailable},
+@code{RUNNER --manager serve} exits with status 2, and the version stays 13.
+
 @section Building the Lean model and the oracle
 
 @cindex one-build rule

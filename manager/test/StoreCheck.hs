@@ -8,7 +8,7 @@ import Agentic.Manager.Test.Contention (withHeldStore, withHeldConfiguration)
 import qualified "agentic" Agentic.Manager as Public
 import Agentic.Manager.Configuration
 import Agentic.Manager.Profile (Diagnostic (SupervisionUnavailable))
-import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration, restartMigration)
+import Agentic.Manager.Schema (schemaVersion, schemaStatements, commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration, artifactMigration, historyMigration, restartMigration, retentionMigration, credentialMigration)
 import Agentic.Manager.Store
 import Agentic.Manager.Flow
   (AdministrationBody (..), AdministrationOperation (..), CommandBody (..), ManagerLogReport (..), ManagerValue (..), Notice (ShutdownNotice),
@@ -33,6 +33,7 @@ import Data.Maybe (isNothing)
 import Data.IORef (newIORef, readIORef, writeIORef, modifyIORef')
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import qualified Database.SQLite3 as SQL
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Conc (BlockReason (BlockedOnSTM))
@@ -73,6 +74,7 @@ main = do
       result <- installConfiguration config
       check "second-process lease refusal" (isLeft result)
     ["idle"] -> putStrLn "ready" >> threadDelay 60000000
+    ["schema-fixtures",directory] -> schemaFixtures directory
     [work] -> do
       publicChecks work
       ownershipChecks work
@@ -80,6 +82,7 @@ main = do
       migrationChecks work
       admissionMigrationChecks work
       ingestionMigrationChecks work
+      schemaUpgradeChecks work
       conditionalTransactionChecks work
       flowFloorChecks work
       requestAdmissionChecks work
@@ -212,7 +215,7 @@ quotaMigrationChecks work = forM_ [False,True] $ \conflict -> do
   (path,root) <- fixture work (if conflict then "retention-migration-refusal" else "retention-migration")
   withInstalled path (const(pure()))
   bracket (rawOpen root) SQL.close $ \db -> do
-    mapM_ (SQL.exec db) (schemaStatements<>commandMigration<>draftMigration<>admissionMigration<>approvalMigration<>ingestionMigration<>controlMigration<>artifactMigration<>historyMigration<>restartMigration)
+    mapM_ (SQL.exec db) (schemaPrefix 10)
     SQL.exec db "INSERT INTO service_metadata VALUES(1,'old_authority','old_stream','1','0','old_revision'); INSERT INTO invalidations VALUES('old_stream','1','service.changed','/v1/capabilities','old_revision'); INSERT INTO clients VALUES('old_client','revision','authorization',0); INSERT INTO runs(id,revision,control_revision,profile_id,root_identity,native_run_id,supervision,result_state) VALUES('old_run','revision','control','profile','root','native','observer','absent'); PRAGMA user_version=10"
     when conflict (SQL.exec db "CREATE TABLE retention_local_commands(sentinel TEXT)")
   setFileMode(root </> "coordination.sqlite3")0o600
@@ -783,6 +786,71 @@ rawOpen :: FilePath -> IO SQL.Database
 rawOpen root = SQL.open2 (T.pack (root </> "coordination.sqlite3"))
   [SQL.SQLOpenReadWrite, SQL.SQLOpenCreate, SQL.SQLOpenFullMutex, SQL.SQLOpenNoFollow] SQL.SQLVFSDefault
 
+-- | The statements that create the empty database of the given schema
+-- version, from 1 to 'schemaVersion': the version-one statements and the
+-- migrations up to that version, in the order in which the Store applies
+-- them. The literal-digest step of the version-three migration rewrites only
+-- existing literal rows, so these statements omit it.
+schemaPrefix :: Int -> [Text]
+schemaPrefix version
+  | version < 1 || version > schemaVersion = error ("no schema prefix for version " <> show version)
+  | otherwise = schemaStatements <> concat (take (version - 1) migrations)
+  where
+    migrations =
+      [commandMigration, draftMigration, admissionMigration, approvalMigration, ingestionMigration, controlMigration,
+       artifactMigration, historyMigration, restartMigration, retentionMigration, credentialMigration]
+
+-- | A fixture manager root at the given schema version, named @schema-N@ in
+-- the given directory beside its configuration file @schema-N.json@. The
+-- configuration installation establishes the manager role of the empty
+-- root, as for every fixture. The coordination database then holds the
+-- tables of the given statements, and its only row is the service metadata
+-- of a fresh database, with an authority epoch and a stream identifier
+-- derived from the version. The database has mode 0600. The result is the
+-- configuration path, the root and the authority epoch.
+schemaRoot :: FilePath -> Int -> [Text] -> IO (FilePath, FilePath, Text)
+schemaRoot work version statements = do
+  (path, root) <- fixture work ("schema-" <> show version)
+  withInstalled path (const (pure ()))
+  let derived prefix = prefix <> T.pack (show (hash (TE.encodeUtf8 (prefix <> T.pack (show version))) :: Digest SHA256))
+      epoch = derived "authority_"
+  bracket (rawOpen root) SQL.close $ \db -> do
+    mapM_ (SQL.exec db) statements
+    SQL.exec db ("INSERT INTO service_metadata(singleton,authority_epoch,stream_id,sequence,retained_floor,revision) VALUES (1,'"
+                 <> epoch <> "','" <> derived "stream_" <> "','0','0','service_1'); PRAGMA user_version=" <> T.pack (show version))
+  setFileMode (root </> "coordination.sqlite3") 0o600
+  bracket (rawOpen root) SQL.close $ \db -> do
+    rawRows db "PRAGMA user_version" >>= check ("schema fixture " <> show version <> " reads its version") . (==[[SQL.SQLInteger (fromIntegral version)]])
+    rawRows db "SELECT authority_epoch FROM service_metadata" >>= check ("schema fixture " <> show version <> " holds its service metadata") . (==[[SQL.SQLText epoch]])
+  pure (path, root, epoch)
+
+-- | The schema-fixtures lane. In the given existing directory it writes the
+-- manager root @schema-N@ for each supported older schema version N from 1
+-- to 11, and the root @schema-13@, whose database has the current tables and
+-- user_version 13. Each root holds its role marker and its coordination
+-- database. The package mode of manager/test/service_http.py upgrades the
+-- older roots and refuses the newer root through the packaged executable.
+schemaFixtures :: FilePath -> IO ()
+schemaFixtures directory = do
+  forM_ ([(version, schemaPrefix version) | version <- [1 .. schemaVersion - 1]] <> [(schemaVersion + 1, schemaPrefix schemaVersion)]) $
+    \(version, statements) -> do
+      (_, root, epoch) <- schemaRoot directory version statements
+      putStrLn ("SCHEMA-FIXTURE " <> show version <> " " <> root <> " " <> T.unpack epoch)
+  putStrLn "PASS schema fixtures"
+
+-- | Each supported older schema version, written as 'schemaFixtures' writes
+-- it, upgrades to the current version in one administering lifetime and
+-- keeps its authority epoch.
+schemaUpgradeChecks :: FilePath -> IO ()
+schemaUpgradeChecks work = forM_ [1 .. schemaVersion - 1] $ \version -> do
+  (path, root, epoch) <- schemaRoot work version (schemaPrefix version)
+  withInstalled path $ \installed -> withCoordinationStore installed $ \store -> do
+    identity <- storeIdentity store
+    check ("schema " <> show version <> " upgrades to the current version with its authority epoch")
+      (storeSchemaVersion identity == schemaVersion && storeAuthorityEpoch identity == epoch)
+  bracket (rawOpen root) SQL.close $ \db ->
+    rawRows db "PRAGMA user_version" >>= check ("schema " <> show version <> " upgrade is durable") . (==[[SQL.SQLInteger (fromIntegral schemaVersion)]])
+
 rawRows :: SQL.Database -> Text -> IO [[SQL.SQLData]]
 rawRows db sql = bracket (SQL.prepare db sql) SQL.finalize $ \statement ->
   let loop remaining = do
@@ -866,7 +934,7 @@ admissionMigrationChecks work = do
       reservation state = [[SQL.SQLText "reservation_old",SQL.SQLText "request_old",SQL.SQLInteger 7,SQL.SQLText "generation_old",SQL.SQLText state]]
   withInstalled path (const(pure()))
   bracket (rawOpen root) SQL.close $ \database -> do
-    mapM_ (SQL.exec database) (schemaStatements<>commandMigration<>draftMigration)
+    mapM_ (SQL.exec database) (schemaPrefix 3)
     SQL.exec database "INSERT INTO service_metadata VALUES (1,'authority_old','stream_old','0','0','service_old'); INSERT INTO clients VALUES ('client_old','revision','fixture',0)"
     SQL.exec database "INSERT INTO requests(id,revision,client_id,workflow_id,descriptor_revision,profile_id,profile_revision,phase,admission,queue_ordinal,blocking_reasons,validation_errors) VALUES ('request_old','revision_old','client_old','workflow_old','descriptor_old','profile_old','policy_old','queued','waiting','18446744073709551614',X'5b5d',X'5b5d')"
     SQL.exec database "INSERT INTO reservations VALUES ('reservation_old','request_old',7,'generation_old','held'); INSERT INTO reservation_resources VALUES ('unclassified','reservation_old'); PRAGMA user_version=3"
@@ -900,7 +968,7 @@ ingestionMigrationChecks work = do
   (path,root) <- fixture work "ingestion-migration"
   withInstalled path (const (pure ()))
   bracket (rawOpen root) SQL.close $ \db -> do
-    mapM_ (SQL.exec db) (schemaStatements<>commandMigration<>draftMigration<>admissionMigration<>approvalMigration)
+    mapM_ (SQL.exec db) (schemaPrefix 5)
     SQL.exec db "INSERT INTO service_metadata VALUES (1,'old_epoch','old_stream','0','0','old_revision'); INSERT INTO clients VALUES ('old_client','old_revision','old_auth',0); INSERT INTO runs(id,revision,control_revision,profile_id,root_identity,native_run_id,supervision,result_state) VALUES ('old_run','old_revision','old_control','old_profile','old_root','old_native','observer','absent'); PRAGMA user_version=5"
     SQL.exec db "CREATE INDEX ingestion_order ON clients(id)"
   setFileMode (root </> "coordination.sqlite3") 0o600

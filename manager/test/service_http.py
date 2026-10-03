@@ -138,6 +138,14 @@ operations_mode = len(sys.argv) == 6 and sys.argv[5] == OPERATIONS
 # exit with status 0. The PASS lines print the identities of the run: the
 # packaged path, the SHA-256 of the binary and the runner version of the
 # catalogue.
+# Its schema step reads the directory that SCHEMA_FIXTURES names, which the
+# schema-fixtures lane of manager-store-check writes. For each older schema
+# root schema-1 to schema-11 it works on a private copy: offline status
+# migrates the root, PRAGMA user_version reads 12, check-store reports a
+# valid Store, and --manager serve answers 200 on GET /v1/capabilities with
+# the authority epoch of the fixture and stops through shutdown with exit
+# status 0. For the copy of schema-13, offline status refuses with
+# storage-unavailable, serve exits with status 2, and user_version stays 13.
 PACKAGE = "package"
 package_mode = len(sys.argv) == 6 and sys.argv[5] == PACKAGE
 if package_mode:
@@ -146,6 +154,11 @@ if package_mode:
     runner = Path(os.environ["PACKAGE_RUNNER"])
     if not (runner.is_file() and os.access(runner, os.X_OK)):
         raise SystemExit(f"The package mode needs PACKAGE_RUNNER, the bin/agentic-run of the Nix package, and {runner} is not an executable file.")
+    if not os.environ.get("SCHEMA_FIXTURES"):
+        raise SystemExit("The package mode needs SCHEMA_FIXTURES, the directory of manager-store-check schema-fixtures, and SCHEMA_FIXTURES is unset.")
+    schema_fixtures = Path(os.environ["SCHEMA_FIXTURES"])
+    if not all((schema_fixtures / f"schema-{version}" / "coordination.sqlite3").is_file() for version in (*range(1, 12), 13)):
+        raise SystemExit(f"The package mode needs SCHEMA_FIXTURES, the directory of manager-store-check schema-fixtures, and {schema_fixtures} lacks a schema root.")
 mixed = len(sys.argv) == 6 and sys.argv[5] in ("mixed", "mixed-confirm", "tui-approval", "tui-consent-control", APPROVE_FAULT, LIFECYCLE, OPERATIONS, "pages", "routes", "failures-worker", "failures-manager", "failures-launched", "storage", "pi-client", "pi-client-controls", "emacs-client", "emacs-client-controls", "pi-host-smoke", "pi-host", "pi-host-broken-answer", "pi-host-model", "pi-host-model-decline", "emacs-service", "emacs-service-broken-answer") + JOURNEYS
 confirm_uncertain = mixed and sys.argv[5] == "mixed-confirm"
 # The boundary mode checks WM-024 through the running protected manager with
@@ -5721,8 +5734,101 @@ if operations_mode:
     raise SystemExit(0)
 
 
+def copied_coordination_rows(directory, statement):
+    """The rows of one query of the coordination database of a directory,
+    read from a private copy of the database and its write-ahead log, so that
+    the read changes no file of the directory."""
+    import sqlite3
+    copy = Path(tempfile.mkdtemp(prefix="rows.", dir=work))
+    for name in ("coordination.sqlite3", "coordination.sqlite3-wal"):
+        if (directory / name).exists():
+            shutil.copyfile(directory / name, copy / name)
+    connection = sqlite3.connect(str(copy / "coordination.sqlite3"))
+    try:
+        return [tuple(row) for row in connection.execute(statement)]
+    finally:
+        connection.close()
+        shutil.rmtree(copy)
+
+
+def package_schema_checks():
+    """The schema step of the package mode, on private copies of the roots of
+    SCHEMA_FIXTURES. Each root has its own offline and serve configuration,
+    which differ from the configuration of the mode only in managerRoot and,
+    for the offline file, in the absence of administrationRoot."""
+    served = json.loads(config.read_text())
+    schema_work = work / "schema"
+    schema_work.mkdir(mode=0o700)
+
+    def configurations(version):
+        root = schema_work / f"schema-{version}"
+        shutil.copytree(schema_fixtures / f"schema-{version}", root)
+        serve_config, offline_config = schema_work / f"schema-{version}-serve.json", schema_work / f"schema-{version}-offline.json"
+        serve_config.write_text(json.dumps(dict(served, managerRoot=str(root))))
+        offline_config.write_text(json.dumps({name: value for name, value in served.items() if name != "administrationRoot"}
+                                             | {"managerRoot": str(root)}))
+        for path in (serve_config, offline_config):
+            path.chmod(0o600)
+        return root, serve_config, offline_config
+
+    def user_version(root):
+        return copied_coordination_rows(root, "PRAGMA user_version")
+
+    status_request = {"version": 1, "operation": "status"}
+    for version in range(1, 12):
+        root, serve_config, offline_config = configurations(version)
+        assert user_version(root) == [(version,)], ("the copied schema root", version, user_version(root))
+        [(epoch,)] = copied_coordination_rows(root, "SELECT authority_epoch FROM service_metadata")
+        reported = administration(status_request, path=offline_config)["result"]
+        assert (reported["state"], reported["live"], reported["authorityEpoch"]) == ("stopped", False, epoch), (version, reported)
+        assert user_version(root) == [(12,)], ("the schema version after offline status", version, user_version(root))
+        checked = administration({"version": 1, "operation": "check-store"}, path=offline_config)["result"]
+        assert checked["integrity"] == "valid", (version, checked)
+        credential = schema_work / f"credential-{version}"
+        administration({"version": 1, "operation": "issue-credential", "label": f"Schema {version} fixture",
+                        "scopes": ["observe"], "profileIds": ["profile_1"], "expiresAt": "2999-01-01T00:00:00Z",
+                        "outputFile": str(credential)}, path=offline_config)
+        authorized = {"Authorization": "Bearer " + credential.read_bytes().decode("ascii")}
+        with (schema_work / f"server-{version}.stdout").open("wb") as output, \
+                (schema_work / f"server-{version}.stderr").open("wb") as errors:
+            process = subprocess.Popen([str(runner), "--manager", "serve", "--config", str(serve_config),
+                                        "+RTS", "-N" + native, "-RTS"], stdout=output, stderr=errors)
+            try:
+                wait_ready(process)
+                status, capabilities, raw = request("/v1/capabilities", authorized)
+                assert status == 200, ("capabilities of the upgraded root", version, status)
+                validate("Capabilities", capabilities, raw)
+                assert capabilities["authorityEpoch"] == epoch, ("the authority epoch of the upgraded root", version, capabilities["authorityEpoch"])
+                stopped = administration({"version": 1, "operation": "shutdown"}, path=serve_config)
+                assert stopped["result"] == {"state": "stopped"}, (version, stopped)
+                process.wait(timeout=60)
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                process.wait(timeout=25)
+                (schema_work / f"server-{version}.exit").write_text(str(process.returncode) + "\n")
+        assert process.returncode == 0, ("the packaged manager exit after shutdown on the upgraded root", version, process.returncode)
+        assert user_version(root) == [(12,)], ("the schema version after serve", version, user_version(root))
+        print("PASS package schema", version, "upgrade: offline status migrated the root to user_version 12, check-store",
+              "reported", checked["integrity"] + ", and the packaged serve process answered 200 on GET /v1/capabilities",
+              "with the fixture authority epoch and exited with status 0 after shutdown", flush=True)
+
+    root, serve_config, offline_config = configurations(13)
+    assert user_version(root) == [(13,)], ("the copied schema root", 13, user_version(root))
+    administration(status_request, refused="storage-unavailable", path=offline_config)
+    with (schema_work / "server-13.stdout").open("wb") as output, (schema_work / "server-13.stderr").open("wb") as errors:
+        refused = subprocess.run([str(runner), "--manager", "serve", "--config", str(serve_config), "+RTS", "-N" + native, "-RTS"],
+                                 stdout=output, stderr=errors, timeout=60)
+    (schema_work / "server-13.exit").write_text(str(refused.returncode) + "\n")
+    assert refused.returncode == 2, ("the packaged serve exit on the newer schema", refused.returncode)
+    assert user_version(root) == [(13,)], ("the schema version after the refusals", user_version(root))
+    print("PASS package schema 13 refusal: offline status refused with storage-unavailable, the packaged serve process",
+          "exited with status 2, and user_version stays 13", flush=True)
+
+
 if package_mode:
     package_checks()
+    package_schema_checks()
     raise SystemExit(0)
 
 

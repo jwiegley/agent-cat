@@ -64,11 +64,17 @@ channel, stops the manager through `shutdown` and requires exit status 0.
 
 ```sh
 out=$(nix build .#agentic-run --no-update-lock-file --option substitute false --print-out-paths --no-link)
+schemas=$(mktemp -d)
+direnv exec . bash -c "\$(bash test/cabal.sh list-bin manager-store-check) schema-fixtures $schemas"
 fixture=$(mktemp -d)
 mkdir "$fixture/N8"
-PACKAGE_RUNNER="$out/bin/agentic-run" direnv exec . python3 -B manager/test/service_http.py \
+SCHEMA_FIXTURES="$schemas" PACKAGE_RUNNER="$out/bin/agentic-run" direnv exec . python3 -B manager/test/service_http.py \
   "$PWD" "$fixture/N8" "$out/bin/agentic-run" 8 package
 ```
+
+The mode needs both `PACKAGE_RUNNER` and `SCHEMA_FIXTURES`. The schema step
+follows the `hello` run and is described under
+[schema upgrade and refusal](#schema-upgrade-and-refusal).
 
 The run of record passed at `-N8` on 2026-10-03. The base revision was
 `5710785a3de642c166929c3dff7204a76af62fa0`, and the working copy held the
@@ -94,3 +100,35 @@ The live `status` answered `state` `serving`, `live` and `ready` `true`, with
 `{"state": "stopped"}`, and the serve process exited with status 0. The result
 holds the identifier of the worker run, so its digest differs from one run to
 the next.
+
+## Schema upgrade and refusal
+
+The `schema-fixtures DIR` lane of `manager-store-check` writes the manager
+roots `schema-1` to `schema-11` and `schema-13` in `DIR`. Each root holds its
+manager role marker and a coordination database. The database of `schema-N`
+holds the tables of schema version N, which are the version-one statements and
+the migrations of `Agentic.Manager.Schema` up to that version. The database of
+`schema-13` holds the tables of version 12 with `user_version` 13. Each
+database has one service metadata row with an authority epoch derived from its
+version.
+
+After the `hello` run, the `package` mode copies each root of
+`SCHEMA_FIXTURES` and gives the copy a serve configuration and an offline
+configuration. For each older root, the packaged executable runs offline
+`status`, which reports the authority epoch of the fixture. `PRAGMA
+user_version` then reads 12, and offline `check-store` reports `valid`. The
+mode issues a credential offline, starts `RUNNER --manager serve`, requires
+200 on `GET /v1/capabilities` with the authority epoch of the fixture, stops
+the manager through `shutdown` and requires exit status 0. For `schema-13`,
+offline `status` refuses with `storage-unavailable`, `RUNNER --manager serve`
+exits with status 2, and `user_version` stays 13.
+
+The run of record of the schema step passed at `-N8` on 2026-10-03 with the
+output path of the table above. The base revision was
+`8fcb49991c9b49ac0095275572f49dcf81818fc0`, and the working copy held the
+change to `manager/test/StoreCheck.hs`, `manager/test/service_http.py` and
+the documentation without a commit. These files are outside the filtered
+source, so `nix build` with substitution disabled built nothing. The one-minute
+load average was 6.2 at the start and 5.9 at the end. All eleven older roots
+upgraded to version 12, passed `check-store` and served, and the version 13
+root was refused by offline administration and by serve.

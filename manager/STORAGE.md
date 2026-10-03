@@ -139,7 +139,14 @@ platform or forced-spill test.
 
 `PRAGMA user_version` holds internal schema version 12. Startup accepts versions
 zero through twelve, and rejects other versions before changing journaling or
-schema. Fresh initialization, command-ledger additions, the explicit literal
+schema. A serving or administering lifetime migrates versions zero through
+eleven to twelve in one transaction. A copying lifetime, for backup or
+inspection, requires version twelve. Thus offline `status` or the first
+`RUNNER --manager serve` on an older manager root upgrades it, and a backup of
+that root follows the upgrade. A newer version is refused, and the database file stays unchanged. Offline
+administration then refuses with `storage-unavailable`, and
+`RUNNER --manager serve` exits with status 2 and writes "manager service is
+unavailable" to standard error. Fresh initialization, command-ledger additions, the explicit literal
 chunk/upload migration, and admission and control-state additions execute DDL,
 metadata and version publication in one immediate transaction. Version-one DDL
 and the version-two and version-three migrations remain unchanged. The frozen
@@ -1151,9 +1158,20 @@ evidence.
 
 `manager/ci/store.sh` builds the real Cabal executable and runs separate N1 and N8
 checks against SQLite and native service leases. The tests include the installed
-public facade, relational constraints, migration rollback, commit failure,
-strict bounds, cancellation, bounded admission waits, and pinned-reader checkpoint
-progress.
+public facade, relational constraints, migration rollback, the upgrade of each
+older schema version from one to eleven, commit failure, strict bounds,
+cancellation, bounded admission waits, and pinned-reader checkpoint progress.
+The `schema-fixtures DIR` lane of `manager-store-check` writes the manager roots
+`schema-1` to `schema-11` and `schema-13` in `DIR`. Each root holds its role
+marker and a database with the tables of its version and one service metadata
+row. The `package` mode of `manager/test/service_http.py` reads that directory
+from `SCHEMA_FIXTURES`. On a copy of each older root, the packaged executable
+runs offline `status`, `PRAGMA user_version` then reads 12, `check-store`
+reports `valid`, and `RUNNER --manager serve` answers 200 on
+`GET /v1/capabilities` with the authority epoch of the root and stops through
+`shutdown`. On a copy of `schema-13`, offline `status` refuses with
+`storage-unavailable`, `RUNNER --manager serve` exits with status 2, and the
+version stays 13.
 Configuration and discovery regression gates remain separate. These checks do
 not certify G1, worker containment, a deployed service, or the withdrawn SQLite
 directory-replacement obligation.
