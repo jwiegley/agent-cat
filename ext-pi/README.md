@@ -54,7 +54,12 @@ The links are never replaced by a registry install. The `devDependencies`
 strings of `package.json`, and of the root entry of `package-lock.json`, name
 the fork release 0.99.1 for `pi-client`, `pi-coding-agent`, `pi-server` and
 `pi-tui`. The `node_modules/@earendil-works` entries of `package-lock.json`
-keep their registry descriptions. They are not an install source.
+keep their earlier registry descriptions: `pi-coding-agent` at 0.85.1, and
+`pi-ai`, `pi-client`, `pi-protocol`, `pi-server`, `pi-telemetry` and `pi-tui`
+at 0.84.3, each with a URL of the npm registry. These entries disagree with
+the root entry and with the linked fork. They are not an install source, and
+`npm ci` is not supported with this lock file. A rewrite of these entries as
+links to the fork waits for an operator authorization.
 `node_modules` links the fork, and `test/host-versions.test.ts` enforces the
 supported set. The test enumerates every linked package, resolves it and
 `pi-agent-core` through the Node resolver, and fails when a version is outside
@@ -454,7 +459,14 @@ one loaded profile:
   connection that delivered an item resets the backoff. After two
   consecutive ends without a delivery, or after another refusal of the
   stream, it polls every second from the cursor and connects the stream
-  again when the backoff has passed. A 410 refusal ends it with
+  again when the backoff has passed. A refusal of the stream with 429
+  `storage-quota` follows this rule. The manager gives it when two
+  subscriptions of the client already count, for example when the
+  subscription of a dropped connection still counts until its next write
+  fails. The refusal is transient: the loop keeps the cursor, takes no new
+  snapshot and continues until a stream connects, as the
+  [protocol document](../doc/api/README.md#stream-reconnection-after-a-429-refusal)
+  states. A 410 refusal ends it with
   `resnapshot`, a credential refusal ends it with `refused`, and `close`
   ends it with `closed`. Its `prefer` option gives the delivery preference
   before each connection and after each polling batch. While it gives
@@ -1574,8 +1586,10 @@ launch and lineage approval refuse when interactive approval is unavailable.
 ## Build and test
 
 The host packages link into the built Pi fork as the section "Supported host"
-states. Do not run `npm ci` or `npm install`, because either command replaces
-those links with the registry pins of `package-lock.json`.
+states. Do not run `npm ci` or `npm install`. `npm ci` is not supported,
+because the `@earendil-works` entries of `package-lock.json` name earlier
+registry releases, and either command replaces the links with those
+releases.
 
 ```sh
 npm run check

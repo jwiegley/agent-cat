@@ -2,6 +2,170 @@
 
 <!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
 
+## Phase G of 2026-10
+
+The resume workflow took Phase G after the Phase F closeout `1bb9dba4`:
+the open functional items of WM-041 from the Phase F review, WM-042
+operations, WM-043 packaging, upgrade and rollback, WM-044 documentation
+reconciliation, and the functional part of G5. The run kept the operator
+directions of 2026-09-29 for fast validation and of 2026-09-30 for
+functionality first, and the operator decisions of 2026-10-01 for the
+Emacs client and of 2026-10-02 for the Lean builds of WM-040 and the
+`ext-pi` pins. The Phase G commits are `86c1e9e9` to `2c56102d` and the
+PG20 change that follows them. `origin/workflow-manager-checkpoint-20260923`
+reads `1bb9dba4`, so no Phase G commit is pushed. PG20 changes the README
+of the `emacs-native` branch of agent-workflows in
+`~/src/agent-workflows-emacs-native` with documentation only, for the
+Integrator to commit locally after `6e8eac0`. Nothing on that branch is
+pushed.
+
+This section describes the current state. Where any section below differs,
+this section supersedes it, and the sections below remain as chronology.
+The evidence of each subtask is under `PG/<subtask>/impl-r1` in the resume
+directory.
+
+### Delivered behavior
+
+| Subtask | agent-cat commit | Delivered behavior |
+| --- | --- | --- |
+| PG1 | `86c1e9e9` | `manager/CAPACITY.md` states the host-load rule of a run of record. Each capacity workload records the one-minute and five-minute load averages at its start and end and the other manager processes on the host. `CapacityHarness` ends its manager on every exit path. |
+| PG2 | `26e84d8d` | The read-path diagnosis `doc/research/workflow-manager-read-path-diagnosis-2026-10.md`. The dominant cost of the burst round was the replay of the whole run log from sequence zero for each runtime envelope under one of the two reader places. |
+| PG3 | `afd44d78` | `State.restoreProjectionCut` continues a stored projection from its next sequence. The Store keeps an authorization revision apart from the authorization cell, and a view check reads the authorization facts again only after a change of those facts or after one second. `capacity-streams` at N8 gave `events.catch-up-p50-ms` 3.4 and `events.catch-up-p95-ms` 128.8, with 0 of 14 ceiling keys outside their ceilings. |
+| PG4 | `76da0f5c` | `History` decodes the legacy entries of a window of `/v1/runs` in eight groups, so the first page of 4096 legacy runs meets `pages.first-page-p50-ms`. |
+| PG5 | `b4b8a30d` | `reload-profiles` on the live channel and as offline validation, with the frozen `{profileIds, revision}` result and the two-configuration rule. |
+| PG6 | `2817abf5` | `drain` on the live channel. A draining manager serves reads and streams, continues started runs and admits no new work. |
+| PG7 | `1b87a0fe` | `shutdown` on the live channel and offline, with the frozen `{state: stopped}` answer. |
+| PG8 | `a1c0ed86` | Offline `backup` with the frozen `{backupId, sha256, bytes}` result. |
+| PG9 | `9cf218f7` | Offline `restore` with fencing evidence. It rotates the authority epoch and the stream and revokes every restored credential. |
+| PG10 | `c550335c` | The `failures-backup` mode of `manager/test/service_http.py`: a backup under a file-size limit, a backup stopped by SIGKILL and a restore stopped by SIGKILL after its marker, through `agentic-run --manager admin`. |
+| PG11 | `5c8f38de` | The same `restore` request completes a restoration that an interruption fenced. |
+| PG12 | `3bf6e8cb` | The `status` result reports the bounded operational facts `live`, `ready`, `queuedRequests`, `oldestQueuedAgeSeconds`, `reservations`, `ownedWorkers`, `lostRuns`, `unresolvedCommands` and `serviceFault`. |
+| PG13 | `eca320c9` | The operator runbook `manager/OPERATIONS.md` and case 7 of the `operations` mode, which executes its procedures in runbook order on one disposable fixture. |
+| PG14 | `5710785a` | The flake outputs `packages.<system>.agentic-run` and `packages.<system>.default` with a filtered source, and the source distribution. |
+| PG15 | `8fcb4999` | The `package` mode runs the packaged executable as the manager and the runner and completes a verified request through `shutdown`. |
+| PG16 | `ab186c91` | The `package` mode upgrades copies of the schema 1 to 11 roots to schema 12 through the packaged executable and refuses a schema 13 root through offline administration and serve. |
+| PG17 | `c901a10f` | The `rollback` mode drains, cancels, shuts down and backs up, rolls back to `agentic-run --tui --local` with the manager history read only, and rolls forward with the queued request served once. |
+| PG18 | None | Not applied. It waits for the operator authorization in "Authorizations" below. |
+| PG19 | `2c56102d` | The manual section "Workflow manager service", the version and compatibility matrix, the truncated-GET rule and the SSE 429 rule of `doc/api/README.md`. |
+| PG20 | This change | The client and owner documents. `tui/README.md` and `doc/tui-design.md` state the service-mode behavior during a drain, a shutdown and a restoration, and the SSE 429 rule. `ext-pi/README.md` states the stale lock entries and that `npm ci` is not supported. The Emacs README lists the service-mode limits that stay open and the 429 rule. `manager/CAPACITY.md` and `manager/STORAGE.md` state that a disk write failure stops the Store until a restart, and `manager/STORAGE.md` states the bound of a POST route. `runtime/BROKER.md` and `manager/CONTROLS.md` state the order of a redirect that arrives after the attempt returned its answer. `manager/README.md` states the client targets, Emacs 30.2 and the Pi fork 0.99.1. The reference pair `doc/examples/manager-serve.json` and `doc/examples/manager-offline.json`, which `manager/OPERATIONS.md` links, passes offline `reload-profiles` validation with private fixture paths. |
+
+### Gate of Phase G
+
+The gate of Phase G has not run at this revision of the handoff. Its
+results replace this paragraph.
+
+### Checks run by the subtasks
+
+Each subtask ran its listed checks once and kept light evidence in its
+stage directory. PG3 and PG4 ran `capacity-streams` and `capacity-inputs`
+at N8 once each, and every ceiling key passed. Neither run is a run of
+record under the PG1 rule, because the PF17 manager, PID 61004, ran on the
+host during both runs. PG10 ran `failures-backup` at N8, PG13 ran
+`operations` with case 7, PG15 and PG16 ran `package`, and PG17 ran
+`rollback`. PG19 and PG20 ran `make -C doc check`. PG20 also validated the
+offline reference configuration with offline `reload-profiles`.
+
+### Checks not run
+
+- The checks that the operator directions remove from routine validation:
+  `cli/ci/policies.sh`, `manager/ci/approval.sh`, `manager/ci/controls.sh`,
+  the `admission_audit.py` mutation audits, bisim and Lean checks, mutant
+  suites, `-fforce-recomp` builds and stability samples.
+- No capacity run of record exists for PG3 and PG4 (`acat-n50o`,
+  `acat-jkas`). Each needs one run while no other manager runs on the host.
+- The exercise of the runbook procedures by another human operator, which
+  WM-042 requires. Case 7 of `operations` is an automated exercise and does
+  not stand for it.
+- A Store that the quick check reports `corrupt`, a true `ENOSPC` and a
+  proxy on another host. No mode exercises them.
+- A fixture that truncates a GET body and confirms that each client reads
+  again (`acat-gbh8`). The client rules of `doc/api/README.md` come from
+  the source.
+- The worst case of a POST route. `manager/STORAGE.md` states its bound
+  from the code, and no check measures it (`acat-pd3-fess-followup-uo4y`).
+- A redirect that arrives after the attempt returned its answer and before
+  `closeAttemptRoute`. `runtime/BROKER.md` states the order, and no check
+  produces it.
+- `npm ci` in `ext-pi`, which the stale lock entries do not support.
+- The Emacs 29.1 minimum-version check, because no Emacs 29.1 is available
+  locally.
+
+### Deferred security items
+
+No item of the security stage was done. These items stay deferred with
+the items of the earlier sections and of section 8 of the remaining-scope
+report:
+
+- The security part of the WM-044 integrated review and of G5: a threat
+  model, a security gate and an independent security review.
+- The hostile-input negatives of the local administration operations, such
+  as malformed or hostile backup, restore and evidence paths.
+- Redaction projections of the protected diagnostics of WM-042 beyond the
+  existing scopes.
+- The revocation and rotation matrices during a POST, an artifact download,
+  a pagination and an event stream, and the authority fencing after a
+  restore from an older backup as a security matrix.
+- The remaining Name Constraints work and TLS for catalogue discovery
+  (`acat-routing-discovery-tls-3m8u`).
+
+### Authorizations
+
+- **PG18 (pending).** A JSON edit of `ext-pi/package-lock.json` with no
+  install: replace the registry entries of
+  `node_modules/@earendil-works/{pi-ai, pi-client, pi-coding-agent,
+  pi-protocol, pi-server, pi-telemetry, pi-tui}` with link entries to the
+  matching packages of `~/src/fork/pi/packages`. Until the operator
+  authorizes it, the lock file keeps the stale entries, and
+  `ext-pi/README.md` records them.
+- PG3 and PG4 returned `needs-authorization` only for the stale PF17
+  manager, PID 61004. The PG1 rule leaves it alone.
+
+### Package status
+
+| Package or item | Status | Tracker |
+| --- | --- | --- |
+| WM-041 | Partial. Every ceiling key passed in the PG3 and PG4 runs, and `failures.backup.passed` passes through PG10. The runs of record wait for a host with no other manager. | `acat-wm-041-17ax`, `acat-wm-041-core-3vvz`, `acat-n50o`, `acat-jkas` |
+| WM-042 | Met for function apart from the exercise by another human operator, which is pending. | `acat-wm-042-sdg9` |
+| WM-043 | Met for function: the package, its acceptance, the schema upgrades, the newer-schema refusal and the rollback. | `acat-wm-043-zm3d` |
+| WM-044 | Documentation reconciled by PG19 and PG20. The integrated review is the gate. | `acat-wm-044-6utw`, `acat-gbh8` |
+| G5 | Open. It needs the gate of Phase G, the human operator exercise and the independent closure review. Production activation stays separately authorized. | `acat-g5-u0w2` |
+
+The fess follow-up issues of Phase G are `acat-pg1-fess-followup-s4dp`,
+`acat-sicz` (PG2), `acat-0rda` (PG3), `acat-uvwy` (PG4), `acat-g971`
+(PG5), `acat-69jk` (PG6), `acat-5j0l` (PG7), `acat-pg8-fess-followup-8x8u`
+to `acat-pg17-fess-followup-ngjm` and `acat-gbh8` (PG19).
+
+### Open findings
+
+- **Orphaned processes (low).** The PF17 manager, PID 61004, and the
+  stopped frontends, PIDs 111 and 9444, still run with parent 1 on
+  2026-10-03. The operator or the Integrator ends them with `kill -CONT`
+  and then `kill -KILL`.
+- **Service-mode limits of the Emacs client (low).** An uncertain send of
+  a request or review command is not reconciled, a command waits in the
+  foreground for up to 120 seconds, the snapshot is read as its first page
+  only (also in `ext-pi`), and Emacs cannot open the review of a request
+  of another client. The Emacs README lists them.
+- **Unresolved command during a drain in the TUI (low).** A 503 refusal
+  during a drain leaves the command unresolved, and every other mutation
+  key, an answer included, refuses until the command settles or the
+  session ends. `tui/README.md` states this behavior.
+- The open findings of the sections "Phase F part 3 of 2026-10-03" and
+  earlier stay open where this section does not close them. This section
+  closes the disk write failure, the SSE 429 rule, the pin statements, the
+  POST route deadlines and the redirect after an answer as documented.
+
+### Next action
+
+1. The gate of Phase G runs and fills "Gate of Phase G".
+2. The operator decides PG18, and the Integrator or the operator ends PIDs
+   61004, 111 and 9444. Then `capacity-streams` and `capacity-inputs` run
+   once each as runs of record.
+3. Another human operator exercises `manager/OPERATIONS.md` against a
+   disposable local fixture.
+4. An independent closure review of G5 follows. The security stage waits
+   for the operator to schedule it.
+
 ## Phase F part 3 of 2026-10-03
 
 The resume workflow completed its Phase F plan of 24 subtasks. After the

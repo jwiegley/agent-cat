@@ -91,6 +91,34 @@ fresh allowance for each lock. So a capture whose file is written is never
 refused by an allowance that the body read used up, and its file is never
 left without its record because of a route deadline.
 
+The code sets no single bound for the whole of a POST route. The bound of a
+POST route is the sum of the bounds of its parts:
+
+- The body read. A JSON body has a read bound of 15 seconds and a size bound
+  of 2 MiB (`Transport.readJsonRequest`), and a body that is not complete in
+  that time refuses with 400 `malformed-request`. A capture upload reads its
+  body after its command preflight. The read and the publication of the
+  capture file together have a bound of 30 seconds
+  (`Drafts.uploadCaptureCommand`), and a body that is not complete in that
+  time refuses with 503 `storage-unavailable`.
+- The admission waits. Each owner deadline of the route bounds its waits to
+  five seconds: the resolve read, the availability read of a control or an
+  answer, the command submission and the receipt view. A capture upload
+  waits at most five seconds for each of its locks.
+- The operation allowances. Each admitted SQL action has its own allowance of
+  five seconds, and a rollback has its own bound of five seconds. The
+  admission deadlines do not include them.
+- The response writes. Each write of the receipt has a bound of five seconds.
+
+The worst case of a POST route is therefore its body bound plus a fixed
+multiple of five seconds, with the multiple set by the number of owner
+deadlines, admitted actions and writes of that route. No check measures the worst case of any
+POST route (`acat-pd3-fess-followup-uo4y`). The capacity keys
+`safety.rate-refusal-ms`, `safety.cancel-ms` and `disk.refusal-ms` of
+[CAPACITY.md](CAPACITY.md) measure single commands under their workloads
+against the allowance of one admission, and they do not measure that worst
+case.
+
 Operation bounds stay separate. The operation allowance of an admitted SQL
 action starts when its wait for the gate starts, as before. The 100 ms busy
 timeout, the rollback bound and the five-second bound of a draft operation do
@@ -238,6 +266,17 @@ inside the same transaction as resource changes.
 An exception, explicit refusal, failed event insertion, constraint failure, or
 cancellation rolls back without returning a receipt. Commit-path failure or
 uncertain rollback poisons the connection, so it cannot return another success.
+A definite write failure of a writable transaction, such as `EFBIG` under a
+file-size limit, rolls back and refuses the command with 503
+`storage-unavailable` and no command row. It also stops the Store for the rest
+of the lifetime: `notifyStoreFailure` clears the authorization cell, closes the
+worker registry and marks it unavailable. Every later command and read of that
+lifetime then refuses with 503 `storage-unavailable`, `GET /v1/capabilities`,
+a whole-run cancel and a withdrawal included. Nothing in the process opens the
+Store again. Only a restart of the manager serves the committed state again,
+and no command executes again at that restart. The `faults-io` mode of
+`manager/test/service_http.py` checks this behavior, and the
+[runbook](OPERATIONS.md#disk-write-failure) gives the procedure.
 The original asynchronous exception remains distinguishable from storage errors.
 Public diagnostics do not expose SQLite errors, SQL text, paths, or private data.
 

@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "managerRoot": "/Users/OPERATOR/agent-cat/manager",
+  "https": {
+    "host": "127.0.0.1",
+    "port": 8443,
+    "certificateFile": "/Users/OPERATOR/agent-cat/tls/certificate.pem",
+    "keyFile": "/Users/OPERATOR/agent-cat/tls/key.pem",
+    "allowedHosts": [
+      "127.0.0.1:8443"
+    ],
+    "allowedOrigins": [],
+    "allowedPeers": [
+      "127.0.0.1"
+    ]
+  },
+  "localRetentionRoots": [],
+  "runners": [
+    {
+      "alias": "native",
+      "executable": "/Users/OPERATOR/agent-cat/bin/agentic-run",
+      "prefix": []
+    }
+  ],
+  "limits": {
+    "drafts": 100,
+    "globalDrafts": 1000,
+    "globalCaptureBytes": 67108864,
+    "globalPageSets": 10,
+    "globalConnections": 32,
+    "globalDatabaseReaders": 4,
+    "globalMutationLedgerBytes": 67108864,
+    "safetyControlsPerMinute": 60,
+    "executionReservations": 1
+  },
+  "profiles": [
+    {
+      "id": "scripted",
+      "runner": "native",
+      "workspace": "/Users/OPERATOR/agent-cat/workspace",
+      "workspaceLabel": "Scripted workspace",
+      "targetLabel": "Deterministic scripted worker",
+      "targetArguments": [
+        "--scripted"
+      ],
+      "environment": [],
+      "ownership": "service-owned",
+      "quarantined": false,
+      "personAnswering": "local-control",
+      "resourceKeys": []
+    }
+  ]
+}

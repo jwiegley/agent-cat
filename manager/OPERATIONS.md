@@ -36,6 +36,28 @@ configuration also holds the `https` section with the members `host`,
 
 `RUNNER` is the configured registry executable, for example `agentic-run`.
 
+### Reference configuration pair
+
+The files [`doc/examples/manager-serve.json`](../doc/examples/manager-serve.json)
+and [`doc/examples/manager-offline.json`](../doc/examples/manager-offline.json)
+are a reference pair for one manager root. No build or package installs them.
+The serve file listens with HTTPS on `127.0.0.1` port 8443, admits the Host
+`127.0.0.1:8443` and the peer `127.0.0.1`, names a private
+`administrationRoot`, and installs one service-owned profile `scripted`. That
+profile runs the native runner with `--scripted`, which reaches no model and
+no network. The offline file is the same file without `administrationRoot`.
+
+Every path in the pair starts with the placeholder `/Users/OPERATOR/agent-cat`.
+To use the pair, copy both files, replace the placeholder with an existing
+private directory of the operator account, and give each copy mode 0600. The
+directories `manager`, `admin`, `workspace` and `tls` below it must exist with
+mode 0700, the `tls` directory holds the certificate and the key of the
+listener, and `bin/agentic-run` is the runner executable. Then validate the
+offline copy as in [Validate a configuration
+offline](#validate-a-configuration-offline). A copy of the offline file with
+private fixture paths answers that validation with `profileIds`
+`["scripted"]` and a `revision`, and it leaves the manager root empty.
+
 ## The administration command
 
 `RUNNER --manager admin --config FILE` reads one JSON request from standard

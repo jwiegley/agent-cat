@@ -567,6 +567,14 @@ nothing, so its ask stays without a reply.
   redirect writes the same `events.ndjson` as before. The case `live-redirect`
   of `test/control_probe.py` checks the redirect, the cancel of the stopped
   turn at its adapter and the two refusals, which send no cancel.
+  The route of the attempt stays open until `closeAttemptRoute`, which runs
+  after the engine turn returns and before the attempt emits its end. A
+  redirect that the runtime accepts after the turn returned its answer and
+  before that close therefore also stops the attempt. The runtime drops the
+  returned answer, the attempt ends with `attempt.failed` after
+  `occurrence.redirected`, and the runtime asks the chosen candidate in a new
+  `question`, as for any accepted redirect. No check produces this order of
+  events.
 
 `runPlanScoped` takes the broker of the run and a function from a `FlowScope`
 to the broker of one occurrence, and `runPlanBrokered` is `runPlanScoped` with

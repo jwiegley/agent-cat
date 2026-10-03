@@ -256,13 +256,15 @@ network, deployment or platform acceptance, and it performs no OS containment.
 
 ## Client baseline policy
 
-The minimum supported targets for the version 1 manager clients are GNU Emacs
-30.2 and Pi coding-agent 0.85.1. Older versions are outside this manager-client
-support policy. This baseline does not narrow the native extension's existing
-peer-dependency declarations or establish service-mode compatibility before the
-owning client acceptance gates run.
+The supported targets for the version 1 manager clients are GNU Emacs 30.2
+and the built Pi fork at 0.99.1. The Emacs client declares Emacs 29.1 in its
+`Package-Requires` header, and every check ran GNU Emacs 30.2, so the 29.1
+minimum stays open until a check runs on Emacs 29.1. The Pi extension supports
+only the fork at 0.99.1, which `ext-pi/test/host-versions.test.ts` enforces.
+This baseline does not narrow the native extension's existing
+peer-dependency declarations.
 
-These minima are support-policy decisions, not inferred compatibility limits.
+These targets are support-policy decisions, not inferred compatibility limits.
 The [native frontend evidence](../doc/tui-release-evidence.md) records Emacs 30.2
 byte-compilation, checkdoc, and smoke execution. The Pi extension develops and
 runs against the built Pi fork 0.99.1. The `devDependencies` of
@@ -276,9 +278,10 @@ compatibility minimum. The
 [version and compatibility matrix](../doc/api/README.md#version-and-compatibility-matrix)
 lists the client versions that the checks exercise.
 
-No older-version compatibility or manager service-mode test is implied by these
-records. Each released client must pass its owning acceptance gate on its actual
-environment, including versions newer than the baseline.
+The service-mode checks of each client run against these targets only. No
+check runs an older client version. Each released client must pass its owning
+acceptance gate on its actual environment, including versions newer than the
+baseline.
 
 ## Profile authority
 

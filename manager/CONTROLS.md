@@ -138,6 +138,14 @@ chosen target. The stopped candidate counts against the chain. The Runtime
 rejects a redirect of an effect in flight and a redirect to any other target,
 and the run continues.
 
+The attempt stays in flight for a redirect until the Runtime closes its route,
+after the engine turn returned and before the attempt ends. A redirect that
+arrives after the turn returned its answer and before that close is accepted
+as any live redirect. The Runtime drops the returned answer and asks the
+chosen target, and the command records the effect `redirected`. The
+[broker contract](../runtime/BROKER.md) states this order under D6. No check
+produces it.
+
 The manager offers this live redirect through the run-control resource. It
 offers `redirect` for an occurrence while exactly one attempt of the occurrence
 runs, no dispatch window is open and the occurrence intent is not `effect`. The

@@ -296,6 +296,18 @@ run until it is cancelled.
 | `safety.cancel-to-cancelled-ms` | at most 10000 | ms | The five-second worker write deadline and one five-second read. |
 | `safety.manager-rss-peak-bytes` | at most 272629760 | bytes | B + 2 H, where H is one supervised worker of 2097152 bytes. |
 
+The safety path holds only while the Store can write. The separate safety
+counter and the ledger reserve admit a cancel when ordinary commands refuse
+with `rate-limit` or `storage-quota`. They do not admit a cancel after a disk
+write failure. The first definite write failure, such as `EFBIG` under a
+file-size limit, stops the Store for the rest of the lifetime, and every
+later command and read of that lifetime refuses with 503
+`storage-unavailable`, a whole-run cancel and a withdrawal included, until a
+restart. The [disk and I/O failure](#disk-and-io-failure) workload shows this
+behavior for `GET /v1/capabilities` and for the withdrawal of a queued
+request, and [STORAGE.md](STORAGE.md#internal-transactions-and-bounds) states
+it for every command and read.
+
 ## Drafts
 
 The configuration sets `drafts` to 4 and `globalDrafts` to 10 and installs

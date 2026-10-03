@@ -741,6 +741,51 @@ discard, `control` for answer, retry and every run control, and `observe` and
 shows the approval notice `Approval did not start: this credential lacks
 SCOPE.`, and the approval hint is absent.
 
+The local administration operations of the
+[operator runbook](../manager/OPERATIONS.md) reach the frontend only through
+the answers of the manager. The frontend shows no drain or shutdown state of
+its own.
+
+- Drain. Reads and the event stream keep serving, so every view stays
+  current, and the runs that started continue. A request can still be
+  created. An enqueue, an input change, a withdrawal, and the approval or
+  discard of a review receive 503 `storage-unavailable`. The lane decides
+  every declared send failure other than 412 `stale-revision` as uncertain,
+  so the command stays unresolved with its original pending command. The
+  notice states `Outcome unresolved:` with the refusal, the status line
+  states `no automatic resend`, and only `x` and `y` send the command again.
+  While the command is unresolved, every other mutation key, an answer and a
+  run control included, shows `OPERATION did not start: a command is in
+  progress or unresolved.` A resend during the drain receives the same
+  refusal. Quitting with `q` and starting the frontend again gives a session
+  with no retained command, in which answers and run controls work during
+  the drain.
+- Shutdown. The reads fail with `TransportUnavailable`, so the header shows
+  `manager unreachable since HH:MM:SSZ`, every observation is shown as stale
+  and nothing is sent, as stated above. When the manager starts again on the
+  same root, the credential stays valid and the first read that reaches the
+  manager ends the state. A run that the shutdown cancelled reads with the
+  supervision `lost`.
+- Restore. A restoration revokes every restored credential and gives the
+  Store a new authority epoch. The first read with the earlier credential
+  receives 401, and the frontend enters the credential-refused state above.
+  `g` cannot end that state, because the credential stays revoked. The
+  operator issues a new credential and writes a client profile that holds
+  it. The user then starts the frontend again with that profile, or switches
+  to it with `E`. The new session reads the restored state. The identity row
+  shows the leading characters of the new authority epoch, and the work after the backup is absent.
+  The procedure of the runbook asks each client to create new requests for
+  such work. Each new request needs a new exact approval.
+
+The SSE reconnection rule of the protocol document applies to the event
+worker. A refusal of the stream with 429 `storage-quota`, for example when a
+subscription of a dropped connection still counts, is transient. The worker
+keeps its cursor, polls every second from it, and connects the stream again
+after its backoff, as the description of the event worker above states. It
+takes no new snapshot because of this refusal. The
+[protocol document](../doc/api/README.md#stream-reconnection-after-a-429-refusal)
+states the rule for every client.
+
 `Agentic.Tui.ServiceLane` owns the read ticket, the one command lane, the
 internal-fault flag, the resend confirmation and the credential-refusal flag. Every read of the manager
 passes through that single-flight lane. One composite read covers the selected
