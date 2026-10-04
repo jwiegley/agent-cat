@@ -29,7 +29,7 @@ import Agentic.Runtime
    Envelope (..), RuntimeEvent (..), SeqNo, checkSequence, decodeEnvelopeFor,
    Control, encodeControlFor, decodeControlFor)
 import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (async, withAsync, waitCatch, race, concurrently_)
+import Control.Concurrent.Async (async, withAsync, waitCatch, race, concurrently)
 import Control.Concurrent.MVar (MVar, newMVar, tryTakeMVar, putMVar)
 import Control.Concurrent.STM
   (STM, TVar, TMVar, TBQueue, throwSTM, atomically, newTVarIO, readTVar, writeTVar, modifyTVar',
@@ -155,7 +155,7 @@ withStartingFrontendWorker store profile revision setup action = mask $ \restore
         errors <- maybe (throwIO WorkerUnavailable) pure (groupErrors group)
         mapM_ (`hSetBinaryMode` True) [input,output,errors]
         atomically (writeTVar (inputPipe worker) (Just input))
-        (concurrently_
+        runFailed <- (snd <$> concurrently
           (drainErrors worker errors)
           (do
             writeFrame WorkerWriteFailed input bytes
@@ -170,7 +170,10 @@ withStartingFrontendWorker store profile revision setup action = mask $ \restore
                 closed <- readTVar(released worker)
                 unless closed(writeTVar(phase worker)WorkerExited))
         exit <- waitProcessGroup group
-        unless (exit == ExitSuccess) (throwIO WorkerUnexpectedExit)
+        -- The runner exits with a nonzero status after the terminal event of
+        -- a failed or cancelled run. That exit is the outcome of the run,
+        -- which the run log records with its cause, and not a worker failure.
+        unless (exit == ExitSuccess || runFailed) (throwIO WorkerUnexpectedExit)
         pure exit
     launch worker owner initial =
       availableCatalogue $ \_ _ catalogues -> do
@@ -249,7 +252,9 @@ readPrepared version handle = do
       reply <- either (const (throwIO WorkerPreparedDecode)) pure (decodeFrontendPreparedFor version bytes)
       pure (reply, rest)
 
-readEvents :: FrontendWorker -> Handle -> FrontendPrepared -> Maybe Envelope -> Bool -> IO ()
+-- | Read the runtime events of the worker to the end of its output. The
+-- result states whether the last event ended the run as failed or cancelled.
+readEvents :: FrontendWorker -> Handle -> FrontendPrepared -> Maybe Envelope -> Bool -> IO Bool
 readEvents worker handle reply previous terminal = loop BS.empty previous terminal
   where
     loop buffered lastEnvelope ended = do
@@ -258,6 +263,7 @@ readEvents worker handle reply previous terminal = loop BS.empty previous termin
         Nothing -> do
           state <- atomically (readTVar (phase worker))
           unless (ended || (state == WorkerDiscardSent && lastEnvelope == Nothing)) (throwIO WorkerUnexpectedExit)
+          pure (ended && maybe False (unsuccessful . envelopeEvent) lastEnvelope)
         Just (bytes, rest) -> do
           validUtf8 WorkerRuntimeDecode bytes
           version <- atomically (readTVar (sessionVersion worker))
@@ -282,6 +288,10 @@ readEvents worker handle reply previous terminal = loop BS.empty previous termin
     terminalEvent event = case event of
       RunCompleted {} -> True
       RunCompletedV2 {} -> True
+      RunFailed {} -> True
+      RunCancelled {} -> True
+      _ -> False
+    unsuccessful event = case event of
       RunFailed {} -> True
       RunCancelled {} -> True
       _ -> False

@@ -21838,6 +21838,13 @@ for iteration in range(2):
                                     saved_path = work / "journey-saved-result.bin"
                                     assert not os.path.lexists(saved_path), "the fresh save path exists before the save"
                                     save_through_tui(saved_path, "Saved the verified " + str(size) + " bytes to " + str(saved_path), "save")
+                                    # The same frame states the save on the status line. The PTY can
+                                    # deliver that row after the result line, so the check pumps briefly.
+                                    status_deadline = time.monotonic() + 5
+                                    while "saved verified final result to " not in session.screen.text():
+                                        assert time.monotonic() < status_deadline, (
+                                            "JOURNEY-ASSERT the status line does not confirm the save", session.screen.text())
+                                        session.pump()
                                     saved = saved_path.read_bytes()
                                     saved_status = os.lstat(saved_path)
                                     assert stat.S_ISREG(saved_status.st_mode) and stat.S_IMODE(saved_status.st_mode) == 0o600, (
@@ -21848,7 +21855,8 @@ for iteration in range(2):
                                     (work / "journey-independent-download.bin").write_bytes(downloaded)
                                     assert saved == downloaded, "JOURNEY-ASSERT saved bytes differ from the verified download"
                                     print("PASS actual TUI saved the verified", size, "bytes to a fresh absolute path with mode 0600; they equal an independent",
-                                          "read-only GET download and the outputs size and SHA-256", artifact["sha256"], flush=True)
+                                          "read-only GET download and the outputs size and SHA-256", artifact["sha256"],
+                                          "and the status line confirmed the save", flush=True)
 
                                     # Single-command evidence: the command.changed events since the cursor
                                     # read before the session name every command of the journey. Each

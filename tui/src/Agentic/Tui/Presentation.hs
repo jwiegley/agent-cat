@@ -551,7 +551,7 @@ layerView presentation width _ mainHeight
       dialog width mainHeight " Confirm exact resend " (vBox (map displayTextWrap
         [ "Resend the retained " <> operation <> " attempt?", uri,
           "The original body, idempotency key and If-Match stay unchanged.",
-          "Its previous outcome may be uncertain. No fresh attempt is created.", "y RESEND EXACT ATTEMPT   n BACK" ]))
+          "Its previous outcome may be uncertain. No fresh attempt is created.", "y RESEND EXACT ATTEMPT   n/q/Esc BACK" ]))
   | Just (title, rows) <- presentationServiceConfirm presentation =
       dialog width mainHeight title (vBox (map displayTextWrap rows))
 layerView presentation width totalHeight mainHeight = case presentationLayer presentation of
@@ -1340,7 +1340,8 @@ keyHelpLines presentation = case modelScreen model of
     <> ["g refreshes observations", "Esc returns to the manager overview", "E manager endpoints", "q detaches without cancelling the manager run"]
   ServiceReviewScreen {} -> ["y approves the exact visible selectors" | not faulted]
     <> ["X discards the review after a confirmation" | not faulted]
-    <> ["Enter does not approve", "d toggles complete review details", "Up/Down scroll details", "q detaches"]
+    <> ["Enter does not approve", "d toggles complete review details", "Up/Down scroll details",
+        "q, or Esc in the summary, detaches; the review stays open at the manager"]
   ServiceCommandScreen _ -> ["g refreshes observations without sending a mutation"]
     <> ["x requests confirmation of an exact resend" | Just (_,_,True) <- [presentationServiceMutation presentation]] <> ["q detaches"]
   InitialLoading -> ["q or Esc      cancel discovery and quit", "? or Esc      close this help"]
@@ -1486,7 +1487,7 @@ billText snapshot = case (snapshotBillFresh snapshot, snapshotBillMemo snapshot)
 
 footerItems :: Presentation -> Int -> Int -> [Text]
 footerItems presentation width height
-  | Just _ <- presentationServiceConfirm presentation = ["y CONFIRM", "n/Esc BACK", "q DETACH"]
+  | Just _ <- presentationServiceConfirm presentation = ["y CONFIRM", "n/q/Esc BACK"]
   | otherwise = case presentationLayer presentation of
   EndpointsLayer -> ["Up/Down SELECT", "Enter CONNECT", "Esc BACK", "q DETACH"]
   KeyHelpLayer -> ["Esc CLOSE", "Up/Down SCROLL", "PgUp/PgDn", "Home/End"]
@@ -1551,7 +1552,7 @@ footerItems presentation width height
         (if not (presentationServiceApprovalOffered presentation) then []
          else if compact then ["y APPROVE EXACT REVIEW"]
          else ["y APPROVE EXACT REVIEW AND RUN", "Enter DOES NOT APPROVE"])
-        <> (if presentationExactDetails presentation then ["d SUMMARY", "Esc BACK"] else ["d EXACT DETAILS"]) <> ["q DETACH"]
+        <> (if presentationExactDetails presentation then ["d SUMMARY", "Esc BACK", "q DETACH"] else ["d EXACT DETAILS", "q/Esc DETACH"])
         <> ["X DISCARD" | presentationServiceMutation presentation == Nothing, not (serviceMutationsStopped presentation)]
         <> ["RESIZE TO REVIEW" | not (serviceReviewAllowed preparation tag (width,height))]
       ServiceCommandScreen _ -> ["g REFRESH", "q DETACH"] <>

@@ -3930,8 +3930,8 @@ Every manager command is sent once.  The client retains the original pending
 command and its receipt location, and it never rebuilds or retargets them.
 When the effect of a send is uncertain, the frontend states that it made no
 automatic resend.  If the manager offers an exact resend, @kbd{x} opens a
-confirmation, @kbd{y} sends the retained command again unchanged, and @kbd{n}
-or @key{ESC} closes the confirmation without a send.  The frontend never repeats
+confirmation, @kbd{y} sends the retained command again unchanged, and @kbd{n},
+@kbd{q} or @key{ESC} closes the confirmation without a send.  The frontend never repeats
 an uncertain send without that confirmation.  When a read of the receipt
 location reports the command @code{refused} or @code{unresolved}, for example
 an approval or an answer whose dispatch a manager restart left unresolved, the
@@ -3962,7 +3962,9 @@ read of single resources cancels that read, and its mutation starts.
 
 Exiting the frontend with @kbd{C-c}, or with @kbd{q} while no answer editor and
 no confirmation has the keys, closes its transport without cancelling manager-owned work.  The run
-continues in the manager.  Service mode starts no child process, so no process
+continues in the manager.  @key{ESC} in the summary view of the exact review
+exits in the same way.  It approves nothing and discards nothing, and the
+review stays open at the manager.  Service mode starts no child process, so no process
 of the frontend remains after the exit.
 
 On the exact review, only @kbd{y} in the summary view approves, and while the
@@ -4045,8 +4047,10 @@ the new file has mode 0600.  A path that is not one absolute single-line file
 path, an existing entry at the destination, including a symbolic link, and any
 other input or output failure are refused.  The dialog then stays open with a
 fixed message and the path, and the destination is left as it was.  A
-successful save closes the dialog and adds a result line with the saved size
-and the path.  The save publishes a private file with a hard link, so the
+successful save closes the dialog, adds a result line with the saved size
+and the path, and states @samp{saved verified final result to} and the path
+on the status line, as local mode does, until the next read of the run.  The
+save publishes a private file with a hard link, so the
 destination file system must support hard links.  When the private file cannot
 be removed after the link, the save succeeds, and the result line names the
 private file that remains.

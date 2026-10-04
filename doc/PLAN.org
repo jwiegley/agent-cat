@@ -4742,7 +4742,7 @@ Report: fess/b2-C15-r1.md in the private evidence directory.
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-30 Wed 15:32]
-:MODIFIED: [2026-09-30 Wed 15:32]
+:MODIFIED: [2026-10-04 Sun 08:52]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -4792,6 +4792,20 @@ when a fixture with an open dispatch is available.
 8. (low) manager/test/service_http.py (about lines 3911-3932). The act helper repeats the
 head-decision driving logic of the mixed driver (about lines 597-621). Fix: factor out one shared
 driver if a third copy appears.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 810,
+    "issue_id": "acat-c16-controls-fess-findings-7xop",
+    "author": "johnw",
+    "text": "PO2 resolves item 2: Worker.hs readEvents now reports whether the last event was RunFailed or RunCancelled, and a nonzero runner exit after that event is accepted as the run outcome, not WorkerUnexpectedExit. A nonzero exit after any other event still raises WorkerUnexpectedExit. manager/WORKERS.md and manager/OPERATIONS.md state this. Evidence PO/PO2/impl-r1 (keys.py case 4, profile with a missing adapter): no StorageUnavailable fault line; before state in RD/walkthrough-2/manager-faults.log. No committed assertion on server-0.stderr was added (tracked in acat-po2-paper-cut-fess-vs16). Items 1, 3 and later remain open.",
+    "created_at": "2026-10-04T15:52:31Z"
+  }
+]
+#+end_src
 
 * TODO [#D] Resolve C17 fess findings in the routing controls
 :PROPERTIES:
@@ -15303,6 +15317,33 @@ scale n (scale 0 f) = bounded n while scale (n*0) f = bounded 0: the composite o
 ]
 #+end_src
 
+* TODO [#D] PO2 follow-up: paper-cut audit notes
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-po2-paper-cut-fess-vs16
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 08:52]
+:MODIFIED: [2026-10-04 Sun 08:52]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/po-PO2-r1.md on readiness subtask PO2 (the five agent-cat paper cuts from the walkthrough), with the implementer's disclosed limitations.
+
+1. Medium (operator decision). Item 5 was reinterpreted. The requirement asked that the recorded fault name the missing adapter. The fix records no fault: manager/src/Agentic/Manager/Worker.hs now accepts a nonzero runner exit after a terminal RunFailed or RunCancelled event. The private fault log holds no exception text by design, so the adapter is named only in the run log (flow output) and on the client run views. The misleading "WorkerUnexpectedExit erased=command StorageUnavailable" line is gone. Ask the operator to accept "no fault line for a failed run".
+2. Low (operator decision). Esc on the TUI exact-review summary now exits the TUI (detach), as the requirement literally says. Esc elsewhere in service mode goes back one level, and the local-mode review uses n/Esc BACK. A stray Esc ends the session, though the review stays open at the manager. Ask whether "leave the review" meant detach or go back.
+3. Low. No committed test covers the changed key handling (Esc detach on the review summary, q closing the resend confirmation) or the worker accepting a nonzero exit after RunFailed. tui-model-test cannot reach App.hs key handling, and the journey run succeeds. The behavior is shown only by the uncommitted evidence script keys.py.
+4. Low. doc/getting-started.md step 6 (about lines 224-226) does not say that the next read of the run replaces the "saved verified final result to" status line within about five seconds, which tui/README.md and doc/agent-cat.texi do say. Add that the result line "Saved the verified N bytes to PATH" keeps the confirmation.
+5. Low. tui/src/Agentic/Tui/Presentation.hs:1344: the key-help text "q, or Esc in the summary, detaches; the review stays open at the manager" contains a semicolon. Split it into two key-help lines.
+6. Low. Worker.hs: the helper unsuccessful repeats two cases of terminalEvent. Fold it in.
+7. Low. The repository .gitignore ignores only /result. result-* is ignored only by the operator's global ignore file. nix build .#agentic-run creates only result, so the requirement is met.
+8. Observation. The run failure text in the run log carries a GHC HasCallStack backtrace after the adapter message, because runMachineWith in cli/src/Agentic/Cli.hs uses displayException on SomeException.
+9. Observation. After an operator-confirmed exact resend of a create, the first Enter on the new draft was sometimes ignored, with no key outcome. The cause was not investigated.
+10. Limitation. The worker fix was not shown failing in this run. The failing state is the walkthrough-2 evidence RD/walkthrough-2/manager-faults.log. ALLBUILD, JOURNEY at N1, and the Pi and Emacs suites were not run (untouched).
+
 * DONE [#C] DSL: a diagnosis inside a library carets the program's text — Pos has no module field
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -16259,7 +16300,7 @@ Evidence: resume-20260923/RD/R7/impl-r1 (r7-guide NN-*.log and .exit, every non-
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-04 Sun 03:54]
-:MODIFIED: [2026-10-04 Sun 03:54]
+:MODIFIED: [2026-10-04 Sun 08:52]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -16278,6 +16319,20 @@ Non-blocking findings of fess audit fess/rd-RW-r1.md on readiness subtask RW (ge
 8. Low (scope note). The RW change also fixed an emacs-service harness that R4 left stale (agent-workflows ci/emacs-ui.py and manager/test/service_http.py). The R4 evidence therefore did not cover emacs-service.
 9. Limitation. A fresh checkout with no ext-pi/node_modules has no documented way to create it except a copy from an existing checkout.
 10. Limitation. The new TUI journey q step was not shown failing before the fix. ALLBUILD was not run after the AcpConfig field addition.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 809,
+    "issue_id": "acat-rd-rw-fess-followup-brdl",
+    "author": "johnw",
+    "text": "PO2 resolves item 1: q on the TUI exact-resend confirmation now closes it as n and Esc do (App.hs), the dialog reads 'y RESEND EXACT ATTEMPT   n/q/Esc BACK', and the discard, withdraw and cancel footer reads 'y CONFIRM   n/q/Esc BACK'. Evidence PO/PO2/impl-r1: build exit 0, tui-model-test N8 exit 0, keys.py PTY PASS (q closed the resend confirmation with the manager paused by SIGSTOP), JOURNEY-ONCE(po2,8) exit 0, make -C doc check exit 0. Items 2-10 remain open.",
+    "created_at": "2026-10-04T15:52:31Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Move the supported Pi host to fork 1.0.1 (needs authorization)
 :PROPERTIES:

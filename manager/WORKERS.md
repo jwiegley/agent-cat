@@ -187,6 +187,15 @@ lineage and quarantine counts treat the run as before. The tui-journey mode
 of `manager/test/service_http.py` checks the run and control views after the
 worker of the finished run exits.
 
+The runner exits with a nonzero status after the terminal event of a failed
+or cancelled run, for example a run whose adapter is not installed. The
+worker accepts that exit after a terminal `RunFailed` or `RunCancelled`
+event (`readEvents` in `Agentic.Manager.Worker`), because it is the outcome
+of the run and not a worker failure. The manager records no fault for it,
+and the run log keeps the cause that the clients show, such as `no adapter
+'claude-agent-acp'`. A nonzero exit after any other last event remains
+`WorkerUnexpectedExit`.
+
 ## Run directory owner lock
 
 When the inner frontend worker starts a run, it creates `runs/<run>/owner.lock`

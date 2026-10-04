@@ -1241,6 +1241,14 @@ laneTests render row profile = do
   check "declared uncertainty control render offers the exact resend and names no fault"
     ("x EXACT RESEND" `T.isInfixOf` declaredFrame && "x requests an exact resend" `T.isInfixOf` declaredFrame
       && not ("nternal frontend fault" `T.isInfixOf` declaredFrame))
+  -- n, q and Esc close every confirmation, and no confirmation offers q DETACH.
+  let resendFrame = render (100,30) (lanePresentation (maybe "" id (L.unresolvedNotice declaredLane)) declaredLane {L.laneResendConfirm = True})
+      discardFrame = render (100,30) (lanePresentation "notice" declaredLane)
+        {presentationServiceConfirm = Just (L.confirmationLines (L.ConfirmDiscard "preparation_1"))}
+  check "the exact resend confirmation states that n, q and Esc go back"
+    ("Confirm exact resend" `T.isInfixOf` resendFrame && "y RESEND EXACT ATTEMPT   n/q/Esc BACK" `T.isInfixOf` resendFrame)
+  check "the footer of a discard confirmation states that n, q and Esc go back and offers no detach"
+    ("Confirm discard" `T.isInfixOf` discardFrame && "n/q/Esc BACK" `T.isInfixOf` discardFrame && not ("q DETACH" `T.isInfixOf` discardFrame))
 
 -- | Model and fixed-size render tests for the composite read of the selected
 -- request, the retention of the last complete observation, the receipt rules
@@ -2659,7 +2667,7 @@ reviewFitTests render profile row request issued tag = do
       shownInFull preparation =
         let shown = frame preparation
          in all (`T.isInfixOf` shown) (concatMap (wrapDisplayLines (serviceSummaryWidth 80)) (A.noticeLine longest : serviceReviewRows preparation tag))
-              && all (`T.isInfixOf` shown) ["Approve exact manager review", "y APPROVE EXACT REVIEW AND RUN", "Enter DOES NOT APPROVE"]
+              && all (`T.isInfixOf` shown) ["Approve exact manager review", "y APPROVE EXACT REVIEW AND RUN", "Enter DOES NOT APPROVE", "q/Esc DETACH"]
               && not ("RESIZE TO REVIEW" `T.isInfixOf` shown)
   mapM_ (\(name, (_, _, preparation)) -> putStrLn ("RENDER " <> name <> " with the longest notice at (80,24):")
       >> putStr (T.unpack (frame preparation))) cases

@@ -51,6 +51,9 @@ nix build .#agentic-run
 export PATH="$PWD/result/bin:$PATH"
 ```
 
+`nix build` leaves the link `result` in the root of the checkout, and Git
+ignores that link.
+
 To run one command with no installation and no change of `PATH`, put the
 arguments of the runner after `--`:
 
@@ -211,14 +214,16 @@ The TUI opens on the Manager profiles list, with the endpoint
    phase `draft`.
 3. Press `Enter` to request the review. The manager prepares the exact
    review, and the TUI shows `Approve exact manager review`. `d` shows its
-   details, and `Esc` returns.
+   details, and `Esc` returns. In the summary, `Esc` detaches as `q` does,
+   and the review stays open at the manager.
 4. Press `y` to approve the review and start the run. Only `y` approves.
    `Enter` does not approve, and `X` discards the review.
 5. The live monitor shows each request. When the run ends, it shows
    `Terminal: succeeded` and `Result: verified`.
 6. Press `s`, type the path of a new file, for example
    `/Users/NAME/hello-result.json`, and press `Ctrl-D`. The TUI writes the
-   verified result bytes to that file with mode 0600.
+   verified result bytes to that file with mode 0600, and the status line
+   states `saved verified final result to` and the path.
 7. Press `q`. The TUI detaches and exits with status 0. The manager keeps the run, and
    `H` in the workflow browser lists it in History.
 
@@ -368,7 +373,10 @@ by the account name:
 
 `targetArguments` also accepts `--model ID` and `--effort LEVEL`. Load the
 profile with `reload-profiles` and give a client a credential that names it
-with `add-client --profile claude`, as section 6 states.
+with `add-client --profile claude`, as section 6 states. When the `PATH` of
+the profile does not hold the adapter, an approved run fails at its start.
+The live monitor then shows `Run failed` and the message `no adapter
+'claude-agent-acp'`, and the fault log of the manager gets no line for it.
 [`manager/CONFIGURATION.md`](../manager/CONFIGURATION.md#a-profile-for-a-real-engine)
 also shows a profile that routes through the routing file.
 

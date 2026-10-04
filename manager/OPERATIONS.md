@@ -314,6 +314,10 @@ same line with `public=503 storage-unavailable class=unexpected
 InvalidRequest`. The response had started, and the line records only that
 the stream ended early. It needs no action.
 
+A run that fails, for example because the `PATH` of its profile does not
+hold its adapter, adds no line. The run log records the failure with its
+cause, `flow` prints it, and the clients show it on the run.
+
 ### HTTP reads
 
 `GET /v1/capabilities` with a current bearer answers 200 and reports the

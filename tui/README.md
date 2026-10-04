@@ -23,7 +23,7 @@ profile names. These keys cover daily use:
 | Show the result | `r` | The live monitor shows it when the run ends |
 | Save the result | `s`, a new file path, then `Ctrl-D` | `s`, a new file path, then `Ctrl-D` |
 | Return | `Esc` | `Esc` |
-| Quit | `q` on the browser | `q`, which detaches. The runs continue at the manager. In an open confirmation, `q` closes the confirmation as `n` does. |
+| Quit | `q` on the browser | `q`, which detaches. On the review summary, `Esc` also detaches. The runs and the open reviews continue at the manager. In an open confirmation, `q` closes the confirmation as `n` does. |
 
 `?` lists the keys of the current screen. The sections below describe each
 mode in full.
@@ -120,7 +120,10 @@ earlier blocked producer. Filter, input, person, steering, and save editors reta
 separate drafts when a mandatory layer preempts another editor. `r` shows a verified
 result on demand. `s` copies it to a new mode-0600 file through an explicit path
 prompt. In service mode, `s` saves the retained verified result bytes of the
-run in the same way, and a refusal shows a fixed message with the path. Save
+run in the same way, and a refusal shows a fixed message with the path. In
+both modes the status line then states `saved verified final result to` and
+the path. In service mode the next read of the run replaces that status, and
+the result line `Saved the verified` keeps the size and the path. Save
 errors are scrollable with `PgUp` and `PgDn`. Steering uses a bounded
 editor beneath the run view so that the output remains visible during composition.
 
@@ -863,7 +866,8 @@ paused instead of `Observation: current`.
 Every command is sent once. The lane retains the original pending command and
 receipt location. An uncertain send is never repeated automatically. When the
 manager offers an exact resend, `x` opens a confirmation and `y` sends the
-retained command unchanged. When the receipt read of a retained command
+retained command unchanged. `n`, `q` or `Esc` closes that confirmation and
+sends nothing. When the receipt read of a retained command
 reports `refused` or `unresolved`, for example for an approval or an answer
 whose dispatch a manager restart left unresolved, the lane keeps the original
 pending command and receipt location, and the notice states the receipt state
@@ -1011,7 +1015,9 @@ rows it starts with `y APPROVE EXACT REVIEW` only. `d` in the footer opens the
 complete exact review, which keeps its frame. It also states the effects that
 the catalogue declares for the workflow and each reviewed input with its
 source and byte count. Its footer offers `d SUMMARY` and `Esc BACK`, and both
-keys return to the summary. `serviceReviewAllowed` reserves
+keys return to the summary. In the summary, the footer offers `q/Esc DETACH`:
+`Esc` detaches as `q` does, approves nothing, discards nothing and leaves the
+review open at the manager. `serviceReviewAllowed` reserves
 the rows of the longest approval-key notice and permits approval only when
 every row fits. With the identifiers that the manager issues, a review
 without lineage, a restart or resume review, a fork review with one

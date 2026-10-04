@@ -2015,6 +2015,9 @@ handleServiceEventCore client event = do
       -- An open confirmation of a withdrawal, a discard or a cancel takes the
       -- keys, q included.
       | Just confirmation <- stateServiceConfirm state -> handleServiceConfirm client confirmation key modifiers
+      -- q in the confirmation of an exact resend closes it as n does.
+      | key == Vty.KChar 'q' && null modifiers && serviceResendConfirm state ->
+          put (onLane (\lane -> lane {Lane.laneResendConfirm = False}) state)
       | key == Vty.KChar 'q' && null modifiers -> halt
       | key == Vty.KChar '?' && null modifiers && not (serviceResendConfirm state) -> put state {stateKeyHelp = not (stateKeyHelp state)}
       -- Under the key help, an approval key on the review still has one
@@ -2042,6 +2045,9 @@ handleServiceEventCore client event = do
           Vty.KEsc -> put (onLane (\lane -> lane {Lane.laneResendConfirm = False}) state)
           _ | Just (operation,start) <- serviceNewMutationKey state key modifiers -> serviceMutationKey operation start
           _ -> pure ()
+      -- Esc on the review summary detaches as q does. It neither approves
+      -- nor discards, and the review stays open at the manager.
+      | key == Vty.KEsc && null modifiers, ServiceReviewScreen {} <- modelScreen (stateModel state), not (stateConfirmDetails state) -> halt
       -- Every approval-key press on the review has exactly one visible
       -- outcome, whatever the command and read lanes hold.
       | Just press <- Approval.reviewApprovalKey (modelScreen (stateModel state)) key modifiers -> handleApprovalKey client press
@@ -3421,7 +3427,8 @@ saveFinalResult = do
 
 -- | Publish the retained verified result bytes of the installed run exactly
 -- through 'saveExact'. A refusal keeps the dialog open with its fixed
--- message, and the destination stays as it was.
+-- message, and the destination stays as it was. A save shows the saved
+-- confirmation of local mode on the status line.
 saveServiceResult :: Text -> EventM Name AppState ()
 saveServiceResult pathText = do
   state <- get
@@ -3432,7 +3439,8 @@ saveServiceResult pathText = do
       case outcome of
         Left refusal -> put state {stateSaveError = Just (serviceSaveRefusal pathText refusal)}
         Right saved -> put state {stateSaveResult = False, stateSaveError = Nothing,
-          stateServiceSaved = Just (run, serviceSavedLine pathText (BS.length (Service.verifiedBytes result)) saved)}
+          stateServiceSaved = Just (run, serviceSavedLine pathText (BS.length (Service.verifiedBytes result)) saved),
+          stateModel = (stateModel state) {modelStatus = savedStatus pathText saved}}
 
 saveLocalResult :: Text -> EventM Name AppState ()
 saveLocalResult pathText = do
@@ -3448,9 +3456,13 @@ saveLocalResult pathText = do
             state
               { stateSaveResult = False,
                 stateSaveError = Nothing,
-                stateModel = (stateModel state) {modelStatus = "saved verified final result to " <> pathText <> savedLeftoverNote saved}
+                stateModel = (stateModel state) {modelStatus = savedStatus pathText saved}
               }
     _ -> put state {stateSaveError = Just "verified final result is not available"}
+
+-- | The status line after a save in either mode.
+savedStatus :: Text -> Saved -> Text
+savedStatus pathText saved = "saved verified final result to " <> pathText <> savedLeftoverNote saved
 
 -- | Publish the verified final JSON result and a final LF exclusively
 -- through 'saveExact'.

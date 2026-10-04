@@ -3,3 +3,4 @@
 ext-pi/node_modules/
 doc/build/
 dist-newstyle/
+/result
