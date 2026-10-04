@@ -15344,6 +15344,27 @@ Non-blocking findings of fess audit fess/po-PO2-r1.md on readiness subtask PO2 (
 9. Observation. After an operator-confirmed exact resend of a create, the first Enter on the new draft was sometimes ignored, with no key outcome. The cause was not investigated.
 10. Limitation. The worker fix was not shown failing in this run. The failing state is the walkthrough-2 evidence RD/walkthrough-2/manager-faults.log. ALLBUILD, JOURNEY at N1, and the Pi and Emacs suites were not run (untouched).
 
+* TODO [#D] PO3 follow-up: Emacs review admission audit notes
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-po3-emacs-admission-fess-o40u
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 08:59]
+:MODIFIED: [2026-10-04 Sun 08:59]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/po-PO3-r1.md on readiness subtask PO3 (Emacs review buffer without stale admission lines, agent-workflows emacs-native), with the implementer's disclosed limitations.
+
+1. Low. emacs/wf-manager-tests.el:3204-3205: the stub for wf-service--read-draft returns the draft the review already holds. The test proves that the stored wait lines are cleared and the current admission line is drawn, but not that the draft from the new read replaces the old one. Fix: have the stub return a draft with a different admission state and check that the new state appears in the buffer.
+2. Low. emacs/wf-service.el:1121-1124: the approve command can be accepted while wf-service--await-run or the draft read that follows it fails. The setf then never runs, and the old admission lines stay until the operator presses g. Handle it with item 3 of acat-rd-rw-fess-followup-brdl (a failed read after the run starts hides the run view).
+3. Low. README.md:1097-1098 has an 89-character line and ci/emacs.sh:56 an 82-character comment line. Rewrap both to the width of the lines around them.
+4. Limitation. The emacs-service live mode does not check the review text after approval. Only the ERT test checks the current-admission-only behavior after a refresh and after an approval.
+
 * DONE [#C] DSL: a diagnosis inside a library carets the program's text — Pos has no module field
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -16300,7 +16321,7 @@ Evidence: resume-20260923/RD/R7/impl-r1 (r7-guide NN-*.log and .exit, every non-
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-04 Sun 03:54]
-:MODIFIED: [2026-10-04 Sun 08:52]
+:MODIFIED: [2026-10-04 Sun 08:59]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -16330,6 +16351,13 @@ Non-blocking findings of fess audit fess/rd-RW-r1.md on readiness subtask RW (ge
     "author": "johnw",
     "text": "PO2 resolves item 1: q on the TUI exact-resend confirmation now closes it as n and Esc do (App.hs), the dialog reads 'y RESEND EXACT ATTEMPT   n/q/Esc BACK', and the discard, withdraw and cancel footer reads 'y CONFIRM   n/q/Esc BACK'. Evidence PO/PO2/impl-r1: build exit 0, tui-model-test N8 exit 0, keys.py PTY PASS (q closed the resend confirmation with the manager paused by SIGSTOP), JOURNEY-ONCE(po2,8) exit 0, make -C doc check exit 0. Items 2-10 remain open.",
     "created_at": "2026-10-04T15:52:31Z"
+  },
+  {
+    "id": 811,
+    "issue_id": "acat-rd-rw-fess-followup-brdl",
+    "author": "johnw",
+    "text": "PO3 resolves item 2 (agent-workflows emacs-native, emacs/wf-service.el): wf-service-review-text prints the Admission: block only while stored lines exist, and wf-service-review-refresh and the run step of wf-service-review-approve clear the stored lines when they read the request again, so the review buffer shows only the current admission after approval or g. New ERT test wf-service-review-shows-the-current-admission-after-a-change runs the real refresh and approve commands and failed before the fix (ert-before-fix.log). Evidence PO/PO3/impl-r1: ci/emacs.sh exit 0 (byte compilation and checkdoc clean for 6 files, smoke 38/38, transport 104/104), emacs-service at N8 exit 0 (steps 1-9). Fess po-PO3-r1 non-blocking; notes in acat-po3-emacs-admission-fess-o40u. Items 1 and 2 are now resolved by PO2 and PO3; items 3 to 10 remain open.",
+    "created_at": "2026-10-04T15:59:22Z"
   }
 ]
 #+end_src
