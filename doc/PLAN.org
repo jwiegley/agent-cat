@@ -16111,6 +16111,65 @@ Evidence: resume-20260923/RD/R5/impl-r1 (tsc exit 0; ext-pi unit tests 222 passe
 ]
 #+end_src
 
+* TODO [#D] Resolve the R6 runner and client messages fess findings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-r6-fess-followup-mbtm
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 02:48]
+:MODIFIED: [2026-10-04 Sun 02:48]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/rd-R6-r1.md on readiness subtask R6 (runner and client messages), with the implementer's disclosed limitations.
+
+1. Medium. cli/test/PolicyProbe.hs:2701-2702: the case "--tui --service with no profile names its usage, not a verb" expects the infix "usage:\n  wf --tui --service ABS_CLIENT_PROFILE", but tuiForms lists "--tui [--local]" first, so the case is False and the policy probe fails when it runs. Expect "usage:\n  wf --tui [--local]\n  wf --tui --service ABS_CLIENT_PROFILE", or test only "\n  wf --tui --service ABS_CLIENT_PROFILE".
+2. Low. cli/src/Agentic/Cli.hs (parseCommand arm ("--tui" : _)): "agentic-run --tui --help" refuses at exit 1, while "--manager --help" prints the usage at exit 0. Add a ["--tui","--help"] arm that prints the tuiForms lines at exit 0.
+3. Low. cli/src/Agentic/Cli.hs rehearsalHint haddock: the comment says a run with an explicit target keeps the refusal unchanged, but an explicit --routing also gets the hint. Reword it.
+4. Low. cli/test/PolicyProbe.hs:2695, 2699, 2700: three cases changed from the "no-verb" label to the generic "refused" label. After item 1, assert the problem sentence of at least one, for example "takes at most eight".
+5. Low. The a7 check left a full build and an isolated Cabal store in the worktree dist-newstyle (now gitignored). Delete it when it is no longer needed.
+6. Low. manager/test/client_native.py and manager/test/service_http.py gained six scenarios beyond the acceptance list. No action required; noted against the 2026-10-03 direction for no excessive testing.
+
+Limitations disclosed by the implementer: a CN-only certificate whose common name equals an IP endpoint host (no subjectAltName) is still accepted by the Haskell client, because crypton-x509-validation 1.9.1 falls back to the common name; refusing it is security hardening and is deferred to the security stage. The Pi extension keeps its own ClientFileUnavailable message (ext-pi/src not changed). cli/ci/examples.sh was not run (its width and help-page checks were covered by the a1 and a5 logs). cli/ci/policies.sh was not run, as the run rules require.
+
+* DONE [#C] Make runner and client messages name their usage and failures
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-r6-runner-messages-r72g
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 02:48]
+:MODIFIED: [2026-10-04 Sun 02:48]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-04 Sun 02:48]
+:CLOSE_REASON: Acceptance met by recorded evidence (RD/R6)
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Readiness subtask R6 of 2026-10-03 (operator direction: functional readiness). Runner and client messages. agentic-run --help lists every command form (--manager serve, admin, init and add-client, --tui --service, --help and --version), every line fits in 80 columns, and the garbled --json, --raw, --route and --adapter entries are repaired. The --manager and --tui lines come from one source each (managerVerbs, managerForm, tuiForms). An incomplete --manager or --tui --service form prints its problem, a usage line for that form, and exits 1. --manager --help prints the manager forms and exits 0. --version prints "agentic-run 0.1.0.0" and exits 0. The no-target refusal of run NAME ends with a hint to rehearse with agentic-run run NAME --scripted. The hello help caveat is accurate, and no help page contains @ markup. In Agentic.Manager.Client and the TUI startup lines, a TLS handshake or certificate failure gets its own line apart from "manager unreachable", and a client file failure names the file role (profile, credential, CA) and the failed rule. No check is weakened. test/cabal.sh defaults CABAL_BUILDDIR to $PWD/dist-newstyle when it is unset, and README.md, doc/agent-cat.texi and tui/README.md state current behavior.
+
+Evidence: resume-20260923/RD/R6/impl-r1 (a1 to a7 acceptance logs, exit 0; ALLBUILD; tui-model-test; client-native-2, 30 PASS; journey-r6-N8 PASS), fess/rd-R6-r1.md (audit, non-blocking).
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 804,
+    "issue_id": "acat-rd-r6-runner-messages-r72g",
+    "author": "johnw",
+    "text": "All acceptance items passed: RD/R6/impl-r1 (a1 --help lists every form with no line wider than 80 and the garbled lines repaired; a2 --version exit 0; a3 form-specific usage at exit 1 for --manager serve, --manager admin and --tui --service; a4 run hello names --scripted; a5 no @ markup and an accurate hello caveat; a6 certificate line for a CN-only certificate, file role and rule for a 0644 profile and a missing credential; a7 env -u CABAL_BUILDDIR build into dist-newstyle; ALLBUILD exit 0; tui-model-test; client-native-2 30 PASS; journey-r6-N8 PASS). The audit fess/rd-R6-r1.md confirmed each item and found nothing blocking. Follow-ups: acat-rd-r6-fess-followup-mbtm.",
+    "created_at": "2026-10-04T09:48:58Z"
+  }
+]
+#+end_src
+
 * DONE [#D] Give the remaining tool "cat" questions honest addressees
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

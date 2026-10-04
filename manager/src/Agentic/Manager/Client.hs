@@ -1,9 +1,11 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
 -- | Endpoint-bound observations and explicit HTTP attempts, never worker ownership.
 module Agentic.Manager.Client
   ( Client, Reference, Observed, PendingCommand, PageSet, pageSetMetadata, pageSetItems, getPageSet, ClientResponse (..), ClientFailure (..),
+    ClientFile (..), FileRule (..),
     connectClient, connectClientProfile, closeClient, clientCapabilities, clientEndpoint, reference, referenceURI,
     getResource, observeResource, observedReference, observedETag, observedValue, prepareObserved,
     pollEvents, pollEventBatch, StreamItem (..), streamEvents, streamEventsWithin, reconnectIdleMilliseconds,
@@ -26,7 +28,7 @@ module Agentic.Manager.Client
 
 import Agentic.Manager.Client.Events
 import Agentic.Manager.Client.Refresh
-import Agentic.Manager.Client.Failure (ClientFailure (..), problemFailure)
+import Agentic.Manager.Client.Failure (ClientFailure (..), ClientFile (..), FileRule (..), problemFailure)
 
 import Agentic.Manager.Protocol.Command
   (validId, validResource, validRevision, encoded, CommandReceipt (..), CommandState, Operation, stateName, operationName,
@@ -37,7 +39,7 @@ import Control.Concurrent.Async (race)
 import Control.Concurrent.STM (TVar, atomically, check, newTVarIO, readTVar, readTVarIO, writeTVar)
 import Control.DeepSeq (NFData, deepseq)
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
-import Control.Exception (Exception, IOException, bracket, bracketOnError, throwIO, try)
+import Control.Exception (Exception, IOException, SomeException, bracket, bracketOnError, fromException, throwIO, try)
 import Control.Monad ((>=>), forM_, guard, unless, when)
 import Crypto.Hash (Digest, SHA256, hash)
 import Crypto.Random (getRandomBytes)
@@ -69,7 +71,10 @@ import qualified Network.HTTP.Client as HTTP
 import Network.HTTP.Client.TLS (mkManagerSettings)
 import qualified Network.HTTP.Types as HTTP
 import qualified Network.TLS as TLS
+import Foreign.C.Error (Errno (Errno), eLOOP)
+import GHC.IO.Exception (IOException (ioe_errno))
 import System.FilePath (isAbsolute)
+import System.IO.Error (isDoesNotExistError)
 import System.IO (hClose)
 import System.Posix.Files (getFdStatus, isRegularFile, fileSize, fileMode, fileOwner, linkCount)
 import System.Posix.IO (OpenFileFlags (nofollow, cloexec, nonBlock), OpenMode (ReadOnly), openFd, closeFd, defaultFileFlags, fdToHandle)
@@ -108,13 +113,13 @@ data ClientResponse = ClientResponse
 -- manager-store access. Normal certificate and hostname validation remain enabled,
 -- and nameConstraintsRefused adds the Name Constraints refusals that it lacks.
 connectClientProfile :: FilePath -> IO (Either ClientFailure Client)
-connectClientProfile path = clientIO $ do
-  bytes <- readClientFile True 16384 path
+connectClientProfile path = connectionIO $ do
+  bytes <- readClientFile ProfileFile path
   value <- either (const (throwIO InvalidClientProfile)) pure (decodeStrictValue bytes)
   (endpoint, credentialPath, caPath) <- either (const (throwIO InvalidClientProfile)) pure
     (parseEither parseClientProfile value)
   base <- checkedEndpoint endpoint
-  caBytes <- readClientFile False 1048576 caPath
+  caBytes <- readClientFile CaFile caPath
   let certificates = readSignedObjectFromMemory caBytes :: [SignedCertificate]
   when (null certificates) (throwIO InvalidClientProfile)
   let defaults = TLS.defaultParamsClient (BC.unpack (HTTP.host base)) ""
@@ -130,7 +135,7 @@ connectClientProfile path = clientIO $ do
           TLS.clientSupported = (TLS.clientSupported defaults) {TLS.supportedVersions = [TLS.TLS13]},
           TLS.clientHooks = hooks {TLS.onServerCertificate = verified} }
   connectClient (mkManagerSettings (TLSSettings parameters) Nothing) endpoint
-    (readClientFile True 512 credentialPath) >>= either throwIO pure
+    (readClientFile CredentialFile credentialPath) >>= either throwIO pure
 
 -- | A certificate refusal that the default validation does not make. tls 2.3.0
 -- turns a synchronous exception from onServerCertificate into a certificate
@@ -202,23 +207,44 @@ validClientPath :: FilePath -> Bool
 validClientPath path = isAbsolute path && BS.length (TE.encodeUtf8 (T.pack path)) <= 4096
   && not (any (`elem` ['\NUL','\n','\r']) path)
 
-readClientFile :: Bool -> Int -> FilePath -> IO BS.ByteString
-readClientFile private limit path = do
+-- | Whether a client file of this role is private, and its size limit in bytes.
+clientFileRules :: ClientFile -> (Bool, Int)
+clientFileRules = \case
+  ProfileFile -> (True, 16384)
+  CredentialFile -> (True, 512)
+  CaFile -> (False, 1048576)
+
+-- | Read one client file of a role, or refuse it with the first rule that it
+-- fails. Every file is a regular file within the limit of its role that no
+-- group or other user can write. A private file is also owned by the effective
+-- user, gives no access to a group or other user, and has one hard link.
+readClientFile :: ClientFile -> FilePath -> IO BS.ByteString
+readClientFile role path = do
   unless (validClientPath path) (throwIO InvalidClientProfile)
   result <- try @IOException $ bracket acquire hClose $ \handle -> do
     bytes <- BS.hGet handle (limit + 1)
-    when (BS.length bytes > limit) (throwIO ClientFileUnavailable)
+    when (BS.length bytes > limit) (refuse FileTooLarge)
     pure bytes
-  either (const (throwIO ClientFileUnavailable)) pure result
+  either (refuse . openFailure) pure result
   where
+    (private, limit) = clientFileRules role
+    refuse = throwIO . ClientFileRefused role
+    openFailure failure
+      | isDoesNotExistError failure = FileMissing
+      | ioe_errno failure == Just (let Errno code = eLOOP in code) = FileSymbolicLink
+      | otherwise = FileUnreadable
     acquire = bracketOnError
       (openFd path ReadOnly defaultFileFlags {nofollow=True,cloexec=True,nonBlock=True}) closeFd $ \descriptor -> do
         status <- getFdStatus descriptor
         uid <- getEffectiveUserID
-        unless (isRegularFile status && fileSize status >= 0 && fileSize status <= fromIntegral limit
-          && fileMode status .&. 0o022 == 0
-          && (not private || (fileOwner status == uid && fileMode status .&. 0o077 == 0 && linkCount status == 1)))
-          (throwIO ClientFileUnavailable)
+        let failed = lookup False
+              [ (isRegularFile status, FileNotRegular),
+                (fileSize status >= 0 && fileSize status <= fromIntegral limit, FileTooLarge),
+                (fileMode status .&. 0o022 == 0, FileWritableByOthers),
+                (not private || fileOwner status == uid, FileNotOwned),
+                (not private || fileMode status .&. 0o077 == 0, FileNotPrivate),
+                (not private || linkCount status == 1, FileMultipleLinks) ]
+        mapM_ refuse failed
         fdToHandle descriptor
 
 checkedEndpoint :: Text -> IO HTTP.Request
@@ -231,7 +257,7 @@ checkedEndpoint endpoint = do
   pure parsed
 
 connectClient :: HTTP.ManagerSettings -> Text -> IO BS.ByteString -> IO (Either ClientFailure Client)
-connectClient settings endpoint credentials = clientIO $ do
+connectClient settings endpoint credentials = connectionIO $ do
   parsed <- checkedEndpoint endpoint
   bearer <- readCredential credentials
   nonce <- getRandomBytes 16 :: IO BS.ByteString
@@ -757,6 +783,39 @@ capabilityEpoch (Object fields) = case KM.lookup "authorityEpoch" fields of Just
 capabilityEpoch _ = ""
 
 clientIO :: IO a -> IO (Either ClientFailure a)
-clientIO action = do
+clientIO = clientIOWith (const TransportUnavailable)
+
+-- | 'clientIO' for the opening of a session, which distinguishes a failed TLS
+-- handshake from an unreachable manager. The handshake precedes every request
+-- byte, so the distinction leaves no request uncertain.
+connectionIO :: IO a -> IO (Either ClientFailure a)
+connectionIO = clientIOWith connectionFailure
+
+clientIOWith :: (HTTP.HttpException -> ClientFailure) -> IO a -> IO (Either ClientFailure a)
+clientIOWith transport action = do
   outcome <- try @HTTP.HttpException (try @ClientFailure action)
-  pure (either (const (Left TransportUnavailable)) id outcome)
+  pure (either (Left . transport) id outcome)
+
+-- | The failure of an HTTP exception at the opening of a session. A TLS
+-- handshake failure whose alert concerns the certificate of the manager, or a
+-- certificate error, gives 'ManagerCertificateRefused'. Every other handshake
+-- failure gives 'TlsHandshakeFailed', and every other exception gives
+-- 'TransportUnavailable'.
+connectionFailure :: HTTP.HttpException -> ClientFailure
+connectionFailure = \case
+  HTTP.HttpExceptionRequest _ content
+    | Just (TLS.HandshakeFailed failure) <- handshake content ->
+        if certificateFailure failure then ManagerCertificateRefused else TlsHandshakeFailed
+  _ -> TransportUnavailable
+  where
+    handshake :: HTTP.HttpExceptionContent -> Maybe TLS.TLSException
+    handshake = \case
+      HTTP.InternalException failure -> fromException failure
+      HTTP.ConnectionFailure failure -> fromException (failure :: SomeException)
+      _ -> Nothing
+    certificateFailure = \case
+      TLS.Error_Protocol _ alert -> alert `elem`
+        [TLS.BadCertificate, TLS.UnsupportedCertificate, TLS.CertificateRevoked, TLS.CertificateExpired,
+         TLS.CertificateUnknown, TLS.UnknownCa]
+      TLS.Error_Certificate _ -> True
+      _ -> False

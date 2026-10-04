@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${CABAL_BUILDDIR:?Run this command through the configured project direnv}"
+# The project environment sets CABAL_BUILDDIR. Without it, the build products
+# and the isolated Cabal store go to dist-newstyle in the current directory.
+: "${CABAL_BUILDDIR:=$PWD/dist-newstyle}"
 # sdist reads no package repository, and Cabal refuses --offline for it.
 # Every other command sets the data directory of the package to this checkout,
 # so that a built runner finds its data files from any working directory.

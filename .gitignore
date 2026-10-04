@@ -2,3 +2,4 @@
 .envrc.cache
 ext-pi/node_modules/
 doc/build/
+dist-newstyle/

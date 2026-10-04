@@ -543,8 +543,10 @@ parsedAs args = case parseCommand collidingRegistry args of
   Right (FrontendExport _) -> "frontend-export"
   Right FrontendSession -> "frontend"
   Right Usage -> "usage"
+  Right Version -> "version"
   Right (Help n) -> "help " <> T.unpack n
   Right (RoutingInspection _ _ _) -> "routing"
+  Right (AdapterOptions _ _ _) -> "adapter-options"
   Right (MigrateRouting _ _) -> "migration"
   Right (List _) -> "list"
   Right (Plan n _ _ _ _) -> "plan " <> T.unpack n
@@ -2690,12 +2692,16 @@ main = do
       ("leading --tui cannot collide with a workflow name", parsedAs ["--tui"] == "tui"),
       ("--tui --local is the explicit local mode of --tui", parsedAs ["--tui", "--local"] == "tui"),
       ("--tui --service takes an absolute client-profile path", parsedAs ["--tui", "--service", "/tmp/client-profile.json"] == "tui-service /tmp/client-profile.json"),
-      ("--tui --service refuses a relative client-profile path", parsedAs ["--tui", "--service", "client-profile.json"] == "no-verb"),
+      ("--tui --service refuses a relative client-profile path", parsedAs ["--tui", "--service", "client-profile.json"] == "refused"),
       ("--tui --service takes up to eight absolute client-profile paths in order",
         parsedAs (["--tui", "--service"] <> ["/tmp/p" <> T.pack (show n) | n <- [1 .. 8 :: Int]])
           == "tui-service " <> unwords ["/tmp/p" <> show n | n <- [1 .. 8 :: Int]]),
-      ("--tui --service refuses nine client-profile paths", parsedAs (["--tui", "--service"] <> ["/tmp/p" <> T.pack (show n) | n <- [1 .. 9 :: Int]]) == "no-verb"),
-      ("--tui --service refuses a relative path among several", parsedAs ["--tui", "--service", "/tmp/a.json", "b.json"] == "no-verb"),
+      ("--tui --service refuses nine client-profile paths", parsedAs (["--tui", "--service"] <> ["/tmp/p" <> T.pack (show n) | n <- [1 .. 9 :: Int]]) == "refused"),
+      ("--tui --service refuses a relative path among several", parsedAs ["--tui", "--service", "/tmp/a.json", "b.json"] == "refused"),
+      ("--tui --service with no profile names its usage, not a verb",
+        either ("usage:\n  wf --tui --service ABS_CLIENT_PROFILE" `T.isInfixOf`) (const False) (parseCommand collidingRegistry ["--tui", "--service"])),
+      ("--tui with an unknown option names its usage", parsedAs ["--tui", "--remote"] == "refused"),
+      ("--version is the version", parsedAs ["--version"] == "version"),
       ("frontend is the prepared-session verb", parsedAs ["frontend"] == "frontend"),
       ("frontend capabilities are a distinct discovery command", parsedAs ["frontend", "--capabilities"] == "frontend-capabilities"),
       ("frontend-io is the read-only query verb", parsedAs ["frontend-io"] == "frontend-io"),

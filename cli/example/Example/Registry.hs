@@ -207,9 +207,11 @@ helloHelp =
     * It has one path, so the two bounds above coincide and this program has a
       price rather than a range: a run that billed anything else is a run of a
       different program. For the same reason — nothing branches — `agentic-run
-      plan hello` prints a `codes` line that is a full sequence rather than
-      `null`. It shares that with `plan-feature`, the table's other pipeline;
-      the five branching rows print `null`.
+      plan hello` prints a `codes` line that is a full sequence. The other two
+      pipelines, `capital` and `plan-feature`, and the two batch rows do the
+      same. The five branching rows print `(none — the program branches, so no
+      one sequence of answer kinds)` instead, and `plan --json` gives them a
+      `codes` of `null`.
     * It refuses `--require-pinned`: `greeter` is asked with no `served by`.
   |]
 

@@ -134,7 +134,14 @@ When the connection fails at startup, the frontend prints one fixed line that
 `Agentic.Tui.ServiceLane.startupFailureText` gives for the declared failure,
 for example `--tui --service: manager unreachable` or `--tui --service:
 credential refused`, and exits with status 1 before the terminal interface
-starts. The shell header has an identity row in every service screen when the
+starts. A failed TLS handshake has its own line, apart from `manager
+unreachable`. A certificate that the `caFile` does not validate for the
+endpoint host gives `--tui --service: manager certificate not accepted by
+caFile; the certificate must chain to caFile and its subjectAltName must match
+the endpoint host`. A refused client file gives a line that names its role
+(`client profile`, `credentialFile` or `caFile`) and the first rule that it
+fails, for example `--tui --service: client profile is not private; give it
+mode 0600`. The shell header has an identity row in every service screen when the
 terminal has at least 72 columns and 16 rows. The row names the endpoint host
 and port from the client profile (`Agentic.Manager.Client.clientEndpoint`), the
 first 18 characters of the authority epoch, the credential scopes, and the

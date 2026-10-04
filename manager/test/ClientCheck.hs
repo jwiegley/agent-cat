@@ -21,7 +21,7 @@ import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import System.Environment (getArgs)
 import System.Exit (die)
-import System.IO (hSetBuffering, stdout, BufferMode (LineBuffering))
+import System.IO (hPutStrLn, hSetBuffering, stderr, stdout, BufferMode (LineBuffering))
 import System.Timeout (timeout)
 
 check :: String -> Bool -> IO ()
@@ -108,8 +108,13 @@ main = do
         Right _ -> False)
     ["failure",profile,kind] -> do
       result <- C.connectClientProfile profile
+      either (hPutStrLn stderr . ("failure: " <>) . show) (const (hPutStrLn stderr "connected")) result
       check "fixed client-profile refusal" $ case result of
-        Left C.ClientFileUnavailable -> kind == "file"
+        Left (C.ClientFileRefused C.ProfileFile C.FileWritableByOthers) -> kind == "file"
+        Left (C.ClientFileRefused C.ProfileFile C.FileNotPrivate) -> kind == "private"
+        Left (C.ClientFileRefused C.CredentialFile C.FileMissing) -> kind == "missing-credential"
+        Left C.ManagerCertificateRefused -> kind == "certificate"
+        Left C.TlsHandshakeFailed -> kind == "handshake"
         Left C.InvalidClientProfile -> kind == "profile"
         Left C.TransportUnavailable -> kind == "transport"
         Left C.UnsupportedVersion -> kind == "version"

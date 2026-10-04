@@ -21184,14 +21184,17 @@ for iteration in range(2):
                         startup_failures = (
                             ("invalid", {"version": 2, "endpoint": f"https://127.0.0.1:{port}/v1",
                                          "credentialFile": str(work / "credential"), "caFile": str(cert)},
-                             "--tui --service: invalid client profile"),
+                             "--tui --service: invalid client profile", 0o600),
                             ("unreachable", {"version": 1, "endpoint": f"https://127.0.0.1:{closed_port}/v1",
                                              "credentialFile": str(work / "credential"), "caFile": str(cert)},
-                             "--tui --service: manager unreachable"))
-                        for name, value, line in startup_failures:
+                             "--tui --service: manager unreachable", 0o600),
+                            ("not-private", {"version": 1, "endpoint": f"https://127.0.0.1:{port}/v1",
+                                             "credentialFile": str(work / "credential"), "caFile": str(cert)},
+                             "--tui --service: client profile is not private; give it mode 0600", 0o644))
+                        for name, value, line, mode in startup_failures:
                             failed_profile = work / ("client-profile-" + name + ".json")
                             failed_profile.write_text(json.dumps(value))
-                            failed_profile.chmod(0o600)
+                            failed_profile.chmod(mode)
                             failed_state = work / ("unused-client-state-" + name)
                             with TuiSession(runner, failed_state, explicit_state=False,
                                             command=[os.environ["TUI_CHECK"], "--tui", "--service", str(failed_profile)]) as failed:

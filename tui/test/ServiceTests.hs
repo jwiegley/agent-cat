@@ -230,7 +230,14 @@ endpointTests render profile = do
       controlOperations = ["cancel", "steer", "retry", "choose-recovery", "redirect", "answer"]
       current = A.ReviewCurrent () :: A.ReviewCheck ()
       failures = [ (C.InvalidClientProfile, "invalid client profile"),
-        (C.ClientFileUnavailable, "client profile, credential or CA file unavailable"),
+        (C.ClientFileRefused C.ProfileFile C.FileNotPrivate, "client profile is not private; give it mode 0600"),
+        (C.ClientFileRefused C.ProfileFile C.FileMissing, "client profile is missing"),
+        (C.ClientFileRefused C.CredentialFile C.FileMultipleLinks, "credentialFile has more than one hard link"),
+        (C.ClientFileRefused C.CaFile C.FileTooLarge, "caFile is larger than 1048576 bytes"),
+        (C.ClientFileRefused C.CaFile C.FileWritableByOthers, "caFile is writable by group or others"),
+        (C.ManagerCertificateRefused, "manager certificate not accepted by caFile; the certificate must chain to caFile"
+          <> " and its subjectAltName must match the endpoint host"),
+        (C.TlsHandshakeFailed, "TLS handshake with the manager failed; the endpoint must serve TLS 1.3"),
         (C.InvalidEndpoint, "invalid manager endpoint"), (C.WrongEndpoint, "wrong manager endpoint"),
         (C.CredentialUnavailable, "credential unavailable"), (C.CredentialChanged, "credential changed during the connection"),
         (C.TransportUnavailable, "manager unreachable"), (C.RedirectRefused, "manager redirect refused"),

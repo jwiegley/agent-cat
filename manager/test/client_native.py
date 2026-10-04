@@ -23,10 +23,12 @@ base = json.loads((source / "test/fixtures/manager/v1/valid/capabilities.json").
 
 
 def certificate(name, common_name="127.0.0.1", san="IP:127.0.0.1"):
+    """A self-signed certificate. A san of None gives a certificate with only a common name."""
     cert, key = work / (name + ".pem"), work / (name + ".key")
+    extension = [] if san is None else ["-addext", "subjectAltName=" + san]
     with (work / (name + ".log")).open("wb") as log:
         subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256",
-                        "-days", "1", "-subj", "/CN=" + common_name, "-addext", "subjectAltName=" + san,
+                        "-days", "1", "-subj", "/CN=" + common_name, *extension,
                         "-keyout", str(key), "-out", str(cert)], check=True, stdout=log, stderr=log, timeout=30)
     return cert, key
 
@@ -113,19 +115,24 @@ san_certificates = {
     "ip-san": (ip_san, ip_san_key), "wrong-host": (ip_san, ip_san_key),
     "wrong-ip": certificate("wrong-ip", san="IP:127.0.0.2"),
     "dns-ip": certificate("dns-ip", san="DNS:127.0.0.1"),
+    "cn-only": certificate("cn-only", "localhost", None),
 }
 for scenario, mode, expected in [
     ("name-permitted", "pages", None),
-    *((name, "failure", "transport") for name in CONSTRAINED if name != "name-permitted"),
+    *((name, "failure", "certificate") for name in CONSTRAINED if name != "name-permitted"),
     ("ip-san", "pages", None), ("pages", "pages", None), ("bad-pages", "bad-pages", None),
     ("nonce", "nonce", None), ("lost", "lost", None),
     ("changed", "changed", None), ("cancel", "cancel", None),
     ("stream-idle", "stream-idle", None), ("stream-close", "stream-close", None),
     ("stream-gone", "stream-gone", None), ("overview", "overview", None), ("bad-overview", "bad-overview", None),
-    ("wrong-ca", "failure", "transport"), ("wrong-host", "failure", "transport"),
-    ("wrong-ip", "failure", "transport"), ("dns-ip", "failure", "transport"),
+    ("wrong-ca", "failure", "certificate"), ("wrong-host", "failure", "certificate"),
+    ("wrong-ip", "failure", "certificate"), ("dns-ip", "failure", "certificate"),
+    ("cn-only", "failure", "certificate"),
+    ("tls12", "failure", "handshake"),
+    ("closed", "failure", "transport"),
     ("bad-version", "failure", "version"), ("redirect", "failure", "redirect"),
     ("bad-profile", "failure", "profile"), ("writable-profile", "failure", "file"),
+    ("private-profile", "failure", "private"), ("missing-credential", "failure", "missing-credential"),
 ]:
     root = work / scenario
     root.mkdir(mode=0o700)
@@ -255,19 +262,26 @@ for scenario, mode, expected in [
 
     server = HTTPServer(("127.0.0.1", 0), Handler)
     tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    tls.minimum_version = tls.maximum_version = ssl.TLSVersion.TLSv1_3
+    tls.minimum_version = tls.maximum_version = ssl.TLSVersion.TLSv1_2 if scenario == "tls12" else ssl.TLSVersion.TLSv1_3
     server_cert, server_key = constrained.get(scenario, san_certificates.get(scenario, (cert, key)))
     tls.load_cert_chain(server_cert, server_key)
     server.socket = tls.wrap_socket(server.socket, server_side=True)
     host = CONSTRAINED[scenario][2] if scenario in CONSTRAINED else "localhost" if scenario == "wrong-host" else "127.0.0.1"
     profile = root / "profile.json"
     trust = ca if scenario in constrained else untrusted if scenario == "wrong-ca" else server_cert
-    settings = {"version": 1, "endpoint": f"https://{host}:{server.server_port}/v1",
+    port = server.server_port
+    if scenario == "closed":
+        with socket.socket() as unused:
+            unused.bind(("127.0.0.1", 0))
+            port = unused.getsockname()[1]
+    if scenario == "missing-credential":
+        credential.unlink()
+    settings = {"version": 1, "endpoint": f"https://{host}:{port}/v1",
                 "credentialFile": str(credential), "caFile": str(trust)}
     if scenario == "bad-profile":
         settings["extra"] = True
     profile.write_text(json.dumps(settings))
-    profile.chmod(0o666 if scenario == "writable-profile" else 0o600)
+    profile.chmod(0o666 if scenario == "writable-profile" else 0o644 if scenario == "private-profile" else 0o600)
     thread = threading.Thread(target=server.serve_forever)
     thread.start()
     command = [str(checker), mode, str(profile)] + ([expected] if expected else []) + ["+RTS", "-N" + native, "-RTS"]

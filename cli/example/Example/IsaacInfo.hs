@@ -74,7 +74,7 @@ isaacHelp :: Text -> Text
 isaacHelp = \case
   "plan-feature" ->
     [wft|
-    @incite@'s @plan-feature@ as a program: the change request given as an
+    `incite`'s `plan-feature` as a program: the change request given as an
     input, four exploration stances taken independently, a planner over them,
     and six plan lenses run in sequence — each one holing the answer before it,
     so the plan is narrowed rather than re-written six times.
@@ -117,7 +117,7 @@ isaacHelp = \case
     |]
   "review-lite" ->
     [wft|
-    @incite@'s @review-lite@ as a program: the per-commit panel — correctness,
+    `incite`'s `review-lite` as a program: the per-commit panel — correctness,
     unsupported claims, complexity, tests — with the Haskell lens behind a cheap
     router, and one report function both arms of that router call. The
     conditional lens is a branch, and a branch is terminal here, which is why
@@ -161,7 +161,7 @@ isaacHelp = \case
     |]
   "ship-feature-lite" ->
     [wft|
-    @incite@'s @ship-feature-lite@ as a program: the change request given as an
+    `incite`'s `ship-feature-lite` as a program: the change request given as an
     input, a plan, a steering question, a capped worker loop, the review panel,
     remediation, and a green gate at the end. It is the one of the five that
     carries the most of the original's failure policy, and the place that policy
@@ -207,7 +207,7 @@ isaacHelp = \case
     |]
   "grind-tests" ->
     [wft|
-    @incite@'s @grind-tests@ as a program: the facts read by a model, a spread
+    `incite`'s `grind-tests` as a program: the facts read by a model, a spread
     of six lenses — vacuity, coverage, properties, mutation, stubbing, sleeps —
     one per serving model, a synthesis that is allowed to *refuse*, a facts gate,
     and a bounded fixer loop with an audit inside it.
@@ -250,7 +250,7 @@ isaacHelp = \case
     |]
   "stack-prs" ->
     [wft|
-    @incite@'s @stack-prs@ as a program: the stack's facts read from `git`, a
+    `incite`'s `stack-prs` as a program: the stack's facts read from `git`, a
     slice, a person's go-ahead, a bootstrap act, a capped cutting loop, a real
     exec gate over `verify-stack.sh`, a capped triage loop, a second person's
     go-ahead, a consent file, and the promotion act behind it.

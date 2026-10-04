@@ -3381,12 +3381,15 @@ repository.  Terminal service mode uses the selected manager's catalogue.
 @section Synopsis
 
 @example
+agentic-run --help
+agentic-run --version
 agentic-run --tui [--local]
 agentic-run --tui --service CLIENT_PROFILE [CLIENT_PROFILE ...]
 agentic-run --manager init --root DIR [--port PORT]
 agentic-run --manager add-client --config FILE --profile-file FILE [--profile ID ...]
 agentic-run --manager serve --config FILE [--legacy-history ROOT=PROFILE ...]
 agentic-run --manager admin --config FILE
+agentic-run --manager --help
 agentic-run frontend --capabilities
 agentic-run frontend
 agentic-run frontend-io < request.json
@@ -3412,7 +3415,12 @@ agentic-run machine-fork RUN_ID PARENT_STORE NAME [FORK-EDIT ...] RUN-OPTION ...
 
 A verb in head position wins over a registered row of the same name.  Help has
 two per-row spellings and one general spelling.  A bare registered name is
-refused rather than interpreted as help or execution.
+refused rather than interpreted as help or execution.  An incomplete
+@option{--manager} or @option{--tui} form, such as @samp{--manager serve}
+without @option{--config} or @samp{--tui --service} without a client profile,
+is refused at exit 1 with the usage lines of that form.  The form
+@samp{--manager --help} prints the usage lines of the four @option{--manager}
+forms at exit 0.
 
 @section Terminal frontend
 
@@ -3448,10 +3456,26 @@ Service mode starts no local machine, helper process, or local runner state.
 When the connection fails at startup, the frontend prints one fixed line for
 the declared failure and exits with status 1 before it initializes Vty.  The
 lines include @samp{--tui --service: invalid client profile},
-@samp{--tui --service: client profile, credential or CA file unavailable},
 @samp{--tui --service: credential refused},
 @samp{--tui --service: manager API version unsupported}, and
 @samp{--tui --service: manager unreachable}.
+
+A failed TLS handshake has its own line.  When the @code{caFile} does not
+validate the certificate of the manager for the endpoint host, the line is
+@samp{--tui --service: manager certificate not accepted by caFile; the
+certificate must chain to caFile and its subjectAltName must match the
+endpoint host}.  Every other handshake failure gives @samp{--tui --service:
+TLS handshake with the manager failed; the endpoint must serve TLS 1.3}.
+
+A client file that the client refuses gives a line that names the role of
+the file and the first rule that it fails.  The roles are @samp{client
+profile}, @samp{credentialFile}, and @samp{caFile}.  Each file must exist, must
+not be a symbolic link, must be a regular file within the size limit of its
+role, and must not be writable by group or others.  The client profile and the
+credential file must also be owned by the user, give no access to group or
+others, and have one hard link.  For example, a client profile with mode 0644
+gives @samp{--tui --service: client profile is not private; give it mode
+0600}.
 
 When the terminal has at least 72 columns and 16 rows, the header of every
 service screen has an identity row.  The row names the endpoint host and port
@@ -4587,8 +4611,14 @@ A terminal client of the manager is @samp{agentic-run --tui --service
 @table @code
 @c COVER CLI --help author
 @item --help
-Alone, print usage at exit 0.  After a row name, print that row's page.  It is
-not accepted as an option to other verb forms.
+Alone, print usage at exit 0.  After a row name, print that row's page.  After
+@option{--manager}, print the usage lines of the four @option{--manager} forms
+at exit 0.  It is not accepted as an option to other verb forms.
+
+@c COVER CLI --version author
+@item --version
+Print the name of the runner and the version of its package, for example
+@samp{agentic-run 0.1.0.0}, at exit 0.
 
 @c COVER CLI --json author
 @item --json
@@ -5789,8 +5819,10 @@ recovery diagnostics.
 
 @multitable @columnfractions .12 .88
 @headitem Status @tab Meaning
-@item 0 @tab Inspection completed or the run reached its represented end.
-@item 1 @tab Usage or preflight refusal.  No live execution has started.
+@item 0 @tab Inspection completed, usage or version printed on request, or the
+run reached its represented end.
+@item 1 @tab Usage or preflight refusal, including an incomplete command form.
+No live execution has started.
 @item 2 @tab Transport failure, missing process, protocol error, stopped session,
 or timeout.
 @item 3 @tab Run abandonment after answer recovery or failed required completion
@@ -5937,11 +5969,14 @@ scheme.  Remove it, or add an actual ACP or deck backend that consumes it.
 @item routing without --engine or --session requires full pin coverage
 Add @code{servedBy} to every model ask and define each profile in routing
 configuration.  A tool or person question cannot carry a model pin and therefore
-requires an explicit engine or session.
+requires an explicit engine or session.  The refusal of @code{run NAME} ends
+with @samp{Or rehearse with agentic-run run NAME --scripted, which asks
+nobody.}
 
 @item routing configuration has no route for pinned model NAME
 Define the named profile in the selected routing persona, or use an explicit
-engine or session.
+engine or session.  The refusal of @code{run NAME} also names the scripted
+rehearsal.
 @end table
 
 @section Execution failures

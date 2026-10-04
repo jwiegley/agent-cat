@@ -759,6 +759,8 @@ data Command
     -- not this — it is a 'Left' carrying the same text, on stderr under exit
     -- @1@, because a command line that asked for nothing was not answered.
     Usage
+  | -- | The package version of the runner, on stdout at exit @0@.
+    Version
   | -- | One row's page: its line, the computed header, its 'rowHelp', the
     -- footer. Reached from @help NAME@ and from @NAME --help@ alike, and
     -- unconditional in the name, so a misspelling gets the list of rows rather
@@ -973,8 +975,60 @@ cliMainWithBroker broker reg = do
     ("--manager" : "add-client" : options) -> managerAddClientCmd reg options
     ("--manager" : "serve" : "--config" : path : options) -> case legacyHistoryOptions options of
       Just legacy -> managerServeCmd reg (T.unpack path) legacy
-      Nothing -> die reg 1 "manager serve takes only --legacy-history ROOT=PROFILE options with distinct absolute roots"
+      Nothing -> formRefusal reg "manager serve takes only --legacy-history ROOT=PROFILE options with distinct absolute roots" (managerForm reg "serve")
+    ["--manager", "--help"] -> say (formLines (concatMap (managerForm reg . fst) managerVerbs)) >> exitSuccess
+    ("--manager" : "serve" : _) -> formRefusal reg "manager serve needs --config ABS_FILE" (managerForm reg "serve")
+    ("--manager" : "admin" : _) ->
+      formRefusal reg "manager admin takes exactly --config ABS_FILE and reads one request on standard input" (managerForm reg "admin")
+    ("--manager" : _) ->
+      formRefusal reg "--manager takes init, add-client, serve or admin" (concatMap (managerForm reg . fst) managerVerbs)
     _ -> runOrdinaryCommand broker reg args
+
+-- | The verbs of @--manager@, in the order that the usage lists them, with the
+-- options of each. The second element is the options after the verb.
+managerVerbs :: [(Text, [Text])]
+managerVerbs =
+  [ ("init", ["--root ABS_DIR", "[--port N]"]),
+    ("add-client", ["--config ABS_FILE", "--profile-file ABS_FILE", "[--profile ID]..."]),
+    ("serve", ["--config ABS_FILE", "[--legacy-history ROOT=PROFILE]..."]),
+    ("admin", ["--config ABS_FILE", "< request.json"])
+  ]
+
+-- | The usage lines of one @--manager@ verb. Options that do not fit in 80
+-- columns continue on the next line, under the first option.
+managerForm :: Registry -> Text -> [Text]
+managerForm reg verb = wrapForm (regBinary reg <> " --manager " <> verb) (fromMaybe [] (lookup verb managerVerbs))
+
+-- | The usage lines of @--tui@.
+tuiForms :: Registry -> [Text]
+tuiForms reg =
+  [ regBinary reg <> " --tui [--local]",
+    regBinary reg <> " --tui --service ABS_CLIENT_PROFILE [ABS_CLIENT_PROFILE ...]"
+  ]
+
+-- | A command and its options as usage lines of at most 80 columns, with the
+-- two-column indent of the usage message. Continuation lines start under the
+-- first option.
+wrapForm :: Text -> [Text] -> [Text]
+wrapForm lead options = go (lead <> " ") options
+  where
+    hanging = T.replicate (T.length lead + 1) " "
+    go line [] = [T.stripEnd line]
+    go line (option : rest)
+      | T.length line + T.length option <= 78 || T.all (== ' ') line = go (line <> option <> " ") rest
+      | otherwise = T.stripEnd line : go (hanging <> option <> " ") rest
+
+-- | Usage lines with the two-column indent of the usage message.
+formLines :: [Text] -> Text
+formLines = T.intercalate "\n" . map ("  " <>)
+
+-- | Refuse an incomplete command form with exit status 1, and name the usage
+-- of that form.
+formRefusal :: Registry -> Text -> [Text] -> IO a
+formRefusal reg problem forms = die reg 1 (formRefusalText problem forms)
+
+formRefusalText :: Text -> [Text] -> Text
+formRefusalText problem forms = problem <> "\n\nusage:\n" <> formLines forms
 
 -- | The repeatable @--legacy-history ROOT=PROFILE@ options of @--manager
 -- serve@. The profile follows the last equals sign. Each root is absolute and
@@ -1004,7 +1058,7 @@ managerInitCmd reg options = case go Nothing Nothing options of
     case outcome of
       Left failure -> die reg 1 ("manager init: " <> T.pack (displayException (failure :: IOException)))
       Right result -> either (die reg 1 . ("manager init: " <>)) (mapM_ say) result
-  _ -> die reg 1 "manager init takes --root ABS_DIR and an optional --port N"
+  _ -> formRefusal reg "manager init takes --root ABS_DIR and an optional --port N" (managerForm reg "init")
   where
     go root port = \case
       [] -> Just (root, port)
@@ -1021,7 +1075,8 @@ managerAddClientCmd reg options = case go Nothing Nothing [] options of
     try (addClient (loadManagerConfiguration reg) (T.unpack config) (T.unpack profileFile) profiles) >>= \case
       Left failure -> die reg 1 ("manager add-client: " <> T.pack (displayException (failure :: IOException)))
       Right result -> either (die reg 1 . ("manager add-client: " <>)) (mapM_ say) result
-  _ -> die reg 1 "manager add-client takes --config ABS_FILE, --profile-file ABS_FILE and optional --profile ID options"
+  _ -> formRefusal reg "manager add-client takes --config ABS_FILE, --profile-file ABS_FILE and optional --profile ID options"
+    (managerForm reg "add-client")
   where
     go config file profiles = \case
       [] -> Just (config, file, profiles)
@@ -1187,6 +1242,7 @@ execute broker reg = \case
     response <- runFrontendExport stateRoot request
     either (die reg 3) BS.putStr response
   Usage -> say (usage reg) >> exitSuccess
+  Version -> say (regBinary reg <> " " <> runnerVersion) >> exitSuccess
   Help name -> helpCmd reg name >> exitSuccess
   RoutingInspection rendering persona mode -> routingInspectionCmd reg rendering persona mode >> exitSuccess
   AdapterOptions adapter arguments rendering -> adapterOptionsCmd adapter arguments rendering >> exitSuccess
@@ -1195,21 +1251,21 @@ execute broker reg = \case
   Plan name r raw pinned ins -> withExample reg pinned False noRefusal name [] ins (planCmd r raw)
   Cost name ins -> withExample reg False False noRefusal name [] ins (\f _ -> costCmd f)
   Run name target pinned ins ->
-    withRunExample reg pinned name target ins $ \effective _ program bindings ->
+    withRunExample reg (rehearsalHint reg name target) pinned name target ins $ \effective _ program bindings ->
       withFinalTarget reg name effective program (\finalTarget -> runCmd broker reg name finalTarget program bindings)
   Machine options runId name target pinned ins -> do
     validateMachineEnvironment options
     withMachineControls broker options runId name target $ \control ->
-      withRunExample reg pinned name target ins $ \effective _ program bindings ->
+      withRunExample reg id pinned name target ins $ \effective _ program bindings ->
         withFinalTarget reg name effective program (\finalTarget -> runMachineCmd broker options control reg runId name finalTarget program bindings)
   LineageCheck options lineage parent edits name target pinned ins ->
-    withRunExample reg pinned name target ins $ \effective _ program _ ->
+    withRunExample reg id pinned name target ins $ \effective _ program _ ->
       withFinalTarget reg name effective program (\finalTarget -> void (validateLineage options (inProcessNames reg name) lineage parent edits name finalTarget program))
   ReadFlow paths follow route from -> flowCmd reg paths follow route from
   MachineLineage options lineage runId parent edits name target pinned ins -> do
     validateMachineEnvironment options
     withMachineControls broker options runId name target $ \control ->
-      withRunExample reg pinned name target ins $ \effective _ program bindings ->
+      withRunExample reg id pinned name target ins $ \effective _ program bindings ->
         withFinalTarget reg name effective program (\finalTarget -> runMachineLineageCmd broker options control reg lineage runId parent edits name finalTarget program bindings)
 
 -- | @flow PATH...@: print each record of the logs as one JSON object, then one
@@ -1338,7 +1394,7 @@ frontendCmd broker reg = Frontend.runFrontendSession (regBinary reg) runnerVersi
         Run _ routed _ _ -> pure routed
         _ -> error "frontend routing changed the command constructor"
       (SomeProgram static, _) <- resolveInputs name False [] (rowExample row) inputs >>= require
-      withRunExample reg pinned name target inputs $ \effective facts program bindings ->
+      withRunExample reg id pinned name target inputs $ \effective facts program bindings ->
         withFinalTarget reg name effective program $ \resolved -> do
           (frozen, frozenArguments) <- case resolved of
             Routed routes'
@@ -1773,13 +1829,14 @@ withExample reg pinned needsAll refuses name facts ins k = case regLookup reg na
 -- sentinel is held fixed throughout; only the target-derived facts move.
 withRunExample :: forall a.
   Registry ->
+  (Text -> Text) ->
   Bool ->
   Text ->
   Target ->
   [InputFlag] ->
   (forall r. Target -> Facts -> ProgramOf r -> [Given] -> IO a) ->
   IO a
-withRunExample reg pinned name initialTarget inputs k = case regLookup reg name of
+withRunExample reg refusal pinned name initialTarget inputs k = case regLookup reg name of
   Nothing -> die reg 1 (noSuchRow reg name)
   Just row -> do
     prepared <- prepareRunInputs name (rowExample row) inputs
@@ -1797,7 +1854,7 @@ withRunExample reg pinned name initialTarget inputs k = case regLookup reg name 
           case resolved of
             Left why -> die reg 1 why
             Right (SomeProgram prog, bindings) -> case resolveTargetForProgram (map fst (rowTools row)) target prog of
-              Left why -> die reg 1 why
+              Left why -> die reg 1 (refusal why)
               Right effective
                 | targetPolicy effective == targetPolicy target ->
                     if pinned
@@ -1814,6 +1871,16 @@ withRunExample reg pinned name initialTarget inputs k = case regLookup reg name 
       Nothing -> case toolRefusal row prog of
         Just why -> die reg 1 ("refused: " <> why)
         Nothing -> k effective (factsOf name row prog) prog bindings
+
+-- | The routing refusal of @run NAME@ with no explicit target, followed by the
+-- scripted rehearsal of the same row. A run with an explicit target, and every
+-- machine verb, keeps the refusal unchanged.
+rehearsalHint :: Registry -> Text -> Target -> Text -> Text
+rehearsalHint reg name target why = case target of
+  Routing _ -> sentence <> " Or rehearse with " <> regBinary reg <> " run " <> name <> " --scripted, which asks nobody."
+  _ -> why
+  where
+    sentence = if "." `T.isSuffixOf` why then why else why <> "."
 
 -- | The refusal a name no row answers to earns, from whichever verb was asking.
 --
@@ -3978,6 +4045,9 @@ parseCommand reg = \case
       all (\path -> isAbsolute (T.unpack path) && BS.length (encodeUtf8 path) <= 4096
         && not (T.any (`elem` ['\NUL','\n','\r']) path)) (profile : others) ->
         Right (TuiService (T.unpack profile :| map T.unpack others))
+  ("--tui" : "--service" : profiles) -> Left (formRefusalText (tuiServiceProblem profiles) (tuiForms reg))
+  ("--tui" : _) -> Left (formRefusalText "--tui takes --local or --service ABS_CLIENT_PROFILE..." (tuiForms reg))
+  ["--version"] -> Right Version
   ["frontend"] -> Right FrontendSession
   ["frontend", "--capabilities"] -> Right FrontendCapabilities
   ["frontend", "--help"] -> Right Usage
@@ -4052,6 +4122,13 @@ parseCommand reg = \case
     -- that has an answer — the usage — where `plan` alone is a verb missing its
     -- subject.
     verbs = ["plan", "cost", "run", "machine", "lineage-check", "machine-restart", "machine-resume", "machine-fork", "flow"]
+
+    tuiServiceProblem profiles
+      | null profiles = "--tui --service needs at least one client profile path"
+      | length profiles > 8 = "--tui --service takes at most eight client profile paths"
+      | otherwise =
+          "--tui --service takes absolute client profile paths of at most 4096 UTF-8 bytes,"
+            <> " without NUL or line breaks"
 
     flowOptions path follow route from = \case
       []
@@ -4576,21 +4653,19 @@ usage :: Registry -> Text
 usage reg =
   T.intercalate
     "\n"
-    [ bin <> " — " <> regBanner reg,
+    $ [ bin <> " — " <> regBanner reg,
       "",
-      "  " <> bin <> " --tui [--local]",
-      "  " <> bin <> " --tui --service ABS_CLIENT_PROFILE [ABS_CLIENT_PROFILE ...]",
-      "  " <> bin <> " --manager init --root ABS_DIR [--port N]",
-      "  " <> bin <> " --manager add-client --config ABS_FILE --profile-file ABS_FILE [--profile ID]...",
-      "  " <> bin <> " --manager serve --config ABS_FILE [--legacy-history ROOT=PROFILE]...",
-      "  " <> bin <> " --manager admin --config ABS_FILE < request.json",
-      "  " <> bin <> " frontend --capabilities",
+      "  " <> bin <> " --help | --version"
+    ]
+      <> map ("  " <>) (tuiForms reg <> concatMap (managerForm reg . fst) managerVerbs)
+      <> [ "  " <> bin <> " frontend --capabilities",
       "  " <> bin <> " frontend",
       "  " <> bin <> " frontend-io < request.json",
       "  " <> bin <> " frontend-export --state TRUSTED_STATE < request.json",
       "  " <> bin <> " list [--json [--descriptor-version 3]]",
       "  " <> bin <> " --routing [--json] [--persona NAME] [--offline | --refresh-models]",
-      "  " <> bin <> " adapter-options --adapter stub|claude|codex|droid|PATH [--adapter-arg ARG]... [--json]",
+      "  " <> bin <> " adapter-options --adapter stub|claude|codex|droid|PATH",
+      under ("  " <> bin <> " adapter-options ") <> "[--adapter-arg ARG]... [--json]",
       "  " <> bin <> " --migrate-routing SOURCE --output DESTINATION",
       "  " <> bin <> " help <" <> noun <> ">",
       "  " <> bin <> " <" <> noun <> "> --help",
@@ -4666,13 +4741,15 @@ usage reg =
       "  --refresh-models force catalogue refresh and refuse if it fails",
       "  --expect-routing-fingerprint SHA256",
       "                 frontend preflight; refuse if offline routing changed",
-      "  --json         print one object per row (list), one object (plan), or the",
-      "                 instead of the prose, for a program that drives this CLI.",
+      "  --json         print one object per row (list), one object (plan), or one",
+      "                 routing report (--routing) instead of the prose, for a",
+      "                 program that drives this CLI.",
       "                 The key names are an interface and are documented in the",
       "                 Agentic.Cli haddock; `inputs` names exactly the inputs a",
       "                 command line may give. cost takes none (plan --json has",
       "                 both of its numbers) and neither does run (its record is",
       "                 the trace). With --raw, plan --json adds the program",
+      "                 itself under the key `program`",
       "  --scripted     answer from a table of canned replies, and ask nobody",
       "  --engine       acp starts an ACP adapter of its own and speaks the protocol",
       "                 to it over a pipe it owns; deck sends to a live agent-deck",
@@ -4687,7 +4764,7 @@ usage reg =
       "                 directory of this runner); claude and codex are looked for on",
       "                 PATH and then at machine-local pins; droid runs `droid exec",
       "                 --output-format acp` from PATH; anything else is a path.",
-      "                 only when this run reaches ACP",
+      "                 Only when this run reaches ACP",
       "  --model        a model value that the default ACP answerer offers, set on",
       "                 its session before every question. adapter-options prints",
       "                 the offered values; a value not offered is refused before",
@@ -4709,8 +4786,8 @@ usage reg =
       "  --route        NAME=BACKEND — put the questions this run pins to the model",
       "                 NAME to BACKEND instead of to the default answerer.",
       "                 Repeatable, at most once per NAME. BACKEND is",
-      "                 acp:stub|claude|codex|droid|PATH (start this run's adapter)",
-      "                 own) or deck:<id> (send to a live agent-deck session).",
+      "                 acp:stub|claude|codex|droid|PATH (start an adapter of this",
+      "                 run's own) or deck:<id> (send to a live agent-deck session).",
       "                 NAME is a *serving model* — a `served by` pin or one of its",
       "                 spares — and not a party: routing the pin is what makes a",
       "                 fail-over ladder cross providers. A pinned model no --route",
@@ -4727,7 +4804,10 @@ usage reg =
       "  --require-pinned",
       "                 refuse the program unless every model ask names the model",
       "                 that serves it (`servedBy`). Routing-only runs impose this",
-      "                 check and configured-route coverage automatically"
+      "                 check and configured-route coverage automatically",
+      "  --version      print the package version of this runner",
+      "  --manager --help",
+      "                 print the usage of the four --manager forms"
     ]
   where
     bin = regBinary reg

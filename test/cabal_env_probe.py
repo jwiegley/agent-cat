@@ -45,10 +45,16 @@ with tempfile.TemporaryDirectory(prefix="agentic-cabal-env-", delete=False) as t
          "sdist", f"--builddir={builddir}", *arguments],
         str(root.resolve()), "fixture environment",
     ], reply.stdout
+    # Without CABAL_BUILDDIR, the build directory is dist-newstyle in the
+    # current directory.
     del env["CABAL_BUILDDIR"]
     reply = subprocess.run(["bash", str(helper), "build"], cwd=root, env=env,
                            capture_output=True, text=True, timeout=10)
-    assert reply.returncode != 0 and reply.stdout == "", reply
-    assert "configured project direnv" in reply.stderr, reply.stderr
+    assert reply.returncode == 23 and reply.stderr == "", reply
+    default = f"{root.resolve()}/dist-newstyle"
+    assert json.loads(reply.stdout)[0] == [
+        f"--store-dir={default}/cabal-store", "--active-repositories=:none",
+        "build", "--offline", f"--datadir={checkout}", "--datasubdir=.", f"--builddir={default}",
+    ], reply.stdout
 assert root.is_dir() and binary.is_file(), "cabal environment evidence was not retained"
-print("cabal environment: offline/data-directory/build-directory flags, sdist without --offline, argv, cwd, environment, and exit status preserved")
+print("cabal environment: offline/data-directory/build-directory flags, the dist-newstyle default, sdist without --offline, argv, cwd, environment, and exit status preserved")

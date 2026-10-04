@@ -661,7 +661,11 @@ startupFailureText failure = "--tui --service: " <> connectionFailureText failur
 connectionFailureText :: C.ClientFailure -> Text
 connectionFailureText failure = case failure of
   C.InvalidClientProfile -> "invalid client profile"
-  C.ClientFileUnavailable -> "client profile, credential or CA file unavailable"
+  C.ClientFileRefused role rule -> clientFileText role rule
+  C.ManagerCertificateRefused ->
+    "manager certificate not accepted by caFile; the certificate must chain to caFile"
+      <> " and its subjectAltName must match the endpoint host"
+  C.TlsHandshakeFailed -> "TLS handshake with the manager failed; the endpoint must serve TLS 1.3"
   C.InvalidEndpoint -> "invalid manager endpoint"
   C.WrongEndpoint -> "wrong manager endpoint"
   C.CredentialUnavailable -> "credential unavailable"
@@ -675,6 +679,25 @@ connectionFailureText failure = case failure of
   C.Refused 401 _ -> "credential refused"
   C.Refused 403 "insufficient-scope" -> "credential lacks the observe scope"
   C.Refused status code -> "manager refused the connection: " <> T.pack (show status) <> " " <> code
+
+-- | The role of a client file and the first rule that it failed.
+clientFileText :: C.ClientFile -> C.FileRule -> Text
+clientFileText role rule = roleText <> " " <> ruleText
+  where
+    (roleText, limit) = case role of
+      C.ProfileFile -> ("client profile", "16384")
+      C.CredentialFile -> ("credentialFile", "512")
+      C.CaFile -> ("caFile", "1048576")
+    ruleText = case rule of
+      C.FileMissing -> "is missing"
+      C.FileSymbolicLink -> "is a symbolic link; name the file itself"
+      C.FileUnreadable -> "cannot be read"
+      C.FileNotRegular -> "is not a regular file"
+      C.FileTooLarge -> "is larger than " <> limit <> " bytes"
+      C.FileWritableByOthers -> "is writable by group or others"
+      C.FileNotOwned -> "is not owned by this user"
+      C.FileNotPrivate -> "is not private; give it mode 0600"
+      C.FileMultipleLinks -> "has more than one hard link"
 
 -- | The connection state of one client profile.
 data EndpointState

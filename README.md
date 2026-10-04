@@ -412,10 +412,12 @@ security posture.
 
 The Nix development shells are the only supported environments. Configure
 direnv for the root, model, and conformance directories before running their
-tools. The root environment supplies `CABAL_BUILDDIR` beneath `~/Products`.
-The shared `test/cabal.sh` entry point passes that directory explicitly, uses
-an isolated Cabal store, and disables package repositories. It builds against
-the supplied dependencies without entering another shell or fetching packages:
+tools. The shared `test/cabal.sh` entry point builds into the directory that
+`CABAL_BUILDDIR` names. When `CABAL_BUILDDIR` is unset, it uses
+`dist-newstyle` in the current directory. It passes that directory explicitly,
+uses an isolated Cabal store inside it, and disables package repositories. It
+builds against the supplied dependencies without entering another shell or
+fetching packages:
 
 ```sh
 direnv exec . test/cabal.sh build all
@@ -445,8 +447,8 @@ sources of the runner and its libraries. The data files are the stub adapter
 `test/cabal.sh` sets the data directory of its builds to the checkout, so the
 runner finds them from any working directory. A change to other documentation
 or to tests therefore leaves the derivation path unchanged. From a Git working copy, Nix reads only the tracked files. The
-source distribution that `test/cabal.sh sdist` writes beneath `CABAL_BUILDDIR`
-includes the three files under `nix/`.
+source distribution that `test/cabal.sh sdist` writes beneath the build
+directory includes the three files under `nix/`.
 `doc/workflow-manager-release-evidence.md` records the package identities.
 The `package` mode of `manager/test/service_http.py` accepts the built
 executable. It runs the file that `PACKAGE_RUNNER` names as the manager and as

@@ -1097,6 +1097,26 @@ the leaf name after a dot, in the same letter case and with the same trailing
 dot. A permitted subtree that starts with a dot therefore matches no name. A
 CA without Name Constraints below a CA that has them is refused.
 
+`connectClientProfile` and `connectClient` give a failed TLS handshake its own
+failure, apart from `TransportUnavailable`. A handshake that fails with a
+certificate alert, or with a certificate error, gives
+`ManagerCertificateRefused`. This covers a certificate that does not chain to
+the `caFile`, a certificate whose names do not match the endpoint host, and
+the Name Constraints refusals above. Every other handshake failure, such as a
+server that does not offer TLS 1.3, gives `TlsHandshakeFailed`. The handshake
+precedes every request byte, so neither failure leaves a request uncertain.
+After a session opens, a failed request still gives `TransportUnavailable`.
+
+A client file that the client refuses gives `ClientFileRefused` with the role
+of the file (`ProfileFile`, `CredentialFile` or `CaFile`) and the first rule
+that it fails, in this order: `FileMissing`, `FileSymbolicLink`,
+`FileUnreadable`, `FileNotRegular`, `FileTooLarge`, `FileWritableByOthers`,
+`FileNotOwned`, `FileNotPrivate` and `FileMultipleLinks`. The last three
+apply only to the profile file and the credential file. The size limits are
+16384 bytes for the profile file, 512 bytes for the credential file, and
+1048576 bytes for the CA file. `manager/test/client_native.py` checks these
+failures against its local TLS fixture.
+
 ## Accepted additive fields
 
 Version 1 is frozen. A change to `openapi.yaml` adds only paths, schemas and
