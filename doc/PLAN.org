@@ -15994,6 +15994,64 @@ Evidence: resume-20260923/RD/R3/impl-r1 (build-8, JOURNEY-ONCE(r3, 8) journey-n8
 ]
 #+end_src
 
+* DONE [#C] Keep Emacs service reviews and runs reachable
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-r4-emacs-client-qumb
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 01:38]
+:MODIFIED: [2026-10-04 Sun 01:38]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-04 Sun 01:38]
+:CLOSE_REASON: Acceptance met by recorded evidence (RD/R4)
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Readiness subtask R4 of 2026-10-03 (operator direction: functional readiness). The Emacs client (agent-workflows-emacs-native, emacs-native branch) no longer strands a service review and keeps started runs reachable. q in a service review asks whether to discard the preparation and, on yes, sends the existing discard, so a declined review holds no execution reservation. d is documented as the decline key. The new autoloaded command M-x wf-requests reads every page of /v1/requests, lists the requests in draft, queued, preparing or review by WORKFLOW/REQUEST, and opens their review (or the setup form of a draft). After approval the review shows the run view of the started run in another window. wf-runs offers every run whose view this Emacs opened (wf-service--known-runs), and its "no run is known" message points to M-x wf-history. The catalogue annotation reads the decimal price fields of /v1/workflows and shows no "nil paths". Service history shows workflow names from each profile catalogue, with the identifier as a fallback. The setup form drops the local-mode first line. The approval prompt reads "Start WORKFLOW in PROFILE (TARGET)?" with the selectors kept in the buffer and the plan summary above the raw program. The local history lineage column prints "root" and "none" instead of nil. The README has a "Using service mode" walkthrough that links to doc/getting-started.md of agent-cat.
+
+Evidence: resume-20260923/RD/R4/impl-r1 (./ci/emacs.sh exit 0: byte-compile with error-on-warn, smoke 38/38, transport ERT 102/102; isolated Emacs session r4-emacs.log exit 0 against an init manager, stopped by the admin shutdown), fess/rd-R4-r1.md (audit, non-blocking).
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 802,
+    "issue_id": "acat-rd-r4-emacs-client-qumb",
+    "author": "johnw",
+    "text": "All acceptance items passed: RD/R4/impl-r1 (./ci/emacs.sh exit 0 with byte-compile error-on-warn, smoke 38/38 and ERT 102/102; isolated Emacs session r4-emacs.log exit 0: q then yes discards and the next hello review opens in 1.4 s, wf-requests lists and opens a review, a then yes opens a run view with Terminal: succeeded, annotations show no nil, history shows hello). The audit fess/rd-R4-r1.md reran ./ci/emacs.sh with exit 0 and found nothing blocking. Follow-ups: acat-rd-r4-fess-followup-hp9n.",
+    "created_at": "2026-10-04T08:38:15Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Resolve the R4 Emacs client fess findings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-r4-fess-followup-hp9n
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 01:38]
+:MODIFIED: [2026-10-04 Sun 01:38]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/rd-R4-r1.md on readiness subtask R4 (Emacs client), with the implementer's disclosed limitations. Paths are in /Users/johnw/src/agent-workflows-emacs-native.
+
+1. Medium. README.md:25: the "Using service mode" walkthrough links to doc/getting-started.md of agent-cat, which does not exist yet. Land the guide in the guide stage, then check that the walkthrough steps and the profile path match it.
+2. Low. emacs/wf-service.el:954: the review buffer header always says "Exact review of the manager - no run has started.", also after approval while the run view is visible beside it. Change the header to name the outcome after approve, discard or withdraw.
+3. Low. emacs/wf-service.el:1180: the wf-service-review-decline docstring says that the window quits in each case, but a failed discard signals before quit-window and leaves the review open. Correct the docstring.
+4. Low. emacs/wf-service.el:503: wf-service--workflow-names drops a failed catalogue read without a message. Optionally show one message.
+5. Low. RD/R4/impl-r1/r4-emacs.log:646: the live "wf-runs offers the finished run" check ran with the run view still open, so it did not exercise wf-service--known-runs after the view and overview entry are gone. Kill the run view before M-x wf-runs in a later live session.
+6. Disclosed. The emacs-service modes of manager/test/service_http.py (wf-manager-live.el drivers) were not run after the run view began to open after approval.
+7. Disclosed. A discarded request becomes a draft and wf-requests keeps listing it. The API has no command that deletes a draft.
+
 * DONE [#D] Give the remaining tool "cat" questions honest addressees
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
