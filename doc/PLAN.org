@@ -754,6 +754,27 @@ Non-blocking fess findings from PE28 (fess/pe-PE28-r1.md):
 
 Refine K1-K6 so each semantic request carries explicit consult/observe/effect intent. Plumb Request through Lean Question/World/Dlg/Plan/Denote/analyses/proofs/DSL/conformance and the Haskell production mirror/runtime. Preserve the existing five-form Plan and Haskell runtime; do not adopt the abandoned Lean-only scheduler/runtime strategy. Update design documents and add regression/conformance coverage proving intent is preserved and operational policy remains outside semantic identity.
 
+* TODO [#D] PO1 follow-up: Pi 1.0.1 audit notes
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-2q4v
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 08:23]
+:MODIFIED: [2026-10-04 Sun 08:23]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the PO1 audit (fess report po-PO1-r1.md). PO1 moved the supported Pi host to fork 1.0.1 (commit 1ad18c15d).
+
+1. ext-pi npm run test:integration did not run on the 1.0.1 host. npm run check and npm test pass. Fix: run once at the next gate with
+   AGENT_CAT_E2E_RUNNER=$(bash test/cabal.sh list-bin agentic-run) timeout 900 npm run test:integration in ext-pi.
+2. ext-pi/package-lock.json:33 and :102: the fork target entries record @anthropic-ai/sdk 0.129.0 and brace-expansion 5.0.12, while the lock keeps a node_modules/@anthropic-ai/sdk registry entry at 0.91.1 and no node_modules/brace-expansion entry. The same mismatch existed at 0.99.1. No functional effect because nothing runs npm install. Fix: prune or align the stale registry entries if a later JSON-only lock edit is authorized.
+3. doc/workflow-manager-handoff.md:47-54: the Pi bullet of "What the operator can do now" carries a change narrative about PO1. Fix: reduce it to the supported host and its commit, and move the PO1 record to a delivered-changes row.
+
 * DONE [#B] Certification residue: three violations, then the thesis is simply true
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -16258,15 +16279,17 @@ Non-blocking findings of fess audit fess/rd-RW-r1.md on readiness subtask RW (ge
 9. Limitation. A fresh checkout with no ext-pi/node_modules has no documented way to create it except a copy from an existing checkout.
 10. Limitation. The new TUI journey q step was not shown failing before the fix. ALLBUILD was not run after the AcpConfig field addition.
 
-* TODO [#C] Move the supported Pi host to fork 1.0.1 (needs authorization)
+* DONE [#C] Move the supported Pi host to fork 1.0.1 (needs authorization)
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-rd-rw-pi-host-1-0-1-bzd2
-:LABELS:   ["needs-authorization","workflow-manager"]
+:LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-04 Sun 03:54]
-:MODIFIED: [2026-10-04 Sun 03:54]
+:MODIFIED: [2026-10-04 Sun 08:23]
 :CREATED_BY: johnw
+:FINISHED: [2026-10-04 Sun 08:23]
+:CLOSE_REASON: PO1 moves ext-pi package.json, package-lock.json, host-versions.test.ts and the supported-version documents to Pi fork 1.0.1 (commit 1ad18c15d) under the operator approval of 2026-10-04. npm run check and npm test pass. Evidence PO/PO1/impl-r1.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -16280,6 +16303,27 @@ Exact change:
 3. ext-pi/README.md "Supported host": "commit `7857926ee`" becomes "commit `1ad18c15d`", and every "0.99.1" becomes "1.0.1".
 
 Current state (evidence RD/RW/impl-r1): ext-pi npm run check passes against 1.0.1 (pi-typecheck.log). The RW walkthrough found that the extension loads and works on 1.0.1. host-versions.test.ts fails only on the version strings (pi-host-versions.log, exit 1).
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 807,
+    "issue_id": "acat-rd-rw-pi-host-1-0-1-bzd2",
+    "author": "johnw",
+    "text": "Readiness closeout (2026-10-04): recorded as a remaining readiness item in the 'Readiness for daily use (2026-10-04)' section of doc/workflow-manager-handoff.md. It does not block the getting-started guide; the final walkthrough passed on 053225ab. Still awaits operator authorization.",
+    "created_at": "2026-10-04T11:18:33Z"
+  },
+  {
+    "id": 808,
+    "issue_id": "acat-rd-rw-pi-host-1-0-1-bzd2",
+    "author": "johnw",
+    "text": "PO1 (operator approval of 2026-10-04, GOAL.md): the supported Pi host is now the fork at 1.0.1, commit 1ad18c15d. Changed: ext-pi/package.json and the root entry of ext-pi/package-lock.json (four @earendil-works devDependency strings), the eight fork link-target entries of the lock (JSON-only edit from the 1.0.1 manifests, no install), ext-pi/test/host-versions.test.ts, and the supported-version statements in ext-pi/README.md, doc/getting-started.md, manager/README.md, doc/api/README.md, doc/workflow-manager-release-evidence.md and the handoff current state. Evidence (PO/PO1/impl-r1): host-versions test failed before the change with nine version findings (exit 1) and passes after; npm run check exit 0; npm test exit 0 (223 passed, 29 skipped), rerun by the auditor with the same result. The remaining 0.99.1 matches are dated run records, hashes and doc/PLAN.org. Fess: non-blocking.",
+    "created_at": "2026-10-04T15:23:40Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Fix the getting-started walkthrough findings
 :PROPERTIES:

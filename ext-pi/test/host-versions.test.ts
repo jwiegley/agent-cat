@@ -6,19 +6,19 @@ import { describe, expect, it } from "vitest";
 
 /** The host packages that `node_modules/@earendil-works` links into the built Pi fork. */
 const SUPPORTED_LINKED: Readonly<Record<string, string>> = {
-  "@earendil-works/chord": "0.99.1",
-  "@earendil-works/pi-ai": "0.99.1",
-  "@earendil-works/pi-client": "0.99.1",
-  "@earendil-works/pi-coding-agent": "0.99.1",
-  "@earendil-works/pi-protocol": "0.99.1",
-  "@earendil-works/pi-server": "0.99.1",
-  "@earendil-works/pi-telemetry": "0.99.1",
-  "@earendil-works/pi-tui": "0.99.1",
+  "@earendil-works/chord": "1.0.1",
+  "@earendil-works/pi-ai": "1.0.1",
+  "@earendil-works/pi-client": "1.0.1",
+  "@earendil-works/pi-coding-agent": "1.0.1",
+  "@earendil-works/pi-protocol": "1.0.1",
+  "@earendil-works/pi-server": "1.0.1",
+  "@earendil-works/pi-telemetry": "1.0.1",
+  "@earendil-works/pi-tui": "1.0.1",
 };
 
 /** Host packages that resolve through the fork's own `node_modules` from pi-coding-agent. */
 const SUPPORTED_THROUGH_FORK: Readonly<Record<string, string>> = {
-  "@earendil-works/pi-agent-core": "0.99.1",
+  "@earendil-works/pi-agent-core": "1.0.1",
 };
 
 /** The supported toolchain. */
@@ -101,13 +101,13 @@ describe("supported Pi host", () => {
     };
     expect(hostFindings(supported)).toEqual([]);
     expect(hostFindings({ ...supported, linked: { ...SUPPORTED_LINKED, "@earendil-works/pi-tui": "0.84.3" } }))
-      .toEqual(["linked package @earendil-works/pi-tui is 0.84.3, not the supported 0.99.1"]);
-    expect(hostFindings({ ...supported, linked: { ...SUPPORTED_LINKED, "@earendil-works/pi-mcp": "0.99.1" } }))
-      .toEqual(["linked package @earendil-works/pi-mcp 0.99.1 is not in the supported set"]);
+      .toEqual(["linked package @earendil-works/pi-tui is 0.84.3, not the supported 1.0.1"]);
+    expect(hostFindings({ ...supported, linked: { ...SUPPORTED_LINKED, "@earendil-works/pi-mcp": "1.0.1" } }))
+      .toEqual(["linked package @earendil-works/pi-mcp 1.0.1 is not in the supported set"]);
     const { "@earendil-works/chord": _chord, ...withoutChord } = SUPPORTED_LINKED;
     expect(hostFindings({ ...supported, linked: withoutChord })).toEqual(["linked package @earendil-works/chord is missing"]);
     expect(hostFindings({ ...supported, throughFork: { "@earendil-works/pi-agent-core": "0.98.0" } }))
-      .toEqual(["fork package @earendil-works/pi-agent-core is 0.98.0, not the supported 0.99.1"]);
+      .toEqual(["fork package @earendil-works/pi-agent-core is 0.98.0, not the supported 1.0.1"]);
     expect(hostFindings({ ...supported, toolchain: { ...SUPPORTED_TOOLCHAIN, node: "24.0.0" } }))
       .toEqual(["toolchain node is 24.0.0, not the supported 22.23.3"]);
   });

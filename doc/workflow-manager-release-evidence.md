@@ -437,7 +437,7 @@ for PG12 is `$R/PG/PG12/impl-r1/openapi-diff.log`.
 | Nix | Nix 2.34.8 (Determinate Nix 3.21.7). |
 | Lean | The toolchains that `model/lean-toolchain` and `bisim/lean-toolchain` pin, built locally under the operator decision of 2026-10-02 for WM-040 only. |
 | Emacs | GNU Emacs 30.2 from the direnv environment of the Emacs worktree. |
-| Pi host | The Pi fork at `~/src/fork/pi`, commit `7857926ee`, with the linked `@earendil-works` packages at 0.99.1, Node 22.23.3, TypeScript 5.9.3 and vitest 4.1.9. |
+| Pi host | The Pi fork at `~/src/fork/pi`, commit `1ad18c15d`, with the linked `@earendil-works` packages at 1.0.1, Node 22.23.3, TypeScript 5.9.3 and vitest 4.1.9. Subtask PO1 moved the supported host to this version, and `npm run check` and `npm test` passed on it (`$R/PO/PO1/impl-r1`). The ext-pi checks of the earlier phases ran on commit `7857926ee` at 0.99.1. |
 
 The [version and compatibility matrix](api/README.md#version-and-compatibility-matrix)
 of the API README gives the version domains that the manager accepts.

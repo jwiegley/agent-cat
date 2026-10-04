@@ -14,7 +14,7 @@ fork is the supported host, as the section "Supported host" states. They
 need these prerequisites:
 
 - Node 22 on `PATH`.
-- The built Pi fork: a checkout of the fork in which
+- The built Pi fork at version 1.0.1: a checkout of the fork in which
   `npm install --ignore-scripts` and `npm run build` ran, as the `README.md`
   of the fork states. The steps run `packages/coding-agent/dist/cli.js` of
   that checkout.
@@ -166,10 +166,10 @@ run references.
 
 ## Supported host
 
-The supported host is the built Pi fork at `~/src/fork/pi`, commit `7857926ee`.
+The supported host is the built Pi fork at `~/src/fork/pi`, commit `1ad18c15d`.
 The directory `node_modules/@earendil-works` holds one symbolic link for each
 host package, and each link points into `~/src/fork/pi/packages`. The linked
-packages are these, each at version 0.99.1:
+packages are these, each at version 1.0.1:
 
 | Package | Fork directory |
 |---|---|
@@ -182,19 +182,19 @@ packages are these, each at version 0.99.1:
 | `@earendil-works/pi-telemetry` | `packages/telemetry` |
 | `@earendil-works/pi-tui` | `packages/tui` |
 
-`@earendil-works/pi-agent-core` 0.99.1 is not linked. It resolves from
+`@earendil-works/pi-agent-core` 1.0.1 is not linked. It resolves from
 `pi-coding-agent` through the `node_modules` directory at the root of the fork,
 to `packages/agent`. The supported toolchain is Node 22.23.3, TypeScript 5.9.3,
 and vitest 4.1.9.
 
 The links are never replaced by a registry install. The `devDependencies`
 strings of `package.json`, and of the root entry of `package-lock.json`, name
-the fork release 0.99.1 for `pi-client`, `pi-coding-agent`, `pi-server` and
+the fork release 1.0.1 for `pi-client`, `pi-coding-agent`, `pi-server` and
 `pi-tui`. In `package-lock.json`, the entry of each package of the table
 above is a link entry in the form that npm writes for a linked local package.
 Its `resolved` path names the fork directory relative to the main checkout
 `~/src/agent-cat/ext-pi`, for example `../../fork/pi/packages/ai`, and the
-target entry of that path records the fork package at 0.99.1. In a worktree
+target entry of that path records the fork package at 1.0.1. In a worktree
 under `~/src/agent-cat/.worktrees`, these relative paths do not reach the
 fork, and the links of `node_modules` are absolute. The lock file also keeps
 the registry entries of the dependencies of the earlier registry releases,

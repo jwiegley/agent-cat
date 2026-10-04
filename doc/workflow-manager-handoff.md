@@ -45,7 +45,13 @@ and `RD/walkthrough-2`, and the fess audits are `fess/rd-<subtask>-r1.md`. The c
   save the verified result. A finished run reads as finished, not as lost,
   and a failed review preparation names its code.
 - Connect Pi through the "Install and start" section of `ext-pi/README.md`
-  (`/wf-launch` in local mode, `/wfm` in service mode).
+  (`/wf-launch` in local mode, `/wfm` in service mode). The supported host
+  is the built Pi fork 1.0.1 (commit `1ad18c15d`). Subtask PO1 moved the
+  `@earendil-works` version strings of `ext-pi/package.json`,
+  `ext-pi/package-lock.json` and `ext-pi/test/host-versions.test.ts` from
+  0.99.1 to 1.0.1 under the operator approval of 2026-10-04, with no
+  install, and `npm run check` and `npm test` pass on that host
+  (`PO/PO1/impl-r1`).
 - Connect Emacs through the section "Using service mode" of the README of
   the `emacs-native` branch of agent-workflows. A review that is closed with
   `q` is discarded on confirmation, `M-x wf-requests` lists open requests,
@@ -105,38 +111,32 @@ problems that RW fixed.
 
 None of these issues blocks the steps of the guide.
 
-1. **Pi host version.** The built Pi fork moved to 1.0.1 (commit
-   `1ad18c15d`), and the supported host stays 0.99.1. The extension loads
-   and works on 1.0.1, and `npm run check` passes. The test
-   `ext-pi/test/host-versions.test.ts` fails on the version strings only.
-   The move is a dependency upgrade and needs operator authorization. The
-   exact change is in `acat-rd-rw-pi-host-1-0-1-bzd2`.
-2. **Real engines.** No paid adapter ran in this run. The `claude`,
+1. **Real engines.** No paid adapter ran in this run. The `claude`,
    `codex` and `droid` model values of the example routing file are
    placeholders that no run has confirmed. The first real run is the
    operator's, after the install and login of section 5 of the guide.
-3. **Runner upgrade.** `bin/agentic-run` in the manager root links one
+2. **Runner upgrade.** `bin/agentic-run` in the manager root links one
    exact Nix store path. After each `nix profile upgrade` the operator stops
    the manager and relinks by hand, as the guide states, and a garbage
    collection can remove the old build (`acat-rd-r7-fess-followup-2tw0`).
-4. **TUI key timing.** An `Enter` pressed on the service request screen
+3. **TUI key timing.** An `Enter` pressed on the service request screen
    while the screen draws can be lost. A second `Enter` requests the review
    (`acat-rd-r7-fess-followup-2tw0`). The resend confirmation of an
    uncertain command still detaches on `q`
    (`acat-rd-rw-fess-followup-brdl`).
-5. **Emacs client location.** The service client is only on the local
+4. **Emacs client location.** The service client is only on the local
    branch `emacs-native` of `~/src/agent-workflows-emacs-native`, 34
    commits ahead of `origin/emacs-native` and never pushed. The branch
    `main` of agent-workflows has the old client. After approval the Emacs
    review buffer still prints its stored admission lines
    (`acat-rd-rw-fess-followup-brdl`).
-6. **Follow-up findings.** The fess audits of R1 to RW filed one follow-up
+5. **Follow-up findings.** The fess audits of R1 to RW filed one follow-up
    each, all P3: `acat-rd-r1-fess-followup-y8oy`,
    `acat-rd-r2-fess-followup-8hyu`, `acat-rd-r3-fess-followup-iyb4`,
    `acat-rd-r4-fess-followup-hp9n`, `acat-rd-r5-fess-followup-woyy`,
    `acat-rd-r6-fess-followup-mbtm`, `acat-rd-r7-fess-followup-2tw0` and
    `acat-rd-rw-fess-followup-brdl`.
-7. **Publication.** `origin/workflow-manager-checkpoint-20260923` and the
+6. **Publication.** `origin/workflow-manager-checkpoint-20260923` and the
    local branch `tui` read `bacc4dc6`, the PH closeout. The readiness
    commits `3f771499` to `053225ab` are not pushed.
 
@@ -146,10 +146,9 @@ the operator direction of 2026-09-30.
 ### Next action
 
 1. The operator follows `doc/getting-started.md` and starts daily use.
-2. The operator decides on the Pi host move to 1.0.1
-   (`acat-rd-rw-pi-host-1-0-1-bzd2`) and on a push of the readiness commits
-   and of the `emacs-native` branch.
-3. The medium findings of items 3, 4 and 5 above go to their owners when
+2. The operator decides on a push of the readiness commits and of the
+   `emacs-native` branch.
+3. The medium findings of items 2, 3 and 4 above go to their owners when
    the operator schedules them.
 
 ## Phase G of 2026-10

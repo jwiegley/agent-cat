@@ -257,20 +257,20 @@ network, deployment or platform acceptance, and it performs no OS containment.
 ## Client baseline policy
 
 The supported targets for the version 1 manager clients are GNU Emacs 30.2
-and the built Pi fork at 0.99.1. The Emacs client declares Emacs 29.1 in its
+and the built Pi fork at 1.0.1. The Emacs client declares Emacs 29.1 in its
 `Package-Requires` header, and every check ran GNU Emacs 30.2, so the 29.1
 minimum stays open until a check runs on Emacs 29.1. The Pi extension supports
-only the fork at 0.99.1, which `ext-pi/test/host-versions.test.ts` enforces.
+only the fork at 1.0.1, which `ext-pi/test/host-versions.test.ts` enforces.
 This baseline does not narrow the native extension's existing
 peer-dependency declarations.
 
 These targets are support-policy decisions, not inferred compatibility limits.
 The [native frontend evidence](../doc/tui-release-evidence.md) records Emacs 30.2
 byte-compilation, checkdoc, and smoke execution. The Pi extension develops and
-runs against the built Pi fork 0.99.1. The `devDependencies` of
-`ext-pi/package.json` name 0.99.1 for the Pi client, coding-agent, server and
+runs against the built Pi fork 1.0.1. The `devDependencies` of
+`ext-pi/package.json` name 1.0.1 for the Pi client, coding-agent, server and
 TUI packages, and `node_modules` links each host package into the fork, which
-reports 0.99.1, as the [extension README](../ext-pi/README.md#supported-host)
+reports 1.0.1, as the [extension README](../ext-pi/README.md#supported-host)
 states. These development pins are not coding-agent version floors. The
 current pinned development shell reports Node 22.23.3, which is a reproducible
 build-runtime observation rather than an independently established Node
