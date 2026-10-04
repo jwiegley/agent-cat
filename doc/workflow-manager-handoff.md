@@ -17,12 +17,14 @@ early. It ended with the pending authorizations of PG3, PG4, PG18, PG26 and
 PG27. The operator decisions of 2026-10-03 resolved them, and the PH run
 closed the last functional items of G5: PH1 `e454fbd7` applies PG18, PH2
 `4d078647` produces the WM-041 runs of record, and PH3 records the final
-functional result of G5. `origin/workflow-manager-checkpoint-20260923`
-reads `1bb9dba4`, so no commit of Phase G or of the PH run is pushed. The
-PG20 change to the
-README of the `emacs-native` branch of agent-workflows in
+functional result of G5 as `821d25a7`.
+`origin/workflow-manager-checkpoint-20260923` and the local branch `tui`
+read `99cef5cf`, so the Phase G commits and the closeout are pushed, and
+the PH commits `e454fbd7`, `4d078647` and `821d25a7` are not. The PG20
+change to the README of the `emacs-native` branch of agent-workflows in
 `~/src/agent-workflows-emacs-native` is the local commit `db7d212` after
-`6e8eac0`. Nothing on that branch is pushed.
+`6e8eac0`. Nothing on that branch is pushed. The subsection "Closeout of
+the PH run of 2026-10-03" below records the end of the PH run.
 
 This section describes the current state. Where any section below differs,
 this section supersedes it, and the sections below remain as chronology.
@@ -63,7 +65,8 @@ directory.
 | PG30 | `c2355ca8` | This section and the release evidence record the result of the gate. |
 | Closeout | `99cef5cf` | This section records the closeout review. |
 | PH2 | `4d078647` | The WM-041 runs of record. `manager/CAPACITY.md` records their measured values. |
-| PH3 | This change | This section and the release evidence record the final functional result of G5. |
+| PH3 | `821d25a7` | This section and the release evidence record the final functional result of G5. |
+| PH closeout | This change | This section, the G5 row of the release evidence and the remaining-scope report of 2026-10-03 record the closeout review of the PH run. |
 
 ### Gate of Phase G
 
@@ -92,7 +95,9 @@ step with its commit, its exit status and its evidence path.
 | Closeout review | BUILD of `agentic-run` and `routing-fixed-point-probe`, then the journey pair at N1 and N8 | `c2355ca8` | Passed, with 46 PASS lines and no process left after the run. |
 | PH1 | `npm run check`, `npm test` (220 passed, 29 live-gated skipped), the JSON validation of the lock file and `make -C doc check` | `99cef5cf` with the lock change, committed as `e454fbd7` | Passed. |
 | PH2 | The six capacity modes and the five failure modes at N8 with no other manager, `capacity_summary.py` over the 11 measurement files, the ceilings check and `make -C doc check` | `e454fbd7` | Passed: 129 keys pass, none fails and none is missing. The runs of record. |
-| PH3 | `make -C doc check`, BUILD of `agentic-run` and `routing-fixed-point-probe`, then the journey at N8 | `4d078647` with this change | Passed, with 23 PASS lines and no process left after the run. |
+| PH3 | `make -C doc check`, BUILD of `agentic-run` and `routing-fixed-point-probe`, then the journey at N8 | `4d078647` with the PH3 change, committed as `821d25a7` | Passed, with 23 PASS lines and no process left after the run. |
+| PH closeout review | BUILD of `agentic-run` and `routing-fixed-point-probe`, the journey pair at N1 and N8, `npm run check`, `npm test` and `make -C doc check` | `821d25a7` | Passed, with 46 PASS lines and no process left after the run. A read-only `npm ls --package-lock-only --offline --all` over a scratch copy of the lock file exits 1 (see "Open findings"). |
+| PH closeout | `make -C doc check` | `821d25a7` with this change | Passed. |
 
 No run of PG26 or PG27 is a run of record under the host-load rule of
 `manager/CAPACITY.md`, because the PF17 manager, PID 61004, ran on the host
@@ -119,7 +124,52 @@ stays open in the tracker, because these items remain:
 - cross-machine evidence, because no second machine took part,
 - the independent closure review of G5.
 
+The upstream gate G3 stays partial, and this does not block the
+functional result of G5. G3 is partial through its deferred security
+gates and through one functional item of WM-028: the database-full case
+did not run, and the file-size limit of `faults-io` stands for it.
 Production activation is not authorized.
+
+### Closeout of the PH run of 2026-10-03
+
+The PH run took the three items that the operator decisions of 2026-10-03
+released after the Phase G closeout `99cef5cf`. It did not stop early,
+and it ended with no pending authorization.
+
+- **Commits.** PH1 `e454fbd7` (PG18, the lock file of `ext-pi`), PH2
+  `4d078647` (the WM-041 runs of record) and PH3 `821d25a7` (the G5
+  record). No product source changed. The run made no commit on
+  `emacs-native`, which stays at the local commit `db7d212`.
+- **Functional result.** PH1 rewrites the `@earendil-works` entries of
+  `ext-pi/package-lock.json` as link entries to the Pi fork, as JSON
+  only, with no install. PH2 ran the six capacity modes and the five
+  failure modes once each at N8 on a host with no other manager. All 129
+  ceiling keys passed, none failed and none is missing, so WM-041 is met
+  for function. PH3 records G5 as met for function on local macOS.
+- **Checks run.** The rows PH1 to PH3 and the two closeout rows of the
+  gate table above. Each ran once. The run plan dropped no check.
+- **Checks not run.** `npm run test:integration` did not run after the
+  lock edit. Its last run is PG30 at `17a5ec73` (9 of 9). The lock edit
+  leaves `node_modules` unchanged, because `node_modules` links the fork
+  through absolute symbolic links. The other checks not run are those of
+  "Checks not run" below.
+- **Closeout review.** Two agent lenses reviewed `99cef5cf..821d25a7` and
+  the `emacs-native` commit `db7d212`. Both returned "approve with notes"
+  with no critical or high finding, and both rate PG18, the WM-041 runs of
+  record and the functional G5 gate met. The working lens built the two
+  journey executables and ran the journey pair at N1 and N8 on `821d25a7`.
+  It passed with 46 PASS lines and no process left. It ran `npm run check`
+  and `npm test` again (220 passed, 29 skipped) and `make -C doc check`.
+  No fix round ran. The closeout corrected the documentation findings:
+  the G5 row of the release evidence and the paragraph above state why a
+  partial G3 does not block functional closure, the release evidence
+  states that `npm run check` and `npm test` do not read the lock file,
+  and the remaining-scope report of 2026-10-03 records the PH results. The
+  finding on the lock file is in "Open findings" below.
+- **Deferred security items.** The PH run did no security work and added
+  no deferred item. The list "Deferred security items" below is
+  unchanged.
+- **Stop reason.** None. The run completed its plan.
 
 ### Closeout review
 
@@ -204,8 +254,9 @@ table above give the checks of PH1 to PH3.
   produces it.
 - `npm ci` in `ext-pi`. The lock file is not an install source: its link
   paths are relative to the main checkout, and it keeps registry entries
-  that no linked package uses. No npm command has parsed the rewritten
-  lock file as an install plan.
+  that no linked package uses. The only npm command that read it is the
+  read-only `npm ls --package-lock-only --offline --all` of the PH
+  closeout review, which exits 1 (see "Open findings").
 - The Emacs 29.1 minimum-version check, because no Emacs 29.1 is available
   locally. Every Emacs check ran GNU Emacs 30.2.
 - The comparison of `/v1` with its earlier contract is a script of the
@@ -283,8 +334,9 @@ report:
   `ext-pi/package-lock.json` on 2026-10-03, and PH1 applied it as
   `e454fbd7` with no install.
 - No authorization is pending. A removal of the registry entries that no
-  linked package uses needs a new operator authorization
-  (`acat-ph1-fess-followup-at5i`).
+  linked package uses, or a regeneration of the lock file that resolves
+  the dependencies of the link targets, needs a new operator
+  authorization (`acat-ph1-fess-followup-at5i`).
 
 ### Package status
 
@@ -347,10 +399,26 @@ to `acat-pg17-fess-followup-ngjm`, `acat-gbh8` (PG19) and
   during a drain leaves the command unresolved, and every other mutation
   key, an answer included, refuses until the command settles or the
   session ends. `tui/README.md` states this behavior.
-- **Lock file of `ext-pi` (low, PH1).** The link paths of
-  `ext-pi/package-lock.json` reach the Pi fork only from the main checkout
-  `~/src/agent-cat/ext-pi`. The lock file keeps 90 registry entries that no
-  linked package reaches (`acat-ph1-fess-followup-at5i`).
+- **Lock file of `ext-pi` (medium, PH closeout review).** npm cannot
+  read `ext-pi/package-lock.json` as a consistent tree. In a scratch
+  layout where `../../fork` reaches `~/src/fork`, `npm ls
+  --package-lock-only --offline --all` exits 1 with 95 unmet dependency
+  lines and marks four of the eight link entries as extraneous. The fork
+  target entries list dependencies that no entry resolves from the fork
+  location, for example `pi-agent-core`, `pi-codemode` and `pi-mcp`. The
+  link paths reach the Pi fork only from the main checkout
+  `~/src/agent-cat/ext-pi`, and the lock file keeps 90 registry entries
+  that no linked package reaches (`acat-ph1-fess-followup-at5i`). The
+  runtime does not depend on the lock file: `node_modules` links the fork
+  through absolute symbolic links, and `npm run check` and `npm test` pass.
+  The lock file is not an install source. A regeneration that adds
+  resolution entries for the link targets is a dependency change and needs
+  operator authorization.
+- **Evidence of the lock file (low, PH closeout review).** `npm run check`
+  and `npm test` resolve through the `node_modules` links and do not read
+  the lock file. They are evidence for the extension against the linked
+  fork. The only check of the lock file itself is the JSON validation of
+  PH1.
 - The open findings of the sections "Phase F part 3 of 2026-10-03" and
   earlier stay open where this section does not close them. This section
   closes the disk write failure, the SSE 429 rule, the pin statements, the
@@ -385,9 +453,11 @@ evidence and the independent closure review remain.
 2. The deferred security stage runs over the items of "Deferred security
    items", followed by an independent closure review of G5. Cross-machine
    evidence waits for the operator to schedule it.
-3. The Integrator pushes the Phase G commits `86c1e9e9` to `c2355ca8`, the
-   closeout `99cef5cf` and the PH commits when the operator permits it. The `emacs-native`
-   commit `db7d212` stays local under the operator decision of 2026-10-01.
+3. The Integrator commits the PH closeout and pushes the PH commits
+   `e454fbd7` to `821d25a7` and the closeout when the operator permits
+   it. The Phase G commits and `99cef5cf` are already on origin. The
+   `emacs-native` commit `db7d212` stays local under the operator
+   decision of 2026-10-01.
 
 ## Phase F part 3 of 2026-10-03
 
@@ -677,7 +747,10 @@ sections below list stay open.
   of `ext-pi/package-lock.json` still name 0.84.3 and 0.85.1 with registry
   URLs, so the lock file disagrees with its root entry, and `npm ci` must
   not use it. `manager/README.md` still states that the Pi package pins
-  coding-agent 0.85.1 (`acat-pf3-fess-followup-ann7`).
+  coding-agent 0.85.1 (`acat-pf3-fess-followup-ann7`). Superseded: PG20
+  corrected the statements, and PH1 `e454fbd7` replaced the registry
+  entries with link entries to the Pi fork. The section "Phase G of
+  2026-10" holds the current finding on the lock file.
 - **Emacs witness search (low).** `service_history_open` in
   `ci/emacs-ui.py` sends the run id to `re-search-forward` without
   `regexp-quote`, and only a batch check covers a child row listed first.
