@@ -136,6 +136,7 @@ module Agentic.Tui.ServiceLane
     switchStep,
     sessionLane,
     unresolvedCommands,
+    outcomeUncertain,
     resendDeferredText,
     resendUnofferedText,
     keyHelpText,
@@ -851,6 +852,15 @@ unresolvedCommands lane = case laneMutation lane of
   _ -> []
   where
     entry attempt = mutationOperation (attemptMutation attempt) <> " " <> mutationURI (attemptMutation attempt)
+
+-- | Whether a command outcome stays uncertain if the frontend stops now:
+-- the active session has a send in flight or an unresolved attempt
+-- ('unresolvedCommands'), or an earlier session left a command unresolved.
+-- A preparation, an intent that the manager accepted and a completed
+-- command, a completed approval included, leave no uncertain outcome.
+outcomeUncertain :: Lane pending location -> Endpoints -> Bool
+outcomeUncertain lane endpoints =
+  not (null (unresolvedCommands lane)) || any (not . null . slotUnresolved) (endpointsSlots endpoints)
 
 -- | The fixed status text of a deferred resend confirmation.
 resendDeferredText :: Text

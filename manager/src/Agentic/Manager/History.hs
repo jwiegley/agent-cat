@@ -76,7 +76,7 @@ withHistory store proof legacy admission respond = bounded $ do
   managed <- withStoreRequest store $ \scoped -> withStoreFiles scoped $ \root -> do
     rows <- map (map (maybe SQL.SQLNull text)) <$> runRead scoped (do
       _ <- currentClient proof >>= either refuseTransaction pure
-      values <- query "SELECT u.id,u.profile_id,u.root_identity,u.native_run_id,u.revision,u.supervision,r.workflow_id,u.request_id,u.parent_run_id,r.lineage_operation,u.result_artifact_id,u.result_state,a.verification_failure FROM runs u LEFT JOIN requests r ON r.id=u.request_id LEFT JOIN artifacts a ON a.id=u.result_artifact_id ORDER BY u.id LIMIT 257" []
+      values <- query "SELECT u.id,u.profile_id,u.root_identity,u.native_run_id,u.revision,u.supervision,r.workflow_id,u.request_id,u.parent_run_id,r.lineage_operation,u.result_artifact_id,u.result_state,a.verification_failure,CAST(u.terminal_observed AS TEXT) FROM runs u LEFT JOIN requests r ON r.id=u.request_id LEFT JOIN artifacts a ON a.id=u.result_artifact_id ORDER BY u.id LIMIT 257" []
       mapM (mapM (\value -> case value of SQL.SQLText t -> pure (Just t); SQL.SQLNull -> pure Nothing; _ -> refuseTransaction StoreIntegrity)) values)
     when (length rows > 256) (throwIO C.ViewTooLarge)
     bracket (try @IOException (openPrivateSubroot root ["runs"])) (either (const (pure ())) closePrivateRoot) $ \opened -> case opened of
@@ -85,7 +85,7 @@ withHistory store proof legacy admission respond = bounded $ do
       Right runs -> do
           now <- getCurrentTime
           let identity = T.pack(privateRootIdentity runs)
-              addresses = [(native,row) | row@[_ ,_,SQL.SQLText bound,SQL.SQLText native,_,_,_,_,_,_,_,_,_] <- rows, bound == identity]
+              addresses = [(native,row) | row@[_ ,_,SQL.SQLText bound,SQL.SQLText native,_,_,_,_,_,_,_,_,_,_] <- rows, bound == identity]
           unless (length addresses == length rows) (throwIO C.ResourceUnavailable)
           entries <- withPrivateDirectoryAt runs [] $ \fd -> foldRunCatalogueBoundedAt 256 (privateRootPath runs) fd Nothing now (\(size,seen,items) entry -> do
             let native = T.pack(takeFileName(entryDirectory entry))
@@ -107,7 +107,7 @@ withHistory store proof legacy admission respond = bounded $ do
   respond items
   where
     renderManaged runs row entry = case row of
-        [SQL.SQLText ident,SQL.SQLText profile,_,SQL.SQLText native,SQL.SQLText revision,SQL.SQLText supervision,workflow,request,parent,lineage,artifact,state,failure] -> do
+        [SQL.SQLText ident,SQL.SQLText profile,_,SQL.SQLText native,SQL.SQLText revision,SQL.SQLText supervision,workflow,request,parent,lineage,artifact,state,failure,SQL.SQLText terminal] -> do
           allowed <- observable store proof profile
           if not allowed then pure [] else do
             unless (T.pack(takeFileName(entryDirectory entry)) == native) (throwIO StoreIntegrity)
@@ -115,7 +115,7 @@ withHistory store proof legacy admission respond = bounded $ do
               (Just controller,CatalogueRun record) -> ownsHistoryRun store controller ident (frontendRunId(recordManifest record)) (T.pack(privateRootIdentity runs))
               _ -> pure False
             let observed = case entry of CatalogueRun record | owned -> CatalogueRun record {recordOwnership=RunOwnedHere}; _ -> entry
-                supervisionNow = if supervision == "owned" && not owned then "lost" else supervision
+                supervisionNow = State.publicSupervision supervision owned (terminal == "1")
             result <- verification artifact state failure
             item <- renderEntry store runs profile ident revision (case workflow of SQL.SQLText value -> Just value; _ -> Nothing) (sqlValue request) (sqlValue parent) (sqlValue lineage) supervisionNow result observed
             pure [item]
@@ -458,7 +458,7 @@ managedRunInView store retainedRoot proof view admission invocations ident = do
   (fields,cut) <- runRead store $ do
     _ <- currentClient proof >>= either refuseTransaction pure
     unless (C.validId ident) (refuseTransaction C.InvalidRequest)
-    rows <- query "SELECT u.id,u.profile_id,u.root_identity,u.native_run_id,u.revision,u.supervision,r.workflow_id,u.request_id,u.parent_run_id,r.lineage_operation,u.result_artifact_id,u.result_state,a.verification_failure FROM runs u LEFT JOIN requests r ON r.id=u.request_id LEFT JOIN artifacts a ON a.id=u.result_artifact_id WHERE u.id=? AND EXISTS(SELECT 1 FROM credential_scopes s WHERE s.credential_id=? AND s.profile_id=u.profile_id AND s.scope='observe')" [text ident,text (credentialRateKey proof)]
+    rows <- query "SELECT u.id,u.profile_id,u.root_identity,u.native_run_id,u.revision,u.supervision,r.workflow_id,u.request_id,u.parent_run_id,r.lineage_operation,u.result_artifact_id,u.result_state,a.verification_failure,CAST(u.terminal_observed AS TEXT) FROM runs u LEFT JOIN requests r ON r.id=u.request_id LEFT JOIN artifacts a ON a.id=u.result_artifact_id WHERE u.id=? AND EXISTS(SELECT 1 FROM credential_scopes s WHERE s.credential_id=? AND s.profile_id=u.profile_id AND s.scope='observe')" [text ident,text (credentialRateKey proof)]
     row <- case rows of [row] -> pure row; _ -> refuseTransaction C.ResourceUnavailable
     case row of
       SQL.SQLText actual:SQL.SQLText profile:SQL.SQLText root:SQL.SQLText native:_ -> do
@@ -470,7 +470,7 @@ managedRunInView store retainedRoot proof view admission invocations ident = do
       _ -> refuseTransaction StoreIntegrity
   snapshot <- fmap checkpointSnapshot <$> State.restoreProjectionCut store cut
   case map (maybe SQL.SQLNull text) fields of
-    [_,SQL.SQLText profile,SQL.SQLText identity,SQL.SQLText native,SQL.SQLText revision,SQL.SQLText supervision,workflow,request,parent,lineage,artifact,state,failure] ->
+    [_,SQL.SQLText profile,SQL.SQLText identity,SQL.SQLText native,SQL.SQLText revision,SQL.SQLText supervision,workflow,request,parent,lineage,artifact,state,failure,SQL.SQLText terminal] ->
       bracket (openPrivateSubroot retainedRoot ["runs"]) closePrivateRoot $ \runs -> do
         unless (T.pack (privateRootIdentity runs) == identity) (throwIO C.ResourceUnavailable)
         now <- getCurrentTime
@@ -489,7 +489,7 @@ managedRunInView store retainedRoot proof view admission invocations ident = do
         value <- renderEntryWith (pure invocations) runs profile ident revision
           (case workflow of SQL.SQLText item -> Just item; _ -> Nothing)
           (sqlValue request) (sqlValue parent) (sqlValue lineage)
-          (if supervision == "owned" && not owned then "lost" else supervision) result entry
+          (State.publicSupervision supervision owned (terminal == "1")) result entry
         revalidateAuthorizedView view >>= either throwIO pure
         pure value
     _ -> throwIO StoreIntegrity

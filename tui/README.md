@@ -281,11 +281,14 @@ profiles and each legacy entry of their bound retention roots once, in the
 identifier order of the collection. `decodeHistory` decodes each item with
 the run decoder and refuses a collection that names one run twice.
 `historyRows` keeps the order of the collection. Each row shows the runtime
-status and the run in the list, and the details show the workflow, the
-profile, the request, the runtime status, the supervision, the verification,
+status, the workflow name and the run in the list, and the details show the
+workflow name with its identifier, the profile, the request, the runtime status, the supervision, the verification,
 the integrity and the limitations. A legacy entry
 (`Agentic.Tui.Service.historyLegacy`) is an entry with an unreadable
 manifest, or a known run with `observer` supervision and no request. The
+workflow name comes from the catalogue of the selected profile. A run of a
+workflow that this catalogue does not list shows its workflow identifier in
+the details only. The
 status line above the list counts the runs, for example `History: current;
 runs: 302 (managed 2, legacy 300)`. `Up` and `Down` select a row, `Home` and
 `End` select the first and the last run, and the application state keeps the
@@ -454,6 +457,17 @@ receipt. A request whose capture this session did not make therefore shows
 its request screen and not an approvable review. The request screen lists
 the captured inputs with their capture identifiers, and it lists the missing
 inputs that the readiness of the request names.
+
+`Enter` on a ready draft requests its review with an `enqueue`. When the
+manager prepares no review, for example because the target of the profile
+names an adapter that does not exist, the request returns to `draft`. The
+request screen then states the end of the requested review under the phase
+(`Agentic.Tui.Service.reviewEnding`), for example `Review: not prepared
+(preparation-failed); the request is back in draft. The manager prints the
+failure on its standard error. Enter requests a new review.` The code
+`preparation-failed` is the cause that the `request-ended` notice of the
+manager log names for such a request. A `refused` request names `refused`. The line remains until the request leaves
+the draft phase or a new review is requested.
 
 Three more request mutations complete the setup of a request. In the input
 editor, `Ctrl-R` removes the supplied value of the displayed input
@@ -686,7 +700,8 @@ is shown. The event worker reconnects as described above. After a manager
 restart, the live monitor shows a run of the earlier lifetime as the manager
 reports it: the runtime line names every supervision other than `owned` after
 the runtime status of the snapshot, for example `Runtime: Running;
-supervision lost`. A restart publishes new profile revisions, so each
+supervision lost`. A run that reached a terminal runtime status reads as
+`owned`, so its runtime line names no supervision. A restart publishes new profile revisions, so each
 workflow catalogue read first reads the current profile
 (`Agentic.Tui.Service.loadProfileWorkflows`), and a request that the earlier
 lifetime queued opens from the overview. The tui-failures mode of
@@ -821,7 +836,10 @@ send it again. A 412 `stale-revision` refusal of a send is
 definite, because the manager recognizes a matching retry of a durable
 command before it evaluates the precondition. The lane becomes idle, retains
 nothing to resend, and reads the selection again
-(`Agentic.Tui.ServiceLane.SendRefused`). A refused answer keeps its draft,
+(`Agentic.Tui.ServiceLane.SendRefused`). A refused request creation instead
+reads the profile and its workflow catalogue again, because the profile or
+descriptor revision changed. The reloaded catalogue keeps the selected
+workflow by name, and `Enter` creates the request again. A refused answer keeps its draft,
 and the line `Control:` states `answer refused: 412 stale-revision; decision
 changed; draft kept`. Any failure that the client does not declare is an
 internal fault. The frontend then shows fixed text without exception detail,
@@ -829,6 +847,12 @@ stops automatic refresh and every further mutation, and keeps only read-only
 actions and detachment. `Ctrl-C`, or `q` while no answer editor has the keys,
 exits without cancelling manager-owned work. Service mode owns no child
 process, so the manager runs continue and no process of the frontend remains.
+The exit prints `Manager command outcome may be uncertain. The manager run was
+not cancelled.` only when a send is in flight or a command is unresolved, in
+the active session or in an earlier session of the Endpoints view
+(`Agentic.Tui.ServiceLane.outcomeUncertain`). A completed approval, an intent
+that the manager accepted and every command with an observed effect leave no
+uncertain outcome.
 
 A question head accepts the simple codes `text`, `verdict`, `flag` and
 `receipt`. `Agentic.Tui.Person.personAnswerValue` converts the editor input by
@@ -937,12 +961,19 @@ lineage rows of a lineage review and the five approval selectors. A lineage
 review shows its parent run and operation in one row and its edits in the
 next row. The summary has no frame: its rows take the whole main area below
 the header, with one column of padding at each side and at most 84 columns
-(`serviceSummaryWidth`). The context row of the header names it `Approve exact
-manager review`. The footer states what the approval keys do. When `y` would
+(`serviceSummaryWidth`). These rows leave no free row at 80x24, so the title
+row of the header names the reviewed workflow and the target label, for
+example `agent-cat  /  review hello · target Deterministic scripted worker`
+(`headerTitle`). The workflow name comes from the loaded catalogue, and the
+workflow identifier stands in for it without one. The context row of the
+header names the view `Approve exact manager review`. The footer states what the approval keys do. When `y` would
 approve, the footer starts with `y APPROVE EXACT REVIEW AND RUN` and `Enter
 DOES NOT APPROVE`, and in a terminal narrower than 72 columns or lower than 16
 rows it starts with `y APPROVE EXACT REVIEW` only. `d` in the footer opens the
-complete exact review, which keeps its frame. `serviceReviewAllowed` reserves
+complete exact review, which keeps its frame. It also states the effects that
+the catalogue declares for the workflow and each reviewed input with its
+source and byte count. Its footer offers `d SUMMARY` and `Esc BACK`, and both
+keys return to the summary. `serviceReviewAllowed` reserves
 the rows of the longest approval-key notice and permits approval only when
 every row fits. With the identifiers that the manager issues, a review
 without lineage, a restart or resume review, a fork review with one

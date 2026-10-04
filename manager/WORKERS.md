@@ -148,9 +148,10 @@ confirms its cleanup, the reservation is released, and the run moves to `lost`
 supervision. Admission does not start, resume or re-dispatch the run.
 
 `GET /v1/runs/{id}` shows `lost` supervision and the `lost-supervision`
-limitation as soon as Admission no longer holds a live worker for the run. The
-runtime status stays the last validated status, such as `running`, and the run
-shows no verified result. The run control resource shows `lost` supervision and
+limitation as soon as Admission no longer holds a live worker for the run and
+the manager has no terminal runtime observation of the run. The runtime status
+stays the last validated status, such as `running`, and the run shows no
+verified result. The run control resource shows `lost` supervision and
 no cancel. A later answer or control for the run is refused with 409
 `ownership-unavailable` and nothing is delivered. The run log ends without its
 stop. The flow verb reports it with `lostSupervision`, with each open ask under
@@ -166,6 +167,25 @@ supervision. The manager does not observe the loss of the proxy alone, and the
 cleanup of the proxy group does not signal the inner group. This is an instance
 of the escaped-descendant limit that the
 [verification section](#verification-and-remaining-owners) states.
+
+## Worker exit after the terminal observation
+
+The worker of a run that ends normally exits after the manager records the
+terminal runtime observation of the run (`terminal_observed`). Admission ends
+the entry as `closed` on the same path as a worker loss: the stored
+supervision label moves from `owned` through `cleanup-pending` to `lost`, the
+worker is closed and its cleanup confirmed, and the reservation is released.
+The outcome of the run is known, so the public views do not report a loss.
+`GET /v1/runs/{id}`, `/v1/runs` and the snapshot route report `owned`
+supervision without the `lost-supervision` limitation, and the run control
+resource reports `owned` supervision with no offer and no cancel.
+`Agentic.Manager.State.publicSupervision` and `terminalSupervision` state
+the rule. It also covers a manager restart after the terminal observation. A
+run whose cleanup stays `cleanup-pending` keeps that label and the
+`quarantined` limitation. The stored label stays `lost`, so retention,
+lineage and quarantine counts treat the run as before. The tui-journey mode
+of `manager/test/service_http.py` checks the run and control views after the
+worker of the finished run exits.
 
 ## Run directory owner lock
 
@@ -224,6 +244,8 @@ shutdown notice then ends the manager log of the lifetime, and the process
 exits with status 0. A restart on the same root and configuration makes each
 such run `lost`, with the `lost-supervision` limitation, its last validated
 runtime status and no cancel, and the start of the run becomes `unresolved`.
+A run with a terminal runtime observation reads as `owned` instead, as the
+[worker exit section](#worker-exit-after-the-terminal-observation) states.
 No reservation is quarantined, so a request of the same resource keys is
 admitted at once. The `cross-client-lifecycle` mode of
 `manager/test/service_http.py` checks these facts with the TUI, Emacs and Pi
@@ -258,8 +280,8 @@ its first response. The replay of an unresolved approval returns that receipt
 and sends nothing.
 
 `GET /v1/runs/{id}` shows `lost` supervision, the `lost-supervision` limitation
-and the last validated runtime status, and the run control resource offers no
-cancel. The quarantined reservation keeps its execution slot and its resource
+and the last validated runtime status of each run without a terminal
+observation, and the run control resource offers no cancel. The quarantined reservation keeps its execution slot and its resource
 keys until the operator releases it with cleanup evidence. While every
 execution slot is held, a new request waits in the queue with `capacity`. A
 request of a profile whose resource keys meet those keys waits with

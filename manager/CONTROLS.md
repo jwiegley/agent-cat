@@ -24,11 +24,13 @@ recovery attempt. Output fragments do not change control availability revisions.
 
 Acceptance requires the original `AcceptedStart` and its actual Worker. A control
 view also requires that association, rather than deriving live availability from a
-stored supervision label. When the stored label is `owned` and Admission holds
-no live original worker for the run, the control view reports `lost`
-supervision, as `GET /v1/runs/{id}` does. The rule covers every run with no
-live original worker, a finished run included, because Admission records no
-transition for a run that finished normally. Before the first Runtime projection the run has no
+stored supervision label. When the stored label is `owned`, Admission holds
+no live original worker for the run, and the validated projection has no
+terminal runtime status, the control view reports `lost` supervision, as
+`GET /v1/runs/{id}` does. A run whose projection has a terminal runtime status
+reports `owned` supervision after its worker exits, also when the cleanup of
+that worker stored the label `lost`, and the view offers no control and no
+cancel (`Agentic.Manager.State.publicSupervision`). Before the first Runtime projection the run has no
 validated runtime state. The control view then offers no control, allows no
 cancellation and names no decision head, and the snapshot view reports a null
 runtime. The existing Admission operation bound and retained

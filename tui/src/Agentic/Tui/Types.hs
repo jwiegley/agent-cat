@@ -22,7 +22,7 @@ import Control.Monad (unless)
 import Data.Aeson (FromJSON (parseJSON), Value (..), eitherDecodeStrict', withObject, (.:), (.:?))
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
-import Data.Aeson.Types (Parser)
+import Data.Aeson.Types (Parser, parseEither)
 import qualified Data.ByteString as BS
 import Data.Char (isAlphaNum)
 import Data.List (nub)
@@ -116,10 +116,24 @@ data LaunchPreview = LaunchPreview
   }
   deriving (Eq, Show)
 
+-- | The routing inspection of the runner. An inspection of version 1 means
+-- that the runner found no version-2 routing, so the result states that no
+-- routing is configured, names the routing file that the runner reads when the
+-- inspection names it, and offers scripted replies.
 decodeRoutingSummary :: BS.ByteString -> Either Text RoutingSummary
 decodeRoutingSummary bytes = case eitherDecodeStrict' bytes of
   Left why -> Left (T.pack why)
-  Right value -> Right value
+  Right (Object fields)
+    | KeyMap.lookup "version" fields == Just (Number 1) -> Left (unconfiguredRouting (KeyMap.lookup "userFile" fields))
+  Right value -> either (Left . T.pack) Right (parseEither parseJSON value)
+
+-- | The text of a runner without version-2 routing, given the routing file
+-- that its inspection names.
+unconfiguredRouting :: Maybe Value -> Text
+unconfiguredRouting file =
+  "No routing is configured"
+    <> (case file of Just (String path) | not (T.null path) -> ": " <> path <> " has no version-2 routing"; _ -> "")
+    <> ". s chooses scripted replies, which contact no external backend."
 
 instance FromJSON RoutingSummary where
   parseJSON value = withObject "routing inspection" (parseSummary value) value

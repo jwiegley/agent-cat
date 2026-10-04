@@ -14,7 +14,7 @@ import qualified Agentic.Manager.Protocol.Command as Command
 import Agentic.Manager.Protocol.Json (decodeStrictValue)
 import Agentic.Manager.State
   ( RunAssociation (..), ProjectionCut, captureProjectionCut, restoreProjectionCut,
-    authorizeObservation, resolveRun, publicRecoveryOptionValue )
+    authorizeObservation, resolveRun, publicRecoveryOptionValue, terminalSupervision )
 import Agentic.Manager.Store
 import Agentic.Runtime
 import Control.DeepSeq (NFData (rnf))
@@ -53,10 +53,11 @@ captureSnapshot proof association = do
   authorizeObservation proof association
   cut <- captureProjectionCut association
   rows <- query
-    "SELECT r.revision,r.supervision,r.result_state,r.result_artifact_id,a.verification_failure,a.private_reference FROM runs r LEFT JOIN artifacts a ON a.id=r.result_artifact_id AND a.run_id=r.id WHERE r.id=?"
+    "SELECT r.revision,r.supervision,r.result_state,r.result_artifact_id,a.verification_failure,a.private_reference,r.terminal_observed FROM runs r LEFT JOIN artifacts a ON a.id=r.result_artifact_id AND a.run_id=r.id WHERE r.id=?"
     [text (associationRun association)]
   (revision, supervision, verification, result) <- case rows of
-    [[SQL.SQLText revision, SQL.SQLText supervision, state, artifact, failure, reference]] -> do
+    [[SQL.SQLText revision, SQL.SQLText stored, state, artifact, failure, reference, SQL.SQLInteger terminal]] -> do
+      let supervision = terminalSupervision (terminal == 1) stored
       verification <- either refuseTransaction pure (verificationValue artifact state failure)
       result <- case (artifact, reference) of
         (SQL.SQLNull, SQL.SQLNull) -> pure Nothing

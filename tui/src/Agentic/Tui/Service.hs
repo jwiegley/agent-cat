@@ -8,7 +8,7 @@ module Agentic.Tui.Service
     Profile (..), Workflow (..), loadProfiles, loadWorkflows, loadProfileWorkflows,
     decodeProfile, decodeWorkflow, createBody,
     Mutation (..), mutationOperation, mutationURI, mutationProfile, prepareMutation,
-    observeDraft, observePreparation, observeReceipt, requestMatches, reviewMatches, reviewLive,
+    observeDraft, observePreparation, observeReceipt, requestMatches, reviewMatches, reviewLive, reviewEnding, reviewEndingText,
     requestReady, literalInputs, suppliedName, receiptMatches, receiptEffectKind, captureMatches, capturedReceipt, captureLimit, readCaptureFile,
     approvalBody, approvalSelectors,
     RunObservation (..), ResultReference (..), Verification (..), Artifact (..),
@@ -600,6 +600,24 @@ approvalSelectors preparation =
     "profileRevision    " <> C.preparationProfileRevision preparation,
     "descriptorRevision " <> C.preparationDescriptorRevision preparation,
     "processGeneration  " <> C.preparationGeneration preparation ]
+
+-- | The public code of a requested review that ended before the frontend
+-- showed it, from one read of its request after the enqueue effect. A request
+-- back in @draft@ names @preparation-failed@, as the @request-ended@ notice of
+-- the manager log names a request whose reservation ended without a review. A
+-- @refused@ request names @refused@. Every other phase names nothing, because
+-- the review is still on its way or the request went on.
+reviewEnding :: C.DraftView -> Maybe Text
+reviewEnding request = case C.draftPhase request of
+  "draft" -> Just "preparation-failed"
+  "refused" -> Just "refused"
+  _ -> Nothing
+
+-- | The line that states the end of a requested review with its code.
+reviewEndingText :: Text -> Text
+reviewEndingText code
+  | code == "refused" = "Review: not prepared (refused); the manager refused the request."
+  | otherwise = "Review: not prepared (" <> code <> "); the request is back in draft. The manager prints the failure on its standard error. Enter requests a new review."
 
 -- | Whether a receipt is the receipt of this mutation. An effect of an input
 -- change, an enqueue, a withdrawal or a discard names the request. An effect of an answer names the
@@ -1790,9 +1808,19 @@ historyLegacy item = case runItemContent item of
 
 -- | The rows of the History view: one row for each run, in the identifier
 -- order of the collection. Each row has the details of the run row of the
--- overview: the runtime status, the supervision and the verification.
-historyRows :: [RunItem] -> [OverviewRow]
-historyRows = map (overviewRow Map.empty . RunMember)
+-- overview: the runtime status, the supervision and the verification. The
+-- given catalogue names map workflow identifiers to workflow names. A run of
+-- a workflow with a known name shows that name in its row and its details.
+historyRows :: Map.Map Text Text -> [RunItem] -> [OverviewRow]
+historyRows names = map $ \item -> named item (overviewRow Map.empty (RunMember item))
+  where
+    named item row = case runItemContent item of
+      KnownContent known | Just name <- Map.lookup (knownWorkflow known) names ->
+        row {overviewRowLabel = "run " <> maybe "unpublished" (\(status,_,_) -> runStatusLabel status) (knownRuntime known)
+            <> "  " <> name <> "  " <> runItemId item,
+          overviewRowDetails = map (\line -> if line == "Workflow: " <> knownWorkflow known
+            then "Workflow: " <> name <> " (" <> knownWorkflow known <> ")" else line) (overviewRowDetails row)}
+      _ -> row
 
 -- | The status line of the installed History view, given the refusal code
 -- of the latest read when that read was refused and the installed runs. A

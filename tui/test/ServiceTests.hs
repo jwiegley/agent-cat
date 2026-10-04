@@ -114,6 +114,11 @@ serviceTests render = do
   check "review selectors fit the acceptance terminal in full" (serviceReviewAllowed preparation "\"preprev_1\"" (140,36))
   check "clipped selectors disable approval" (not (serviceReviewAllowed preparation "\"preprev_1\"" (40,8)))
   check "all five exact selectors are rendered" (all (`elem` serviceReviewRows preparation "\"preprev_1\"") (S.approvalSelectors preparation))
+  check "the summary review names the workflow and the target label in its title row at 80x24"
+    (let model = (initialServiceModel []) {modelScreen = ServiceReviewScreen preparation "\"preprev_1\"",
+            modelWorkflow = Just (S.workflowDisplay selectedWorkflowRow)}
+         frame = render (80,24) ((emptyPresentation model) {presentationService = True, presentationNoColor = True})
+      in ("agent-cat  /  review " <> workflowName (S.workflowDisplay selectedWorkflowRow) <> " · target " <> C.reviewTargetLabel review) `T.isInfixOf` frame)
   -- The identifiers have the lengths that the manager issues. The tui-sizes
   -- journey approves such a review at 80x24 and is refused at 40x12.
   let hex count = T.replicate count "a"
@@ -348,7 +353,7 @@ historyTests render row = do
       unreadable = S.RunItem "run_legacy_2" "handle_2" "profile_main" (S.UnreadableContent "malformed-manifest")
       listed = either (const []) id (S.decodeHistory (runItems <> [later]))
       runs = listed <> [legacy]
-      rows = S.historyRows runs
+      rows = S.historyRows Map.empty runs
       status = S.historyStatus Nothing (Just runs)
       bytes = BS.replicate 80 65 <> "\n"
       result = S.VerifiedResult artifact bytes
@@ -664,8 +669,18 @@ overviewTests render row request0 preparation = do
       staleFrame = render (80,24) (presentation overviewModel stale 0 PrimaryPane)
       narrowList = render (40,12) (presentation overviewModel current 0 PrimaryPane)
       narrowDetails = render (40,12) (presentation overviewModel current 0 SecondaryPane)
+      failedRequest = request {C.draftAdmission = "released", C.draftReasons = []}
+      ended code = (emptyPresentation ((initialServiceModel []) {modelScreen = ServiceRequestScreen failedRequest})) {presentationService = True,
+        presentationNoColor = True, presentationServiceReviewEnded = Just (S.reviewEndingText code)}
+      endedFrame = render (100,30) (ended "preparation-failed")
   checks
-    [ ("the Phase A key sequence slmfci1, Tab, h, Esc leaves the service browser on the workflows list",
+    [ ("a requested review that ends in draft names preparation-failed, a refused request names refused, and every other phase names nothing",
+        S.reviewEnding failedRequest == Just "preparation-failed"
+          && S.reviewEnding failedRequest {C.draftPhase = "refused"} == Just "refused"
+          && all (\phase -> isNothing (S.reviewEnding failedRequest {C.draftPhase = phase})) ["queued","preparing","review","associated"]),
+      ("the request screen states the code of the ended review and that the request is back in draft",
+        "Review: not prepared (preparation-failed); the request is back in draft." `T.isInfixOf` endedFrame),
+      ("the Phase A key sequence slmfci1, Tab, h, Esc leaves the service browser on the workflows list",
         modelScreen afterPhaseA == BrowserScreen && modelTab afterPhaseA == WorkflowsTab && modelWorkflowIndex afterPhaseA == 0),
       ("h in the Phase A sequence opens the workflow help, and no Phase A key opens the overview",
         modelScreen (foldl press browser (take 9 phaseA)) == HelpScreen (S.workflowHelp row)
@@ -920,6 +935,12 @@ switchTests render row profile = do
         L.unresolvedCommands (L.Lane Nothing (L.MutationSending 3 retained) False False Nothing) == unresolved
           && null (L.unresolvedCommands (L.Lane Nothing (L.MutationPreparing 3 create) False False Nothing :: L.Lane T.Text T.Text))
           && null (L.unresolvedCommands (L.Lane Nothing (L.MutationAwaiting create "pending" "/v1/commands/c") False False Nothing :: L.Lane T.Text T.Text))),
+      ("a quit leaves an uncertain outcome for a send in flight, an unresolved attempt or an earlier unresolved command only",
+        L.outcomeUncertain (L.Lane Nothing (L.MutationSending 3 retained) False False Nothing) start
+          && L.outcomeUncertain uncertain start
+          && L.outcomeUncertain (L.sessionLane :: L.Lane T.Text T.Text) switched
+          && not (L.outcomeUncertain (L.sessionLane :: L.Lane T.Text T.Text) start)
+          && not (L.outcomeUncertain (L.Lane Nothing (L.MutationAwaiting create "pending" "/v1/commands/c") False False Nothing :: L.Lane T.Text T.Text) start)),
       ("selecting the earlier endpoint again opens a new session at a new generation and keeps its unresolved command listed",
         backStart == L.SwitchStart "/p/one.json" && backStep == L.SwitchConnected "first again" && L.endpointsActive returned == 0
           && L.activeIdentity returned == Just first && generation returned == L.SessionGeneration 2

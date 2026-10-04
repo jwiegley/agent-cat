@@ -103,6 +103,9 @@ runTests = do
       (initialRunSnapshot (frontendRunId manifest))
       personEvents
   routing <- requireRight "routing fixture" (decodeRoutingSummary routingFixture)
+  check "a version-1 routing inspection states that no routing is configured and offers scripted replies"
+    (either (== "No routing is configured: /h/.config/agent-cat/routing.yaml has no version-2 routing. s chooses scripted replies, which contact no external backend.") (const False)
+      (decodeRoutingSummary "{\"version\":1,\"userFile\":\"/h/.config/agent-cat/routing.yaml\",\"profiles\":[],\"routers\":[],\"sources\":[]}"))
   let alternate = descriptor {workflowName = "other", workflowBlurb = "Unrelated task"}
       runRecord =
         RunRecord

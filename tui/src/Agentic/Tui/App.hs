@@ -85,7 +85,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import qualified Data.Map.Strict as Map
-import Data.List (elemIndex, find)
+import Data.List (elemIndex, find, findIndex)
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -338,6 +338,12 @@ data AppState = AppState
     stateServiceKeySerial :: !Int,
     -- | The sequence number of the press that started the latest approval.
     stateServiceApprovalPress :: !(Maybe Int),
+    -- | The request whose review the operator requested and the frontend has
+    -- not shown yet, set when the enqueue effect is observed.
+    stateServiceReviewRequested :: !(Maybe Text),
+    -- | The request whose requested review ended before it was shown, with
+    -- the public code of that end ('Service.reviewEnding').
+    stateServiceReviewEnded :: !(Maybe (Text, Text)),
     -- | The notice of the latest approval-key press. Only the approval-key
     -- handler sets it, and 'Approval.retainNotice' alone ends or replaces it.
     stateServiceNotice :: !(Maybe Approval.KeyNotice),
@@ -488,6 +494,8 @@ runAppWith backend = mask $ \restore -> do
             stateServiceLineage = Nothing,
             stateServiceKeySerial = 0,
             stateServiceApprovalPress = Nothing,
+            stateServiceReviewRequested = Nothing,
+            stateServiceReviewEnded = Nothing,
             stateServiceNotice = Nothing,
             stateServiceKeyOutcome = Nothing,
             stateServiceOutcomeSerial = 0,
@@ -714,7 +722,9 @@ serviceDecisionRows = maybe [] Service.decisionRows . Lane.installedRead . state
 
 -- | The rows of the installed run list, in identifier order.
 serviceHistoryRows :: AppState -> [Service.OverviewRow]
-serviceHistoryRows = maybe [] Service.historyRows . Lane.installedRead . stateServiceHistory
+serviceHistoryRows state = maybe [] (Service.historyRows names) (Lane.installedRead (stateServiceHistory state))
+  where
+    names = Map.fromList [(Service.workflowId workflow, workflowName (Service.workflowDisplay workflow)) | workflow <- stateServiceWorkflows state]
 
 -- | Load the workflow catalogue of a profile, and then open the given
 -- request when one is given.
@@ -1303,8 +1313,17 @@ handleServiceSent client ticket result = do
             _ -> stateServiceLineage state
       put state {stateServiceLane = lane, stateServiceControlOutcome = outcome, stateServiceExport = exported, stateServiceLineage = lineaged,
         stateModel = (stateModel state) {modelStatus = label}}
-      liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
-      refreshServiceRequest client Lane.AutomaticRefresh
+      -- A creation refused for a stale profile or descriptor revision reads
+      -- the profile and its catalogue again, and the catalogue keeps the
+      -- selected workflow by name. Enter then creates the request again.
+      case Lane.attemptMutation attempt of
+        Service.Create workflow
+          | Lane.refusalCode failure == "stale-revision",
+            Just profile <- find ((== Service.workflowProfile workflow) . Service.profileId) (stateServiceProfiles state) -> do
+              modify $ \current -> current {stateModel = (stateModel current)
+                {modelStatus = "create refused: stale-revision; reading the catalogue of " <> Service.profileId profile <> " again"}}
+              startServiceWorkflows client profile Nothing
+        _ -> refreshServiceRequest client Lane.AutomaticRefresh
     (Lane.SendDelivered attempt@(Lane.Attempt mutation pending _) response,_) -> case mutation of
         Service.Create workflow -> case Manager.decodeObservation (Manager.responseValue response) of
           Right request | Manager.responseStatus response == 201, Service.requestMatches workflow request,
@@ -1317,7 +1336,6 @@ handleServiceSent client ticket result = do
                     modelStatus = "request created; fetching its exact validator"}
               put (idleService state) {stateServiceSelected = Just (Service.RequestSelection (Manager.draftId request) Nothing),
                 stateServiceObservation = Lane.noObservation, stateServiceWorkflow = Just workflow, stateModel = model, stateEditor = blankEditor}
-              liftIO (writeIORef (stateServiceUncertainExit state) False)
               refreshServiceRequest client Lane.AutomaticRefresh
           _ -> uncertainService state (Lane.declaredSendUncertain attempt "invalid creation response" (stateServiceLane state))
         -- A capture answers with its capture receipt, which must name the
@@ -1374,7 +1392,6 @@ applyServiceObservation client (Service.RequestRead requestRead preparation rece
         put (idleService state) {stateModel = model,
           stateEditor = Edit.editorText InputEditor Nothing (inputValue model),
           stateServiceDrafts = Lane.dropDraft (Lane.InputDraft (Manager.draftId request) name) (stateServiceDrafts state)}
-        liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
   put state
   case (pending, requested) of
     (Just (mutation@(Service.SaveLiteral _ name value index),command,location), Just request)
@@ -1407,13 +1424,11 @@ applyServiceObservation client (Service.RequestRead requestRead preparation rece
       put (idleService state) {statePersonEditor = blankEditor,
         stateServiceDrafts = Lane.dropDraft (Lane.AnswerDraft (Service.decisionRun decision) (Service.decisionId decision)) (stateServiceDrafts state),
         stateModel = (stateModel state) {modelStatus = "answer effect observed"}}
-      liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
     -- The retry completes only on its own effect-observed receipt of the
     -- effect kind of its offer, whose address 'Service.receiptMatches' binds
     -- to the recovering occurrence and attempt of the run controls.
     (Just (Service.Retry _ _ offer _,_,_), _) | confirmed (Service.retryEffect offer) -> do
       put (idleService state) {stateModel = (stateModel state) {modelStatus = "retry effect observed"}}
-      liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
     -- A cancel, a steer and a recovery choice complete on the outcome that
     -- 'Service.controlOutcome' reads from their own receipt: the accepting
     -- runtime acknowledgement of a cancel, the effect steered of a steer,
@@ -1423,7 +1438,6 @@ applyServiceObservation client (Service.RequestRead requestRead preparation rece
       Just outcome <- Service.controlOutcome mutation received -> do
         put (idleService state) {stateServiceControlOutcome = Just (run, outcome),
           stateModel = (stateModel state) {modelStatus = Service.mutationOperation mutation <> " outcome observed: " <> outcome}}
-        liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
     -- A removal, a withdrawal and a discard complete on their own
     -- effect-observed receipt of their effect kind, which names the request.
     -- The request screen then shows the request of this read: its readiness
@@ -1433,18 +1447,15 @@ applyServiceObservation client (Service.RequestRead requestRead preparation rece
       put (idleService state) {stateModel = (stateModel state) {modelInputs = Map.delete name (modelInputs (stateModel state)),
           modelScreen = shownScreen state (ServiceRequestScreen request), modelStatus = "input removal observed"},
         stateServiceDrafts = Lane.dropDraft (Lane.InputDraft (Manager.draftId request) name) (stateServiceDrafts state)}
-      liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
     (Just (Service.Withdraw _,_,_), Just request) | confirmed "withdrawn" -> do
       put (idleService state) {stateModel = (stateModel state) {modelScreen = shownScreen state (ServiceRequestScreen request),
         modelStatus = "withdrawal effect observed"}}
-      liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
     (Just (Service.Discard {},_,_), Just request) | confirmed "discarded" -> do
       put (idleService state) {stateModel = (stateModel state) {modelScreen = shownScreen state (ServiceRequestScreen request),
         modelStatus = "discard effect observed; Enter prepares a new review"}}
-      liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
     (Just (Service.Enqueue _,_,_), Just request) | confirmed "enqueued" -> do
-      put (idleService state) {stateModel = (stateModel state) {modelScreen = shownScreen state (ServiceRequestScreen request)}}
-      liftIO (writeIORef (stateServiceUncertainExit state) (isJust (stateServiceApproval state)))
+      put (idleService state) {stateServiceReviewRequested = Just (Manager.draftId request), stateServiceReviewEnded = Nothing,
+        stateModel = (stateModel state) {modelScreen = shownScreen state (ServiceRequestScreen request)}}
     (Just (mutation@(Service.Approve approvedRequest _),command,location), Just request)
       | Manager.draftPhase request == "associated", isJust (Manager.draftRun request),
         Manager.draftId request == Manager.draftId approvedRequest,
@@ -1479,9 +1490,19 @@ applyServiceObservation client (Service.RequestRead requestRead preparation rece
             Service.reviewLive (stateNow current) prep -> do
               let screen = ServiceReviewScreen prep (Manager.observedETag prepObserved)
               put current {stateConfirmDetails = stateConfirmDetails current && modelScreen (stateModel current) == screen,
+                stateServiceReviewRequested = Nothing,
                 stateModel = (stateModel current) {modelScreen = screen, modelStatus = "exact manager review observed"}}
-        _ -> put current {stateConfirmDetails = False, stateModel = (stateModel current)
-          {modelScreen = ServiceRequestScreen request, modelStatus = "manager request: " <> Manager.draftPhase request}}
+        -- A requested review that ends before it is shown states its
+        -- public code on the request screen ('Service.reviewEnding').
+        _ -> do
+          let ended = case stateServiceReviewRequested current of
+                Just ident | ident == Manager.draftId request -> Service.reviewEnding request
+                _ -> Nothing
+          put current {stateConfirmDetails = False,
+            stateServiceReviewRequested = if isJust ended then Nothing else stateServiceReviewRequested current,
+            stateServiceReviewEnded = maybe (stateServiceReviewEnded current) (\code -> Just (Manager.draftId request, code)) ended,
+            stateModel = (stateModel current) {modelScreen = ServiceRequestScreen request,
+              modelStatus = maybe ("manager request: " <> Manager.draftPhase request) Service.reviewEndingText ended}}
       (_, Nothing) -> pure ()
 
 -- | Handle one service event, start the next waiting fetch of live
@@ -1752,11 +1773,17 @@ handleServiceResultCore client serviceEvent = do
       (Lane.ReadFaulted,lane) -> faultService state lane
       (Lane.ReadRefused problem,lane) -> put (failed lane problem)
       (Lane.ReadDelivered (profile, workflows),lane) -> do
+        -- A catalogue read again keeps the selected workflow by name.
+        let named = workflowName . Service.workflowDisplay
+            earlier = named <$> atMay (stateServiceWorkflows state) (modelWorkflowIndex (stateModel state))
+            kept = earlier >>= \name -> (,) name <$> findIndex ((== name) . named) workflows
         put state {stateServiceLane = lane, stateServiceWorkflows = workflows,
           stateServiceProfiles = map (\listed -> if Service.profileId listed == Service.profileId profile then profile else listed)
             (stateServiceProfiles state),
           stateModel = (initialModel (map Service.workflowDisplay workflows) [] (Left "manager owns routing"))
-            {modelStatus = "manager catalogue: " <> Service.profileId profile}, statePaneFocus = PrimaryPane}
+            {modelWorkflowIndex = maybe 0 snd kept,
+              modelStatus = "manager catalogue: " <> Service.profileId profile
+                <> maybe "" (\(name,_) -> "; " <> name <> " stays selected; Enter creates a request") kept}, statePaneFocus = PrimaryPane}
         forM_ opening $ \request -> case find (`Service.requestMatches` request) workflows of
           Just workflow -> openServiceRequest workflow request
           Nothing -> modify $ \current -> current {stateModel = (stateModel current)
@@ -1823,7 +1850,6 @@ handleServiceResultCore client serviceEvent = do
                 put (idleService current) {stateServiceLastReceipt = Just receipt,
                   stateServiceExport = Just (run, Service.ExportVerified export bytes),
                   stateModel = (stateModel current) {modelStatus = "export published; its download verified"}}
-                liftIO (writeIORef (stateServiceUncertainExit current) (isJust (stateServiceApproval current)))
           (Just (mutation@Service.Export {}, command, location), Service.ExportPending receipt)
             | Just reason <- Service.receiptSettlement mutation (Just (mutation, Right receipt)) ->
                 settleService current {stateServiceLastReceipt = Just receipt} (Lane.Attempt mutation command location) reason
@@ -1866,7 +1892,6 @@ handleServiceResultCore client serviceEvent = do
                 put (idleService current) {stateServiceLastReceipt = Just receipt,
                   stateServiceLineage = Just (run, Service.LineageCreated (Service.lineageChoiceName choice) (Manager.draftId child)),
                   stateModel = (stateModel current) {modelStatus = "lineage request created; opening request " <> Manager.draftId child}}
-                liftIO (writeIORef (stateServiceUncertainExit current) (isJust (stateServiceApproval current)))
                 openLineageChild client child
           (Just (mutation@Service.Lineage {}, command, location), Service.LineagePending receipt)
             | Just reason <- Service.receiptSettlement mutation (Just (mutation, Right receipt)) ->
@@ -2381,7 +2406,7 @@ handleEndpointConnected ticket outcome = do
               writeTVar (sinkDelivery (stateServiceSink state)) Lane.DeliveryIdle
             Manager.closeClient earlier
             writeIORef (stateServiceSession state) (Just client)
-            writeIORef (stateServiceUncertainExit state) (any (not . null . Lane.slotUnresolved) (Lane.endpointsSlots next))
+            writeIORef (stateServiceUncertainExit state) (Lane.outcomeUncertain Lane.sessionLane next)
           put (clearServiceSession state) {stateBackend = ServiceBackend client next}
           startServiceProfiles client
           modify $ \current -> current {stateModel = (stateModel current)
@@ -2420,6 +2445,8 @@ clearServiceSession state =
       stateServiceExport = Nothing,
       stateServiceLineage = Nothing,
       stateServiceApprovalPress = Nothing,
+      stateServiceReviewRequested = Nothing,
+      stateServiceReviewEnded = Nothing,
       stateServiceNotice = Nothing,
       stateServiceKeyOutcome = Nothing,
       stateServiceConfirm = Nothing,
@@ -2577,6 +2604,10 @@ toPresentation state =
       presentationLineageError = stateLineageMenu state >>= Service.menuError,
       presentationServiceSavable = serviceSavable state,
       presentationServiceRequestLines = maybe [] (serviceRequestLines . snd) (serviceRequest state),
+      presentationServiceReviewEnded = case (modelScreen (stateModel state), stateServiceReviewEnded state) of
+        (ServiceRequestScreen request, Just (ident, code))
+          | Manager.draftId request == ident, Manager.draftPhase request `elem` ["draft","refused"] -> Just (Service.reviewEndingText code)
+        _ -> Nothing,
       presentationServiceApprovalOffered = case modelScreen (stateModel state) of
         ServiceReviewScreen displayed tag ->
           Approval.approvalOffered (serviceScopes state) (serviceReviewView state) (stateServiceLane state) (serviceReviewCheck state displayed tag)
@@ -2687,6 +2718,12 @@ handleEvent event = do
   handleEventCore event
   after <- get
   resetEnteredViewport before after
+  -- The shutdown notice of an uncertain outcome follows the command state
+  -- after each event ('Lane.outcomeUncertain'): a completed approval or
+  -- another observed effect leaves no uncertain outcome.
+  case stateBackend after of
+    ServiceBackend _ endpoints -> liftIO (writeIORef (stateServiceUncertainExit after) (Lane.outcomeUncertain (stateServiceLane after) endpoints))
+    LocalBackend {} -> pure ()
 
 handleEventCore :: BrickEvent Name AppEvent -> EventM Name AppState ()
 handleEventCore event = do
@@ -3571,7 +3608,8 @@ chooseLive = do
   state <- get
   let model = stateModel state
   case modelRouting model of
-    Left failure -> put state {stateModel = model {modelScreen = FailureScreen failure}}
+    -- Without routing the target screen stays, so s still chooses scripted.
+    Left failure -> put state {stateModel = model {modelStatus = failure}}
     Right routing
       | any (not . engineChoiceCredentialReady) (routingSummaryEngines routing) ->
           put state {stateModel = model {modelStatus = "routing engine is NOT READY"}}

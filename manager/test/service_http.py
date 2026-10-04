@@ -21753,6 +21753,7 @@ for iteration in range(2):
                                     assert verified_run["verification"] == {"state": "verified", "artifactId": artifact["id"]}, (
                                         "JOURNEY-ASSERT terminal evidence is not success", verified_run["verification"])
                                     assert "Terminal: succeeded" in shown_result, "JOURNEY-ASSERT terminal evidence is not success"
+                                    assert "supervision lost" not in shown_result, ("JOURNEY-ASSERT the live monitor shows a finished run as supervision lost", shown_result)
                                     expected = ("Terminal: succeeded", "Result: verified " + str(int(artifact["bytes"])) + " bytes", "Result SHA-256: " + artifact["sha256"])
                                     assert all(row in shown_result for row in expected[1:]), ("JOURNEY-ASSERT result size or digest differs from the verified artifact", expected)
                                     print("PASS actual TUI shows terminal success from the snapshot and the verified result:", expected[1], "and", expected[2], flush=True)
@@ -21851,6 +21852,11 @@ for iteration in range(2):
                             session.send(b"q")
                             assert session.wait_exit() == 0, "service TUI did not exit successfully"
                             session.assert_restored()
+                            if journey:
+                                # A completed approval and observed effects leave no command
+                                # outcome uncertain, so q prints no uncertain-outcome notice.
+                                assert b"Manager command outcome may be uncertain" not in bytes(session.output), (
+                                    "JOURNEY-ASSERT q after a completed approval printed the uncertain-outcome notice")
                         with harness_reads_only(), TuiSession(runner, client_state, command=command, explicit_state=False) as session:
                             session.wait_screen("Manager profiles")
                             session.process.terminate()
@@ -21864,6 +21870,23 @@ for iteration in range(2):
                                 status, final, raw = request("/v1/runs/" + associated["runId"] + "/snapshot", authorized)
                                 assert status == 200 and final["runtime"]["status"] == "succeeded", "the run is not succeeded after the detach"
                                 (work / "tui-detached-snapshot.json").write_bytes(raw)
+                                # The worker of the run exits after its terminal observation. The
+                                # control view then reports no live worker, and the run and its
+                                # control view still read as owned, without lost supervision.
+                                exit_deadline = time.monotonic() + 30
+                                while True:
+                                    status, control, _ = request("/v1/runs/" + associated["runId"] + "/control", authorized)
+                                    assert status == 200
+                                    if control["revision"].startswith("closed_"):
+                                        break
+                                    assert time.monotonic() < exit_deadline, "JOURNEY-DEADLINE worker exit after terminal success"
+                                    time.sleep(0.2)
+                                status, finished, raw = request("/v1/runs/" + associated["runId"], authorized)
+                                (work / "tui-finished-run.json").write_bytes(raw)
+                                assert status == 200 and finished["supervision"] == "owned" and "lost-supervision" not in finished["limitations"] \
+                                    and control["supervision"] == "owned" and not control["cancelAllowed"], (
+                                    "JOURNEY-ASSERT a finished run reads as lost supervision", finished["supervision"], finished["limitations"], control["supervision"])
+                                print("PASS the finished run reads as owned supervision without the lost-supervision limitation after its worker exit", flush=True)
                                 (work / "journey-deferred-keys.txt").write_text(str(deferred_keys[0]) + "\n")
                                 print("JOURNEY deferred-key outcomes:", deferred_keys[0], flush=True)
                                 print("PASS tui-journey: Unicode submission with exact request bytes, explicit approval, live runtime progress from the snapshot, "

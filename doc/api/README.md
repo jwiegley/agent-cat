@@ -379,7 +379,7 @@ credentials, and a network administration scope are absent.
 | Readiness | Declared inputs, supplied representations, missing names, and validation errors. It does not claim semantic preparation succeeded. |
 | Preparation | `live`, `consumed`, or `invalidated`, with expiry, review digest, and reason where applicable. Absence is represented separately. |
 | Runtime | Absent before native evidence, then the validated existing runtime status and nested observations. |
-| Supervision | `owned`, `cleanup-pending`, `lost`, or `observer`. A historically running state can coexist with lost ownership. |
+| Supervision | `owned`, `cleanup-pending`, `lost`, or `observer`. A historically running state can coexist with lost ownership. A run with a terminal runtime status reads as `owned` after its worker exits, because its outcome is known. |
 | Decision | `pending`, `submitting`, `resolved`, or `invalidated`, with runtime generation and ordered position. Timeout does not release an uncertain reservation. |
 | Verification | `absent`, `referenced`, `verified`, or `unavailable`, independently of reported runtime outcome. |
 

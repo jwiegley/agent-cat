@@ -15860,7 +15860,7 @@ The list-item semicolon finding in doc/model-routing-v2.md was fixed in the R1 c
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-04 Sun 00:19]
-:MODIFIED: [2026-10-04 Sun 00:19]
+:MODIFIED: [2026-10-04 Sun 01:07]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -15877,6 +15877,20 @@ Non-blocking findings of fess audit fess/rd-R2-r1.md on readiness subtask R2 (ma
 6. Low. doc/examples/manager-serve.json:68 and manager-offline.json:67 bind the person profile PATH to /usr/bin:/bin, which needs /usr/bin/python3 (Command Line Tools). Fix: one sentence in OPERATIONS.md on what to change when it is absent.
 7. Low. manager/ci/bootstrap.sh is a new check script. The Integrator kept it as the executable form of the runbook. No action unless it grows.
 8. Low. README.md:446 has one line well over 80 columns after a reflow. Fix: rewrap.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 801,
+    "issue_id": "acat-rd-r2-fess-followup-8hyu",
+    "author": "johnw",
+    "text": "The lost supervision label of a completed run is addressed by readiness subtask R3 (acat-rd-r3-run-state-6eii): a run with terminal runtime evidence now reads owned with no lost-supervision limitation. Evidence: RD/R3/impl-r1 m2-hello-probe and journey-n8-final.",
+    "created_at": "2026-10-04T08:07:24Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Bootstrap a manager and client profile in one command
 :PROPERTIES:
@@ -15915,6 +15929,67 @@ Evidence: resume-20260923/RD/R2/impl-r1 (acceptance a1-a14, bootstrap, builds, J
     "author": "johnw",
     "text": "Follow-up issue id: acat-rd-r2-fess-followup-8hyu.",
     "created_at": "2026-10-04T07:19:04Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Resolve the R3 run state fess findings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-r3-fess-followup-iyb4
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 01:07]
+:MODIFIED: [2026-10-04 Sun 01:07]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/rd-R3-r1.md on readiness subtask R3 (run state that reads true), with the implementer's disclosed limitations.
+
+1. Medium. tui/src/Agentic/Tui/Service.hs:610-620: the failed-preparation code preparation-failed is inferred by the client from the draft phase. The manager stderr shows only class=command InvalidInput, which does not name the cause (for example a missing adapter). Put the real cause in the manager request-ended notice, or in an additive /v1 request field, and show it on the request screen.
+2. Medium. tui/src/Agentic/Tui/App.hs:1316-1326, 1776-1786: the 412 stale-revision create path (profile and catalogue reload that keeps the workflow by name) has no test and was not run end to end. Run it once by hand or add a model-level check of the refusal branch.
+3. Low. tui/src/Agentic/Tui/Types.hs:132-136: with no routing source the runner reports that the file does not exist, but the TUI says the file has no version-2 routing, and it drops the exampleFile the runner names. Say that the file does not exist and name the example file to copy.
+4. Low. History creation time is deferred: GET /v1/runs has no createdAt, and the TUI, ext-pi and Emacs run parsers reject unknown fields. Add an additive createdAt with the parser and test/manager_client_vectors.json updates. The workflow and target appear in the review header title row, and effects and inputs only in the d details view.
+5. Low. tui/src/Agentic/Tui/App.hs:1786: the suffix "<name> stays selected; Enter creates a request" appears on every catalogue read that keeps a selection, not only on the stale-revision reload.
+6. Low. manager/src/Agentic/Manager/State.hs:106,148,452: the terminal-status list is repeated three times. Factor out one isTerminalStatus predicate.
+7. Evidence only. RD/R3/impl-r1/m2-hello-probe.exit contains "exit=" with no code. The log supports exit 0.
+8. Disclosed. A finished run can briefly read cleanup-pending with the quarantined limitation while its worker is cleaned up, and keeps that label if cleanup gets stuck.
+9. Disclosed. Each manual session logged one GET /v1/events 503 storage-unavailable fault (class=unexpected InvalidRequest) on the manager stderr. R2 evidence has the same line. Not investigated.
+10. Disclosed. The no-routing target screen is checked by a decoder unit test only and was not driven in a PTY.
+
+* DONE [#C] Make run state read true in the manager and TUI
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-r3-run-state-6eii
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 01:07]
+:MODIFIED: [2026-10-04 Sun 01:07]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-04 Sun 01:07]
+:CLOSE_REASON: Acceptance met by recorded evidence (RD/R3)
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Readiness subtask R3 of 2026-10-03 (operator direction: functional readiness). Run state reads true in the manager and the TUI. A run with terminal runtime evidence reads supervision owned with no lost-supervision limitation in run detail, the run list, the control view and the snapshot (publicSupervision and terminalSupervision in manager State.hs). The stored label is unchanged, and lost is still reported for a worker exit or manager loss before terminal evidence. The TUI sets the uncertain-exit flag only for an in-flight send, an unresolved command or an unresolved endpoint slot. A failed review preparation shows its code on the request screen and states that the request is back in draft. A 412 stale-revision on create reloads the profile and catalogue and keeps the workflow selected by name. The review title names the workflow and target, the details view lists effects, inputs and Esc BACK, History shows the workflow name, and the local target screen says that no routing is configured and offers s for scripted.
+
+Evidence: resume-20260923/RD/R3/impl-r1 (build-8, JOURNEY-ONCE(r3, 8) journey-n8-final exit 0, tui-consent-control and tui-journey-broken-answer controls fail with their expected messages, PTY sessions m5-m8 against an init manager, check-prose exit 0), fess/rd-R3-r1.md (audit, non-blocking).
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 800,
+    "issue_id": "acat-rd-r3-run-state-6eii",
+    "author": "johnw",
+    "text": "All acceptance items passed: RD/R3/impl-r1 (build-8 exit 0, JOURNEY-ONCE(r3, 8) journey-n8-final exit 0 with the finished-run PASS line, tui-consent-control and tui-journey-broken-answer controls exit 1 with their expected messages, PTY sessions m5-m8 against an init manager, check-prose exit 0). The audit fess/rd-R3-r1.md reran tui-consent-control on the final build and found nothing blocking. Follow-ups: acat-rd-r3-fess-followup-iyb4.",
+    "created_at": "2026-10-04T08:07:23Z"
   }
 ]
 #+end_src

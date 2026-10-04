@@ -173,6 +173,9 @@ data Presentation = Presentation
     -- | The lines that name the installed request, its phase and its run.
     -- The live monitor shows them in service mode.
     presentationServiceRequestLines :: ![Text],
+    -- | The line that states the end of a requested review that the shown
+    -- request never offered, with its public code.
+    presentationServiceReviewEnded :: !(Maybe Text),
     -- | The installed run observation in service mode. The live monitor takes
     -- the published workflow and target label from it, also when the runtime
     -- is absent.
@@ -294,6 +297,7 @@ emptyPresentation model =
       presentationServiceCredentialRefused = False,
       presentationServiceObservation = [],
       presentationServiceRequestLines = [],
+      presentationServiceReviewEnded = Nothing,
       presentationServiceRun = Nothing,
       presentationServiceRecoveryOffers = [],
       presentationServiceRunKeys = [],
@@ -385,7 +389,7 @@ layout presentation width height
             [ contextRow,
               bar width (muted (displayText (oneLine width (liveSubtitle presentation))))
             ] <> identityRows
-        | otherwise -> [bar width (withAttr (attrName "title") (displayText (" agent-cat  /  " <> screenTitle (modelScreen (presentationModel presentation))))), contextRow]
+        | otherwise -> [bar width (withAttr (attrName "title") (displayText (oneLine width (" agent-cat  /  " <> headerTitle presentation)))), contextRow]
             <> identityRows
     mainWidget = hLimit width (vLimit mainRows (padBottom Max (layerView presentation width height mainRows)))
     statusWidgets = [vLimit outcomeRows (bar width (statusView presentation width outcomeRows)) | statusRows == 1]
@@ -462,6 +466,18 @@ endpointsLines endpoints = concat (zipWith entry [0 :: Int ..] (endpointsSlots e
 bar :: Int -> Widget n -> Widget n
 bar width widget = hLimit width (padRight Max widget)
 
+
+-- | The title of the screen in the header. The summary review names the
+-- reviewed workflow, by its catalogue name when the frontend has its
+-- descriptor, and the target label of the review.
+headerTitle :: Presentation -> Text
+headerTitle presentation = case modelScreen model of
+  ServiceReviewScreen preparation _ | not (presentationExactDetails presentation) ->
+    let review = Manager.preparationReview preparation in
+      "review " <> maybe (Manager.reviewWorkflow review) workflowName (modelWorkflow model) <> " · target " <> Manager.reviewTargetLabel review
+  screen -> screenTitle screen
+  where
+    model = presentationModel presentation
 
 headerContext :: Presentation -> Widget Name
 headerContext presentation = case modelScreen model of
@@ -643,7 +659,9 @@ serviceRequestLines request =
 serviceRequestView :: Presentation -> Manager.DraftView -> Widget Name
 serviceRequestView presentation request = pane "Manager request" $ viewport FailureViewport Vertical $ vBox $ map displayTextWrap $
   [ "Request: " <> Manager.draftId request, "Profile: " <> Manager.draftProfile request,
-    "Phase: " <> Manager.draftPhase request, "Admission: " <> Manager.draftAdmission request,
+    "Phase: " <> Manager.draftPhase request ]
+  <> maybe [] pure (presentationServiceReviewEnded presentation)
+  <> [ "Admission: " <> Manager.draftAdmission request,
     "Position: " <> maybe "none" shown (Manager.draftPosition request),
     "Blocking reasons: " <> T.intercalate ", " (Manager.draftReasons request),
     "Missing inputs: " <> (if null missing then "none" else T.intercalate ", " missing),
@@ -665,7 +683,9 @@ serviceRequestView presentation request = pane "Manager request" $ viewport Fail
 -- restart, resume or fork review with one replacement, and the rows of a
 -- review whose profile identifier has the maximum length of 128 characters,
 -- fit an 80x24 terminal beside the reserved notice rows, so the operator can
--- approve at that size.
+-- approve at that size. These rows leave no row free at 80x24, so the title
+-- row of the header names the workflow and the target label ('headerTitle'),
+-- and the exact details add the declared effects and the reviewed inputs.
 serviceReviewRows :: Manager.Preparation -> Text -> [Text]
 serviceReviewRows preparation tag =
   [ "Request: " <> Manager.preparationRequest preparation,
@@ -686,6 +706,19 @@ serviceReviewRows preparation tag =
     editText edit = case edit of
       Manager.ReviewDrop occurrence -> "drop occurrence " <> occurrence
       Manager.ReviewReplace occurrence digest -> "replace occurrence " <> occurrence <> " (answer SHA-256 " <> digest <> ")"
+
+-- | The effects that the catalogue descriptor of a reviewed workflow
+-- declares, when the frontend has that descriptor.
+reviewEffectsText :: Maybe WorkflowDescriptor -> Text
+reviewEffectsText = maybe "not in the loaded catalogue" $ \workflow ->
+  let capabilities = workflowCapabilities workflow in
+    "effectful " <> yesNo (descriptorEffectful capabilities) <> ", tool execution " <> yesNo (descriptorToolExecution capabilities)
+
+-- | The reviewed inputs, each with its source and its byte count.
+reviewInputsText :: Manager.Review -> Text
+reviewInputsText review = case Manager.reviewInputs review of
+  [] -> "none"
+  items -> T.intercalate ", " [Manager.reviewInputName item <> " (" <> Manager.reviewInputSource item <> ", " <> Manager.reviewInputBytes item <> " bytes)" | item <- items]
 
 -- | The width of the rows of the summary review at this terminal width. The
 -- summary has no frame: its rows take the whole main area with one column of
@@ -740,6 +773,8 @@ serviceReviewView presentation preparation tag width _ mainHeight
         "Profile: " <> Manager.reviewProfile review,
         "Workspace: " <> Manager.reviewWorkspaceLabel review,
         "Target: " <> Manager.reviewTargetLabel review,
+        "Effects: " <> reviewEffectsText (modelWorkflow (presentationModel presentation)),
+        "Inputs: " <> reviewInputsText review,
         "Policy:", jsonTextValue (Manager.policyValue (Manager.reviewPolicy review)),
         "Exact native input identities:", jsonTextValue (toJSON (Manager.reviewInputs review)),
         "Exact plan:", Manager.reviewPlan review,
@@ -915,8 +950,11 @@ targetView presentation width = hCenter $ hLimit (min 84 width) $
         muted (displayTextWrap "Routing requires full pin coverage. You will review the exact plan before launch."),
         displayText ""
       ]
+    -- Without routing, the target screen states the reason and still offers
+    -- scripted replies.
     routingLines = case modelRouting model of
-      Left failure -> [withAttr (attrName "error") (displayTextWrap ("ERROR: " <> failure))]
+      Left failure -> [withAttr (attrName "warning") (displayTextWrap failure), displayText "", muted hBorder,
+        shortcutLine "s SCRIPTED", muted (displayTextWrap "Deterministic replies; no external backend is contacted.")]
       Right routing ->
         [ displayTextWrap ("Persona: " <> fromMaybe "none" (routingSummaryPersona routing) <> maybe "" (\source -> " (" <> source <> ")") (routingSummaryPersonaSource routing)),
           withAttr (attrName "warning") (displayTextWrap "Live providers may charge for requests."),
@@ -1513,7 +1551,7 @@ footerItems presentation width height
         (if not (presentationServiceApprovalOffered presentation) then []
          else if compact then ["y APPROVE EXACT REVIEW"]
          else ["y APPROVE EXACT REVIEW AND RUN", "Enter DOES NOT APPROVE"])
-        <> ["d EXACT DETAILS", "q DETACH"]
+        <> (if presentationExactDetails presentation then ["d SUMMARY", "Esc BACK"] else ["d EXACT DETAILS"]) <> ["q DETACH"]
         <> ["X DISCARD" | presentationServiceMutation presentation == Nothing, not (serviceMutationsStopped presentation)]
         <> ["RESIZE TO REVIEW" | not (serviceReviewAllowed preparation tag (width,height))]
       ServiceCommandScreen _ -> ["g REFRESH", "q DETACH"] <>

@@ -8,7 +8,8 @@ module Agentic.Manager.State
     decisionHeadIds, decisionQueueIds, decisionHeadRefusal,
     withControlSurface, withClosedControlSurface, withDecision, decisionInView,
     authorizeObservation, requireProjection, withProfileProjection, withProfileProjectionSource,
-    ProjectionCut, captureProjectionCut, restoreProjectionCut, publicRecoveryOptionValue
+    ProjectionCut, captureProjectionCut, restoreProjectionCut, publicRecoveryOptionValue,
+    publicSupervision, terminalSupervision
   ) where
 
 import Agentic.Manager.Admission (AcceptedStart, acceptedStartRun, consumeAcceptedStart, acceptedControlContext, acceptControlCommand, acceptAndDeliverControlCommand, observeAcceptedStart)
@@ -445,10 +446,10 @@ controlSurfaceBorrowed store proof association approved live = do
         _ -> refuseTransaction StoreIntegrity
       if unchanged && boundary==projectionBoundary snapshot then Just <$> pendingDecisions association else pure Nothing
     pure((\current -> (revision,supervision,snapshot,current)) <$> heads)
-  -- A stored owned label without a live original worker reads as lost, as
-  -- the run resource reports it. This covers every such run, including a
-  -- finished run whose label Admission never changes.
-  let reported=if supervision=="owned" && not live then "lost" else supervision
+  -- The control view reports the supervision that the run resource
+  -- reports ('publicSupervision'). The terminal runtime status of the
+  -- validated projection is the terminal observation of the run.
+  let reported=publicSupervision supervision live (snapshotRunStatus snapshot `elem` [RunSucceeded,RunFailedStatus,RunCancelledStatus])
       available=live && supervision=="owned" && snapshotRunStatus snapshot==RunRunning
       offer operation occurrence attempt generation timings choices targets=object
         ["operation" .= (operation::Text),"address" .= object(["occurrenceId" .= T.pack(show(occurrenceNumber occurrence))] <>
@@ -474,6 +475,28 @@ controlSurfaceBorrowed store proof association approved live = do
   pure(object ["version" .= (1::Int),"runId" .= associationRun association,"revision" .= (if live then revision else "closed_"<>revision),
     "supervision" .= (reported::Text),"cancelAllowed" .= available,"offers" .= offers,
     "decisionHeadId" .= case heads of (ident,_,_,_,_,_):_->Just ident;_->Nothing])
+
+-- | The public supervision of a managed run, given its stored label,
+-- whether Admission holds the live original worker of the run, and whether
+-- the manager recorded the terminal runtime observation of the run. A stored
+-- @owned@ label without a live original worker reads as @lost@ while the run
+-- has no terminal observation. A run with a terminal observation reads as
+-- 'terminalSupervision' states.
+publicSupervision :: Text -> Bool -> Bool -> Text
+publicSupervision stored live terminal
+  | stored == "owned" && not live && not terminal = "lost"
+  | otherwise = terminalSupervision terminal stored
+
+-- | The supervision of a run with a terminal runtime observation. The
+-- manager supervised such a run to its terminal status, so its outcome is
+-- known. The exit of its worker afterward, the release of its reservation
+-- and a manager restart change the stored label to @lost@, but the run
+-- reads as @owned@. A @cleanup-pending@ run stays quarantined, and every
+-- run without a terminal observation keeps its stored label.
+terminalSupervision :: Bool -> Text -> Text
+terminalSupervision terminal stored
+  | terminal && stored `elem` ["owned","lost"] = "owned"
+  | otherwise = stored
 
 -- IDs, occurrence, generation, revision, kind, state in per-run opening order.
 type DecisionRow = (Text,Text,Text,Text,Text,Text)
