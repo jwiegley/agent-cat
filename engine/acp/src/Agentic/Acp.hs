@@ -330,7 +330,8 @@ import qualified Data.Vector as V
 import System.Directory (canonicalizePath, doesFileExist)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode)
-import System.FilePath (splitSearchPath, (</>))
+import System.FilePath (isAbsolute, normalise, splitSearchPath, (</>))
+import Paths_agentic (getDataFileName)
 import System.IO
   ( BufferMode (BlockBuffering, LineBuffering),
     Handle,
@@ -486,7 +487,10 @@ adapterConfig spec arguments =
       acpLiteralArguments = adapterLiteralArguments spec
     }
 
--- | Deterministic repository-local test adapter.
+-- | The deterministic test adapter. Its script is a data file of the package:
+-- 'resolveAcpCommand' finds it in the working directory when that directory
+-- is a checkout of the repository, and otherwise in the installed data
+-- directory of the runner.
 stubAdapter :: AdapterSpec
 stubAdapter = AdapterSpec ["python3", "engine/acp/test/stub_adapter.py"] Nothing False
 
@@ -523,11 +527,22 @@ resolveAcpCommand cfg = case acpCommand cfg of
                         <> T.pack fallback
                         <> "' does not exist"
 
+    -- A relative path that names no file in the working directory names a
+    -- data file of the package when the data directory holds one, as it holds
+    -- the script of 'stubAdapter'.
     absolutize argument
       | '/' `notElem` argument = pure argument
       | otherwise = do
           there <- doesFileExist argument
-          if there then canonicalizePath argument else pure argument
+          if there
+            then canonicalizePath argument
+            else
+              if isAbsolute argument
+                then pure argument
+                else do
+                  installed <- getDataFileName argument
+                  shipped <- doesFileExist installed
+                  pure (if shipped then normalise installed else argument)
 
 -- | The first entry of @PATH@ holding a file of this name.
 searchPath :: String -> IO (Maybe FilePath)

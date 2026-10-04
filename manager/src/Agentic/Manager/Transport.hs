@@ -5,7 +5,7 @@
 -- | A bounded authenticated HTTPS boundary around the existing coordinator.
 module Agentic.Manager.Transport
   ( AuthenticatedApplication, runHttps, authenticated, readJsonRequest,
-    octetStreamSource, respondBytes, problem, HttpFailure (..)
+    octetStreamSource, respondBytes, problem, HttpFailure (..), ListenerFileRefused (..)
   ) where
 
 import Agentic.Manager.Authorization (AuthorizedView, CredentialProof, authenticateCredential, releaseResponseLoans, revalidateAuthorizedView)
@@ -19,8 +19,8 @@ import Agentic.Runtime (readPrivateConfigurationFile)
 import Control.Concurrent (forkIOWithUnmask)
 import Control.Concurrent.QSem (newQSem, waitQSem, signalQSem)
 import Control.Exception
-  (Exception, SomeException, SomeAsyncException, bracket, catch,
-   finally, fromException, mask, onException, throwIO)
+  (Exception, IOException, SomeException, SomeAsyncException, bracket, catch,
+   finally, fromException, mask, onException, throwIO, try)
 import Control.Monad (forM_, replicateM_, unless, void, when)
 import Data.Aeson (object, (.=))
 import qualified Data.ByteString as BS
@@ -38,6 +38,7 @@ import Network.TLS (Version (TLS13))
 import qualified Network.Wai as Wai
 import qualified Network.Wai.Handler.Warp as Warp
 import qualified Network.Wai.Handler.WarpTLS as TLS
+import System.IO.Error (ioeGetErrorString)
 import System.Timeout (timeout)
 
 -- | A request whose possession proof is current, not authority for any resource.
@@ -47,14 +48,24 @@ type AuthenticatedApplication = CredentialProof -> Wai.Application
 data HttpFailure = HttpFailure !Int !Text deriving (Show)
 instance Exception HttpFailure
 
+-- | A certificate or key file of the listener that the private-file rule
+-- refuses: the configuration member, @certificateFile@ or @keyFile@, the
+-- configured path and the reason of the refusal. It is a local diagnostic of
+-- the operator and never a response field.
+data ListenerFileRefused = ListenerFileRefused !Text !FilePath !String deriving (Show)
+instance Exception ListenerFileRefused
+
 -- | Retain the original listener and a finite number of connection workers.
 -- TLS is mandatory, including loopback. Peer addresses are numeric and explicit.
--- When the listener stops, it closes its socket, runs the closing action of
--- the application and then joins every connection worker.
-runHttps :: HttpsConfiguration -> ConfigurationLimits -> IO () -> Wai.Application -> IO ()
-runHttps configuration limits closing application = do
-  certificate <- readPrivateConfigurationFile (httpsCertificateFile configuration) 1048576
-  key <- readPrivateConfigurationFile (httpsKeyFile configuration) 1048576
+-- The certificate and the key are read as private configuration files, and a
+-- refused file stops the start with 'ListenerFileRefused'. The bound action
+-- runs once the socket listens. When the listener stops, it closes its socket,
+-- runs the closing action of the application and then joins every connection
+-- worker.
+runHttps :: HttpsConfiguration -> ConfigurationLimits -> IO () -> IO () -> Wai.Application -> IO ()
+runHttps configuration limits bound closing application = do
+  certificate <- listenerFile "certificateFile" (httpsCertificateFile configuration)
+  key <- listenerFile "keyFile" (httpsKeyFile configuration)
   addresses <- numeric (httpsHost configuration) (httpsPort configuration)
   peers <- concat <$> mapM (\host -> numeric host 0) (httpsAllowedPeers configuration)
   address <- case addresses of value:_ -> pure value; [] -> throwIO (HttpFailure 503 "storage-unavailable")
@@ -83,9 +94,12 @@ runHttps configuration limits closing application = do
     Socket.setSocketOption listener Socket.ReuseAddr 1
     Socket.bind listener (Socket.addrAddress address)
     Socket.listen listener (min 128 capacity)
+    bound
     TLS.runTLSSocket tls settings listener application)
     `finally` (closing >> replicateM_ capacity (waitQSem slots))
   where
+    listenerFile member path = try @IOException (readPrivateConfigurationFile path 1048576)
+      >>= either (throwIO . ListenerFileRefused member path . ioeGetErrorString) pure
     numeric :: Text -> Int -> IO [Socket.AddrInfo]
     numeric host port = Socket.getAddrInfo
       (Just Socket.defaultHints {Socket.addrFlags = [Socket.AI_NUMERICHOST,Socket.AI_NUMERICSERV],

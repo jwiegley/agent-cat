@@ -320,8 +320,8 @@ import GHC.Clock (getMonotonicTimeNSec)
 import Numeric (showFFloat)
 import qualified Paths_agentic as Paths
 import Data.Version (showVersion)
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getCurrentDirectory, getHomeDirectory, getTemporaryDirectory, listDirectory, makeAbsolute)
-import Agentic.Cli.LocalAdmin (runLocalAdmin)
+import System.Directory (canonicalizePath, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, getCurrentDirectory, getHomeDirectory, getTemporaryDirectory, listDirectory, makeAbsolute)
+import Agentic.Cli.LocalAdmin (addClient, configurationNote, initManager, runLocalAdmin)
 import System.Environment (getArgs, getEnvironment, getExecutablePath, lookupEnv)
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
 import System.FilePath (isAbsolute, takeDirectory, takeExtension, takeFileName, (</>))
@@ -969,6 +969,8 @@ cliMainWithBroker broker reg = do
   args <- map T.pack <$> getArgs
   case args of
     ["--manager", "admin", "--config", path] -> runLocalAdmin (loadManagerConfiguration reg) (T.unpack path)
+    ("--manager" : "init" : options) -> managerInitCmd reg options
+    ("--manager" : "add-client" : options) -> managerAddClientCmd reg options
     ("--manager" : "serve" : "--config" : path : options) -> case legacyHistoryOptions options of
       Just legacy -> managerServeCmd reg (T.unpack path) legacy
       Nothing -> die reg 1 "manager serve takes only --legacy-history ROOT=PROFILE options with distinct absolute roots"
@@ -992,20 +994,65 @@ legacyHistoryOptions options = do
       ((root, profile) :) <$> go rest
     go _ = Nothing
 
+-- | @--manager init --root ABS_DIR [--port N]@: create a manager root for
+-- this executable. The default port is 8443.
+managerInitCmd :: Registry -> [Text] -> IO ()
+managerInitCmd reg options = case go Nothing Nothing options of
+  Just (Just root, port) -> do
+    executable <- getExecutablePath >>= canonicalizePath
+    outcome <- try (initManager (loadManagerConfiguration reg) executable (T.unpack root) (fromMaybe 8443 port))
+    case outcome of
+      Left failure -> die reg 1 ("manager init: " <> T.pack (displayException (failure :: IOException)))
+      Right result -> either (die reg 1 . ("manager init: " <>)) (mapM_ say) result
+  _ -> die reg 1 "manager init takes --root ABS_DIR and an optional --port N"
+  where
+    go root port = \case
+      [] -> Just (root, port)
+      "--root" : value : rest | isNothing root -> go (Just value) port rest
+      "--port" : value : rest | isNothing port, Just number <- readMaybe (T.unpack value) -> go root (Just number) rest
+      _ -> Nothing
+
+-- | @--manager add-client --config ABS_FILE --profile-file ABS_FILE [--profile
+-- ID]...@: issue one client credential and write its client profile. Without
+-- @--profile@, the credential covers every configured profile.
+managerAddClientCmd :: Registry -> [Text] -> IO ()
+managerAddClientCmd reg options = case go Nothing Nothing [] options of
+  Just (Just config, Just profileFile, profiles) ->
+    try (addClient (loadManagerConfiguration reg) (T.unpack config) (T.unpack profileFile) profiles) >>= \case
+      Left failure -> die reg 1 ("manager add-client: " <> T.pack (displayException (failure :: IOException)))
+      Right result -> either (die reg 1 . ("manager add-client: " <>)) (mapM_ say) result
+  _ -> die reg 1 "manager add-client takes --config ABS_FILE, --profile-file ABS_FILE and optional --profile ID options"
+  where
+    go config file profiles = \case
+      [] -> Just (config, file, profiles)
+      "--config" : value : rest | isNothing config -> go (Just value) file profiles rest
+      "--profile-file" : value : rest | isNothing file -> go config (Just value) profiles rest
+      "--profile" : value : rest | value `notElem` profiles -> go config file (profiles <> [value]) rest
+      _ -> Nothing
+
 managerServeCmd :: Registry -> FilePath -> [(FilePath, Text)] -> IO ()
 managerServeCmd reg path legacy = do
   unless (isAbsolute path) (die reg 1 "manager --config requires an absolute file")
+  configuration <- loadManagerConfiguration reg path >>= either refusedConfiguration pure
+  let listening url = TIO.putStrLn ("manager listening on " <> url) >> hFlush stdout
   withManagerSignals $ \stop -> (do
-    configuration <- loadManagerConfiguration reg path >>= either throwIO pure
-    Manager.serveManager (Manager.ServeHooks (\installed -> reloadManagerConfiguration reg installed path) stop) configuration legacy)
+    Manager.serveManager (Manager.ServeHooks (\installed -> reloadManagerConfiguration reg installed path) stop listening) configuration legacy)
     `catches`
-      [ Handler $ \(_ :: Manager.Diagnostic) ->
+      [ Handler $ \(Manager.ListenerFileRefused member file reason) ->
+          die reg 1 $ "manager HTTPS listener is unavailable: https." <> member <> " " <> T.pack file
+            <> " is refused (" <> T.pack reason <> "). The file must be a regular file that this user owns,"
+            <> " with mode 0600, at a path with no symbolic-link component",
+        Handler $ \(_ :: Manager.Diagnostic) ->
           die reg 1 "manager configuration or HTTPS listener is unavailable",
         Handler $ \(failure :: SomeException) ->
           case fromException failure :: Maybe SomeAsyncException of
             Just asynchronous -> throwIO asynchronous
             Nothing -> die reg 2 "manager service is unavailable"
       ]
+  where
+    refusedConfiguration problem = do
+      note <- configurationNote path problem
+      die reg 1 ("manager configuration or HTTPS listener is unavailable: " <> note)
 
 -- Interrupt the foreground owner so its original brackets perform cleanup.
 -- Signals do not reconstruct workers from process identifiers. When the
@@ -4533,6 +4580,10 @@ usage reg =
       "",
       "  " <> bin <> " --tui [--local]",
       "  " <> bin <> " --tui --service ABS_CLIENT_PROFILE [ABS_CLIENT_PROFILE ...]",
+      "  " <> bin <> " --manager init --root ABS_DIR [--port N]",
+      "  " <> bin <> " --manager add-client --config ABS_FILE --profile-file ABS_FILE [--profile ID]...",
+      "  " <> bin <> " --manager serve --config ABS_FILE [--legacy-history ROOT=PROFILE]...",
+      "  " <> bin <> " --manager admin --config ABS_FILE < request.json",
       "  " <> bin <> " frontend --capabilities",
       "  " <> bin <> " frontend",
       "  " <> bin <> " frontend-io < request.json",
@@ -4631,8 +4682,9 @@ usage reg =
       "  --binary       the agent-deck executable (default: agent-deck, found on PATH)",
       "  --poll         milliseconds between two checks of the session's status",
       "  --adapter      the answering program (default: stub, the deterministic double",
-      "                 at engine/acp/test/stub_adapter.py, which resolves against the",
-      "                 working directory); claude and codex are looked for on",
+      "                 engine/acp/test/stub_adapter.py, run with python3 from PATH",
+      "                 and found in a repository checkout or in the installed data",
+      "                 directory of this runner); claude and codex are looked for on",
       "                 PATH and then at machine-local pins; droid runs `droid exec",
       "                 --output-format acp` from PATH; anything else is a path.",
       "                 only when this run reaches ACP",

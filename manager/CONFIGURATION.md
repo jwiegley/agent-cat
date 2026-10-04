@@ -151,6 +151,74 @@ bytes as `valid-operator-v1.json` with mode 0600 in each emitted test directory.
 That fixture uses synthetic credentials and native capability and descriptor
 codecs. It is not a provider or service fixture.
 
+## A profile for a real engine
+
+A worker inherits no environment from the manager, the client or the
+administrator. Its environment is exactly the `environment` of its profile,
+and its working directory is the `workspace`. A target that starts a program
+from `PATH`, reads files below the home directory or reads user configuration
+therefore needs those bindings in the profile. The `person` profile of the
+reference pair binds only `PATH`, because the stub adapter needs only
+`python3`. A real engine needs more:
+
+- `PATH` lists the directories of the adapter program, for example
+  `claude-agent-acp`, and of every program that the adapter starts.
+- `HOME` is the home directory, where the adapter keeps its login and its
+  own settings.
+- `XDG_CONFIG_HOME` is the configuration directory. A target with
+  `--routing` reads the user routing file
+  `$XDG_CONFIG_HOME/agent-cat/routing.yaml` from it.
+
+These two profiles show the form. The first one runs the Claude ACP adapter
+for every ask. The second one routes each ask through the routing files and
+the persona `work`. Replace `OPERATOR` with the account name and give `PATH`
+the directories of the account:
+
+```json
+{
+  "id": "claude",
+  "runner": "native",
+  "workspace": "/Users/OPERATOR/agent-cat/workspace",
+  "workspaceLabel": "Local workspace",
+  "targetLabel": "Claude through ACP",
+  "targetArguments": ["--engine", "acp", "--adapter", "claude"],
+  "environment": [
+    {"name": "PATH", "value": "/Users/OPERATOR/.nix-profile/bin:/usr/bin:/bin"},
+    {"name": "HOME", "value": "/Users/OPERATOR"},
+    {"name": "XDG_CONFIG_HOME", "value": "/Users/OPERATOR/.config"}
+  ],
+  "ownership": "service-owned",
+  "quarantined": false,
+  "personAnswering": "local-control",
+  "resourceKeys": []
+}
+```
+
+```json
+{
+  "id": "routed",
+  "runner": "native",
+  "workspace": "/Users/OPERATOR/agent-cat/workspace",
+  "workspaceLabel": "Local workspace",
+  "targetLabel": "Routing persona work",
+  "targetArguments": ["--routing", "--persona", "work"],
+  "environment": [
+    {"name": "PATH", "value": "/Users/OPERATOR/.nix-profile/bin:/usr/bin:/bin"},
+    {"name": "HOME", "value": "/Users/OPERATOR"},
+    {"name": "XDG_CONFIG_HOME", "value": "/Users/OPERATOR/.config"}
+  ],
+  "ownership": "service-owned",
+  "quarantined": false,
+  "personAnswering": "local-control",
+  "resourceKeys": []
+}
+```
+
+Add a profile to both files of the configuration pair, load it with
+`reload-profiles`, and issue a credential that names it, as
+[OPERATIONS.md](OPERATIONS.md#provision-a-client) states. A run of a real
+engine contacts its provider and can incur cost.
+
 ## Bounds and file ownership
 
 The configuration path must be absolute. Runtime opens every component without

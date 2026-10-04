@@ -2012,9 +2012,13 @@ agentic-run run NAME --engine acp [--adapter ADAPTER] [--model ID]
 @code{droid}, or an executable path.  The default is @code{stub}, the
 deterministic local adapter, so an omitted option never starts a paid live
 model.  The stub is the command @command{python3
-engine/acp/test/stub_adapter.py}, and its path resolves against the working
-directory.  A stub run therefore starts from the root of the agent-cat source
-tree.
+engine/acp/test/stub_adapter.py}, with @command{python3} from @code{PATH}.  The
+script is a data file of the package.  The runner uses the copy in the working
+directory when that directory is the root of an agent-cat checkout, and
+otherwise the copy in its installed data directory.  A stub run therefore
+works from any directory.  The builds of @file{test/cabal.sh} set the data
+directory to the checkout, and the Nix package installs the data files below
+its own @file{share/agentic} directory.
 
 @command{claude-agent-acp} and @command{codex-acp} must be on @code{PATH}.  The
 runner looks for each of them on @code{PATH} first.  Its fallback for each is
@@ -2297,16 +2301,20 @@ overrides of @file{nix/haskell-overrides.nix}.  These overrides include the
 subject-alternative-name patch of @code{crypton-x509-validation} and, on Linux,
 the descriptor-closing patch of the @code{process} boot library.  The
 derivation builds the component @code{exe:agentic-run} with optimization level
-1 and parallel compilation, and it installs @file{bin/agentic-run}.  The root
+1 and parallel compilation, and it installs @file{bin/agentic-run}.  It also
+installs the three data files of @file{agentic.cabal}, the stub adapter and
+the manager reference pair, below @file{share/agentic}, and the runner reads
+them from there.  The root
 shell already holds every input of the derivation.  The build therefore fetches
 nothing, and the option @code{--option substitute false} prevents any contact
 with a binary cache.
 
 The source of the derivation is a filtered copy of the repository.  It holds
 @file{agentic.cabal}, @file{cabal.project}, the three files under @file{nix},
-and the Haskell and C sources of the library, the @code{examples} library, and
-the runner.  Documentation, tests, fixtures, and the Lean model are outside it,
-so a change to them leaves the derivation path unchanged.  From a Git working
+the three data files, and the Haskell and C sources of the library, the
+@code{examples} library, and the runner.  Other documentation, tests,
+fixtures, and the Lean model are outside it, so a change to them leaves the
+derivation path unchanged.  From a Git working
 copy, Nix reads only the files that Git tracks, and a new source file must be
 added to the index before the build can read it.  A copy of the repository that
 is not a Git working copy builds with the reference @code{path:$PWD#agentic-run}.
@@ -3375,6 +3383,8 @@ repository.  Terminal service mode uses the selected manager's catalogue.
 @example
 agentic-run --tui [--local]
 agentic-run --tui --service CLIENT_PROFILE [CLIENT_PROFILE ...]
+agentic-run --manager init --root DIR [--port PORT]
+agentic-run --manager add-client --config FILE --profile-file FILE [--profile ID ...]
 agentic-run --manager serve --config FILE [--legacy-history ROOT=PROFILE ...]
 agentic-run --manager admin --config FILE
 agentic-run frontend --capabilities
@@ -4381,11 +4391,13 @@ overwritten.
 @cindex workflow manager service
 @cindex local administration
 @cindex two-configuration rule
-Two forms of @command{agentic-run} serve and administer the workflow manager.
-The runner reads these forms before every other form, and each form takes
-exactly the words that the synopsis shows:
+Four forms of @command{agentic-run} create, serve and administer the workflow
+manager.  The runner reads these forms before every other form, and each form
+takes exactly the words that the synopsis shows:
 
 @example
+agentic-run --manager init --root DIR [--port PORT]
+agentic-run --manager add-client --config FILE --profile-file FILE [--profile ID ...]
 agentic-run --manager serve --config FILE [--legacy-history ROOT=PROFILE ...]
 agentic-run --manager admin --config FILE
 @end example
@@ -4398,10 +4410,45 @@ the manager.  Each refusal line below starts with the name of the executable
 and a colon.
 
 @table @code
+@item --manager init --root DIR [--port PORT]
+@cindex manager root creation
+Create a manager root for the executable that runs the command.  @var{DIR} is
+an absolute directory that does not exist or is empty, and @var{PORT} is the
+HTTPS port on @code{127.0.0.1}, 8443 by default.  The command creates the
+directories @file{manager}, @file{admin}, @file{workspace}, @file{tls},
+@file{bin} and @file{client} with mode 0700, links @file{bin/agentic-run} to
+the executable, and writes @file{serve.json} and @file{offline.json} from the
+reference pair @file{doc/examples/manager-serve.json} and
+@file{doc/examples/manager-offline.json}, which are data files of the package.
+The canonical path of @var{DIR} replaces the placeholder root, and @var{PORT}
+replaces the port in @code{port} and in @code{allowedHosts}.  The command then
+makes a self-signed certificate for @code{127.0.0.1} and its key with the
+@command{openssl} of @code{PATH}, validates @file{offline.json} offline,
+issues one credential for every configured profile offline, and writes the
+client profile @file{client/profile.json}.  Every written file has mode 0600.
+The command prints the commands that start the manager, ask for its status,
+stop it, and connect the TUI, Pi and Emacs.  An existing root that is not
+empty, a relative root, a port outside 1 to 65535, a root whose
+@file{admin/admin.sock} path exceeds the 103-byte Unix socket address limit
+of macOS, or a failed step exits with status 1 and a line that starts with
+@samp{manager init:}.
+
+@item --manager add-client --config FILE --profile-file FILE [--profile ID @dots{}]
+Issue one credential through the local authority that the configuration file
+selects, and write its client profile.  The credential file is the profile
+file with the extension @file{.credential} in place of @file{.json}.  Each
+@option{--profile} names a configured profile, and without the option the
+credential covers every configured profile.  The scopes are @code{observe},
+@code{submit}, @code{control} and @code{export}.  An existing profile file or
+an unknown profile identifier exits with status 1 and a line that starts with
+@samp{manager add-client:}.
+
 @item --manager serve --config FILE [--legacy-history ROOT=PROFILE @dots{}]
 Start the manager in the foreground.  The command loads the configuration,
 opens the coordination Store under @code{managerRoot}, opens the HTTPS
 listener of the @code{https} section, and serves until it stops.  When the
+listener is bound, it writes the line @samp{manager listening on
+https://HOST:PORT/v1} to standard output.  When the
 configuration names @code{administrationRoot}, the manager also serves the
 local administration channel through a Unix socket in that private directory.
 
@@ -4425,7 +4472,11 @@ distinct absolute roots}.  A relative @var{FILE} exits with status 1 and the
 line @samp{manager --config requires an absolute file}.  An invalid
 configuration, a binding that the configuration refuses, or a listener that
 cannot open exits with status 1 and the line @samp{manager configuration or
-HTTPS listener is unavailable}.  Any other failure of the service exits with
+HTTPS listener is unavailable}.  For a configuration file that the loader
+refuses, the line continues with the cause, and a path with a symbolic-link
+component names that component.  A certificate or key file that the
+private-file rule refuses exits with status 1 and a line that names
+@code{https.certificateFile} or @code{https.keyFile}, the file, and the rule.  Any other failure of the service exits with
 status 2 and the line @samp{manager service is unavailable}.  A Store whose
 schema version is newer than 12 is such a failure.
 
@@ -4436,7 +4487,13 @@ standard output.  An answer with @code{"ok": true} exits with status 0.  A
 refusal has the answer @code{"ok": false} with a fixed error code, and it
 exits with status 1.  A malformed request, an unknown field, or an unknown
 operation is refused before dispatch, and its answer has
-@code{"operation": null}.  Local administration has no HTTP equivalent.
+@code{"operation": null}.  The @code{message} of a refusal is empty.  A
+refusal whose cause the operator can act on also writes one line that starts
+with @samp{manager admin:} to standard error.  The line names the cause, for
+example that no manager serves on the @code{administrationRoot}, a
+symbolic-link component of the configuration path, or a profile identifier of
+@code{issue-credential} that the configuration does not define.  Local
+administration has no HTTP equivalent.
 @end table
 
 The configuration file selects the channel of an administration request.  The

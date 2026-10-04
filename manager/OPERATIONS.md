@@ -8,6 +8,88 @@ The [command contract](COMMANDS.md#local-credential-administration) and the
 [storage contract](STORAGE.md) define the behavior that these procedures
 use. The [protocol document](../doc/api/README.md) defines the `/v1` routes.
 
+## Create a manager root
+
+`RUNNER --manager init --root ROOT [--port PORT]` creates a complete manager
+root for the runner that runs the command. `ROOT` is an absolute directory
+that does not exist or is empty. Its parent directory must exist. `PORT` is
+the HTTPS port on `127.0.0.1`, and the default port is 8443. The command does
+these steps in order:
+
+1. It creates `ROOT` with mode 0700 and uses its canonical path in every file
+   that it writes. On macOS, `/tmp` and `/var` are symbolic links into
+   `/private`, and the manager refuses a configuration path with a symbolic
+   link in it, so the canonical path is the only path that works.
+2. It creates the directories `manager`, `admin`, `workspace`, `tls`, `bin`
+   and `client` below `ROOT`, each with mode 0700.
+3. It links `bin/agentic-run` to the executable that runs the command.
+4. It writes `serve.json` and `offline.json` from the [reference configuration
+   pair](#reference-configuration-pair), with the root and the port in place of
+   the placeholders. The port goes into `https.port` and into
+   `https.allowedHosts`. Both files have mode 0600.
+5. It creates a self-signed certificate `tls/certificate.pem` for the address
+   `127.0.0.1` and its key `tls/key.pem` with the `openssl` of `PATH`. Both
+   files have mode 0600.
+6. It validates `offline.json` with an offline `reload-profiles`.
+7. It issues one credential for every configured profile through
+   `offline.json`, with the scopes `observe`, `submit`, `control` and
+   `export`, into `client/profile.credential`.
+8. It writes the client profile `client/profile.json` with mode 0600 and
+   prints the commands that start the manager, ask for its status, stop it
+   and connect the TUI, Pi and Emacs.
+
+A root that exists and is not empty, a relative root, a port outside 1 to
+65535 and a root whose path leaves `admin/admin.sock` longer than 103 bytes,
+the Unix socket address limit of macOS, refuse before any change. A step that fails stops the command with a
+line that names the step, and the root keeps what the earlier steps made.
+Remove that root and run the command again.
+
+To make the certificate without `init`, run this command in the `tls`
+directory. It writes the same two files:
+
+```sh
+cat > openssl.cnf <<'EOF'
+[req]
+distinguished_name = subject
+x509_extensions = listener
+prompt = no
+[subject]
+CN = 127.0.0.1
+[listener]
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
+basicConstraints = critical,CA:true
+subjectAltName = IP:127.0.0.1
+EOF
+openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 3650 \
+  -config openssl.cnf -keyout key.pem -out certificate.pem
+chmod 600 key.pem certificate.pem && rm openssl.cnf
+```
+
+OpenSSL and the LibreSSL of macOS both accept this configuration-file form.
+
+`manager/ci/bootstrap.sh` runs `init`, `serve`, `status`, `add-client` and
+`shutdown` in a new root below `TMPDIR` with an isolated `HOME`. It checks
+the modes, the listening line, the answer 200 of both client profiles and the
+refusal lines of this runbook.
+
+### Start the manager
+
+`RUNNER --manager serve --config SERVE_FILE` runs in the foreground until a
+`shutdown` request or a termination signal stops it. When the HTTPS listener
+is bound, it writes one line to standard output:
+
+```text
+manager listening on https://127.0.0.1:PORT/v1
+```
+
+Standard error is the [private fault log](#private-fault-log). A certificate
+or key file that the private-file rule refuses stops the start with status 1
+and a line that names the member (`https.certificateFile` or `https.keyFile`),
+the file and the rule: a regular file that the user owns, with mode 0600, at a
+path with no symbolic-link component. A configuration path with a symbolic
+link in it stops the start with a line that names the link.
+
 ## Two configurations for one manager root
 
 The operator keeps two configuration files for one `managerRoot`. Both files
@@ -40,23 +122,39 @@ configuration also holds the `https` section with the members `host`,
 
 The files [`doc/examples/manager-serve.json`](../doc/examples/manager-serve.json)
 and [`doc/examples/manager-offline.json`](../doc/examples/manager-offline.json)
-are a reference pair for one manager root. No build or package installs them.
-The serve file listens with HTTPS on `127.0.0.1` port 8443, admits the Host
-`127.0.0.1:8443` and the peer `127.0.0.1`, names a private
-`administrationRoot`, and installs one service-owned profile `scripted`. That
-profile runs the native runner with `--scripted`, which reaches no model and
-no network. The offline file is the same file without `administrationRoot`.
+are a reference pair for one manager root. They are data files of the
+package, and `init` reads the installed copies. The serve file listens with
+HTTPS on `127.0.0.1` port 8443, admits the Host `127.0.0.1:8443` and the peer
+`127.0.0.1`, names a private `administrationRoot`, and allows 4 execution
+reservations, so that one request that waits in review does not block later
+work. It installs two service-owned profiles:
+
+- `scripted` runs the native runner with `--scripted`, which reaches no model
+  and no network.
+- `person` runs the native runner with `--engine acp --person-answer
+  model:namer`. The default stub adapter answers every model ask, and a person
+  answers the ask of the model `namer` through a decision of the manager, as in
+  the `hello` workflow. Its environment holds `PATH` with the value
+  `/usr/bin:/bin`, because the stub adapter is a `python3` script and a worker
+  inherits no environment.
+
+The offline file is the same file without `administrationRoot`.
+[CONFIGURATION.md](CONFIGURATION.md#a-profile-for-a-real-engine) shows a
+profile for a real engine.
 
 Every path in the pair starts with the placeholder `/Users/OPERATOR/agent-cat`.
-To use the pair, copy both files, replace the placeholder with an existing
-private directory of the operator account, and give each copy mode 0600. The
+`init` replaces the placeholder and the port. To use the pair without `init`,
+copy both files, replace the placeholder with the canonical path of an
+existing private directory of the operator account, replace 8443 with the
+port in `port` and in `allowedHosts`, and give each copy mode 0600. The
 directories `manager`, `admin`, `workspace` and `tls` below it must exist with
 mode 0700, the `tls` directory holds the certificate and the key of the
 listener, and `bin/agentic-run` is the runner executable. Then validate the
 offline copy as in [Validate a configuration
 offline](#validate-a-configuration-offline). A copy of the offline file with
 private fixture paths answers that validation with `profileIds`
-`["scripted"]` and a `revision`, and it leaves the manager root empty.
+`["scripted", "person"]` and a `revision`, and it leaves the manager root
+empty.
 
 ## The administration command
 
@@ -73,6 +171,21 @@ an unknown field or an unknown operation refuses before dispatch with
 ```sh
 printf '%s' '{"version": 1, "operation": "status"}' | RUNNER --manager admin --config OFFLINE_FILE
 ```
+
+The `message` of a refusal is always empty. For a refusal whose cause the
+operator can act on, the command also writes one line that starts with
+`manager admin:` to standard error and names that cause:
+
+- A request through `SERVE_FILE` while no manager serves names the
+  `administrationRoot` and states that no manager serves on it.
+- A configuration path with a symbolic link in it names the link. Give the
+  canonical path.
+- A configuration file that cannot be read as a private file of the user, or
+  that is not a valid configuration, is named with the rule that it breaks.
+- An offline request that cannot take the manager root states that a serving
+  manager holds it or that a configured directory is missing or not private.
+- `issue-credential` with a profile identifier that the configuration does not
+  define names that identifier.
 
 The request bodies in this runbook are the bodies that the `operations` mode
 of `manager/test/service_http.py` sends. The `release-quarantine` body is the
@@ -111,6 +224,12 @@ operational facts `live`, `ready`, `queuedRequests`,
 - `lostRuns` counts runs without a terminal observation whose supervision is
   lost. `unresolvedCommands` counts commands whose outcome is uncertain.
 - `serviceFault` names the class of the current service fault, or `none`.
+
+The `streamId` of `status` is the stream identity of the Store, which also
+names the manager log file `flow/STREAM.ndjson`. The `streamId` of
+`GET /v1/capabilities` is a different value: the public stream identity that
+the manager derives for each credential. The two values never match, and two
+credentials receive two different public values.
 
 Offline status opens the Store in restart mode. Each offline status creates
 a new process generation, and it reconciles a restart as a serving lifetime
@@ -183,6 +302,13 @@ the file system, no exception text and no request content. Lines to look for:
 - `busy site=SITE class=store StoreBusy`: a Store admission waited out its
   five-second allowance.
 
+A client that detaches while it reads `/v1/events`, for example the TUI after
+`q`, can leave one line of the form `manager-fault TIME response GET
+/v1/events started public=410 view-expired class=command ViewExpired`, or the
+same line with `public=503 storage-unavailable class=unexpected
+InvalidRequest`. The response had started, and the line records only that
+the stream ended early. It needs no action.
+
 ### HTTP reads
 
 `GET /v1/capabilities` with a current bearer answers 200 and reports the
@@ -241,6 +367,37 @@ through `OFFLINE_FILE` while none serves. The secret goes only to the output
 file. The answer holds only metadata.
 
 ### Provision a client
+
+A client needs a client profile: a private JSON file of version 1 with
+exactly the members `version`, `endpoint`, `credentialFile` and `caFile`.
+`endpoint` is the `https` URL of the `/v1` base. `credentialFile` is the
+absolute path of the file that holds the bearer. `caFile` is the absolute
+path of the certificate that signed the certificate of the listener, which
+for the certificate of `init` is the certificate itself. The profile file and
+the credential file have mode 0600. The TUI, Pi and Emacs read the same file:
+
+```json
+{"version": 1, "endpoint": "https://127.0.0.1:8443/v1", "credentialFile": "/PRIVATE_DIR/laptop.credential", "caFile": "ROOT/tls/certificate.pem"}
+```
+
+`RUNNER --manager add-client --config FILE --profile-file PROFILE_FILE
+[--profile ID]...` issues one credential and writes this file. `FILE` is
+`SERVE_FILE` while a manager serves and `OFFLINE_FILE` while none serves.
+`PROFILE_FILE` is an absolute path that does not exist, in an existing
+private directory. The credential file is `PROFILE_FILE` with the extension
+`.credential` in place of `.json`. Each `--profile` names a configured
+profile, and without the option the credential covers every configured
+profile. The label of the credential is the base name of `PROFILE_FILE`, and
+its scopes are `observe`, `submit`, `control` and `export`. The command
+prints the commands that connect the TUI, Pi and Emacs with the new profile.
+An unknown profile identifier refuses with a line that names it.
+
+A credential covers only the profiles that it names. After a profile is added
+to the configuration and loaded with `reload-profiles`, issue a new
+credential that names it, for example with `add-client --profile NEW_ID`.
+
+`add-client` sends the request below with its own label, scopes, profile
+identifiers and output file. An operator can also send it directly.
 
 Preconditions: the parent directory of the output file exists and is
 private. The output file does not exist.

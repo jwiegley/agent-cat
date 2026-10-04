@@ -32,7 +32,7 @@
     "globalDatabaseReaders": 4,
     "globalMutationLedgerBytes": 67108864,
     "safetyControlsPerMinute": 60,
-    "executionReservations": 1
+    "executionReservations": 4
   },
   "profiles": [
     {
@@ -45,6 +45,29 @@
         "--scripted"
       ],
       "environment": [],
+      "ownership": "service-owned",
+      "quarantined": false,
+      "personAnswering": "local-control",
+      "resourceKeys": []
+    },
+    {
+      "id": "person",
+      "runner": "native",
+      "workspace": "/Users/OPERATOR/agent-cat/workspace",
+      "workspaceLabel": "Local workspace",
+      "targetLabel": "Stub model, with a person answering the model namer",
+      "targetArguments": [
+        "--engine",
+        "acp",
+        "--person-answer",
+        "model:namer"
+      ],
+      "environment": [
+        {
+          "name": "PATH",
+          "value": "/usr/bin:/bin"
+        }
+      ],
       "ownership": "service-owned",
       "quarantined": false,
       "personAnswering": "local-control",

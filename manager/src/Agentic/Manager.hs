@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
 -- | Trusted profile authority and storage boundaries for runtime coordination.
@@ -11,6 +12,7 @@ module Agentic.Manager
     withCoordinationStore, withServingStore, storeIdentity, checkpointStore, backupCoordinationStore, RestoreFence (..), StoreRestoration (..), restoreCoordinationStore,
     LocalAdminRequest, decodeLocalAdminRequest, administerCredentials, withLocalAdministration,
     AdministrationHooks (..), offlineAdministration, StoreState (..), LifetimeFacts (..), stoppedLifetime, ServeHooks (..), serveManager,
+    ListenerFileRefused (..), listenerUrl,
   ) where
 
 import Agentic.Manager.Profile
@@ -27,9 +29,11 @@ import qualified Agentic.Manager.History as History
 import Agentic.Manager.Protocol.Command (CommandFailure)
 import qualified Agentic.Manager.Service as Service
 import qualified Agentic.Manager.Transport as Transport
+import Agentic.Manager.Transport (ListenerFileRefused (..))
 import Control.Exception (bracket, throwIO, try)
 import Control.Monad (forM, void)
 import Data.Text (Text)
+import qualified Data.Text as T
 
 -- | The actions that the composition of a serving manager supplies.
 -- 'serveReload' loads the configuration file of the manager again and
@@ -37,11 +41,20 @@ import Data.Text (Text)
 -- 'serveStop' requests the end of the serving process with the same effect as
 -- the termination signal: the action of 'serveManager' is interrupted, its
 -- scopes end with their original cleanup, and the process exits with status
--- 0.
+-- 0. 'serveListening' receives the URL of the @/v1@ base, from
+-- 'listenerUrl', once the HTTPS listener is bound.
 data ServeHooks = ServeHooks
   { serveReload :: InstalledConfiguration -> IO (Either Diagnostic [PublicProfile]),
-    serveStop :: IO ()
+    serveStop :: IO (),
+    serveListening :: Text -> IO ()
   }
+
+-- | The URL of the @/v1@ base of a listener, with a numeric IPv6 host in
+-- brackets.
+listenerUrl :: HttpsConfiguration -> Text
+listenerUrl https = "https://" <> host <> ":" <> T.pack (show (httpsPort https)) <> "/v1"
+  where
+    host = if T.any (== ':') (httpsHost https) then "[" <> httpsHost https <> "]" else httpsHost https
 
 -- | One foreground listener within the original configuration and Store
 -- lifetimes. Each legacy binding names a configured local retention root and
@@ -67,7 +80,7 @@ serveManager hooks configuration legacy = do
         try @CommandFailure (History.bindLegacyHistory store root profile) >>= either (const (throwIO InvalidConfiguration)) pure
       Service.withService store bindings $ \service -> do
         (application, closing) <- Application.newApplication https service
-        let listen = Transport.runHttps https limits closing application
+        let listen = Transport.runHttps https limits (serveListening hooks (listenerUrl https)) closing application
         case configurationAdministrationRoot configuration of
           Nothing -> listen
           Just _ -> withLocalAdministration store (AdministrationHooks

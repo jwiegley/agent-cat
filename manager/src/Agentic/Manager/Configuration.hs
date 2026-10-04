@@ -6,7 +6,7 @@ module Agentic.Manager.Configuration
   ( Configuration, TargetValidator, InstalledConfiguration,
     loadConfiguration, exactPreparedTarget, installConfiguration, reloadConfiguration, closeConfiguration, validateConfigurationProfiles,
     configurationSnapshot, selectConfiguredProfile, probeConfiguredProfile,
-    configurationAdministrationRoot, withConfigurationAdministration,
+    configurationAdministrationRoot, configurationProfileIds, withConfigurationAdministration,
     HttpsConfiguration (..), configurationHttps,
     acquireConfigurationStorage, releaseConfigurationStorage, withConfigurationSnapshot, withConfigurationCatalogues, tryConfigurationCatalogueContext, withConfigurationLoan, probeConfiguredCapabilities, withConfiguredRetentionRootLoan, validateHistoryBindings, revalidateRetentionRoot, configuredInvocations, configuredLimits
   ) where
@@ -56,6 +56,10 @@ data HttpsConfiguration = HttpsConfiguration
 
 configurationHttps :: Configuration -> Maybe HttpsConfiguration
 configurationHttps (Configuration _ _ _ _ _ https) = https
+
+-- | The identifiers of the configured profiles, in file order.
+configurationProfileIds :: Configuration -> [Text]
+configurationProfileIds (Configuration _ _ _ profiles _ _) = map operatorId profiles
 
 -- | The explicitly selected local channel directory, not execution authority.
 configurationAdministrationRoot :: Configuration -> Maybe FilePath

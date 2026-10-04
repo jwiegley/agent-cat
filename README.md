@@ -438,9 +438,13 @@ direnv exec . test/cabal.sh sdist
 ```
 
 The source of the package holds only `agentic.cabal`, `cabal.project`, the
-files under `nix/`, and the Haskell and C sources of the runner and its
-libraries. A change to documentation or tests therefore leaves the derivation
-path unchanged. From a Git working copy, Nix reads only the tracked files. The
+files under `nix/`, the data files of `agentic.cabal`, and the Haskell and C
+sources of the runner and its libraries. The data files are the stub adapter
+`engine/acp/test/stub_adapter.py` and the manager reference pair under
+`doc/examples`. The package installs them below `share/agentic`, and
+`test/cabal.sh` sets the data directory of its builds to the checkout, so the
+runner finds them from any working directory. A change to other documentation
+or to tests therefore leaves the derivation path unchanged. From a Git working copy, Nix reads only the tracked files. The
 source distribution that `test/cabal.sh sdist` writes beneath `CABAL_BUILDDIR`
 includes the three files under `nix/`.
 `doc/workflow-manager-release-evidence.md` records the package identities.

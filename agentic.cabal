@@ -46,7 +46,6 @@ extra-source-files:
   test/frontend_export_probe.py
   test/frontend_io_probe.py
   test/frontend_session_probe.py
-  engine/acp/test/stub_adapter.py
   engine/acp/test/effect_hang_adapter.py
   engine/acp/test/hold_adapter.py
   engine/acp/test/retry_adapter.py
@@ -63,6 +62,7 @@ extra-source-files:
   manager/ci/dependencies.sh
   manager/ci/profiles.sh
   manager/ci/configuration.sh
+  manager/ci/bootstrap.sh
   manager/ci/store.sh
   manager/ci/commands.sh
   manager/ci/drafts.sh
@@ -92,6 +92,10 @@ extra-source-files:
   manager/ci/contract.sh
   manager/test/DependencyProbe.hs
   manager/test/containment_probe.py
+data-files:
+  engine/acp/test/stub_adapter.py
+  doc/examples/manager-serve.json
+  doc/examples/manager-offline.json
 extra-doc-files:
   manager/README.md
   manager/CONFIGURATION.md

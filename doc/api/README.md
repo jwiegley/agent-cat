@@ -1059,6 +1059,9 @@ contains an HTTPS endpoint and an OS credential-store or private-file
 reference, not a credential supplied by the model or inferred from history.
 Exactly one local or service mode is active. Mode or endpoint changes advance
 the client's fetch generation and do not transfer live worker ownership.
+The section "Provision a client" of `manager/OPERATIONS.md` states the
+format of the client profile file and the command `--manager add-client`
+that issues a credential and writes the file.
 
 The Haskell client trusts only the certificates in the `caFile` of its
 profile. It does not read a platform certificate store. It accepts only TLS

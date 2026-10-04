@@ -15853,6 +15853,72 @@ Non-blocking findings of the R1 audit (resume-20260923/fess/rd-R1-r1.md).
 6. Evidence only. The implementer's a4 no-routing-file logs show a run with a routing file present, and the acceptance and journey logs predate the last Cli.hs edit. The audit reran the acceptance commands with an empty isolated XDG_CONFIG_HOME (all pass), and the Integrator reran JOURNEY-ONCE(r1, 8) on the final source (RD/R1/integrator, pass).
 The list-item semicolon finding in doc/model-routing-v2.md was fixed in the R1 commit.
 
+* TODO [#D] Resolve the R2 manager bootstrap fess findings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-r2-fess-followup-8hyu
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 00:19]
+:MODIFIED: [2026-10-04 Sun 00:19]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/rd-R2-r1.md on readiness subtask R2 (manager bootstrap: init and add-client).
+
+1. Medium. cli/src/Agentic/Cli/LocalAdmin.hs:88 prints "no manager serves on this administrationRoot" for every IOException from callLocalAdministration, including a lost reply after a live manager admitted a mutation (OPERATIONS.md:196-198 calls that a lost reply with an uncertain outcome). Fix: print the no-manager note only when the socket is missing or the connection is refused, and otherwise state that the reply was lost and the outcome is uncertain.
+2. Medium (predates R2). A completed person-profile run reports supervision "lost" on GET /v1/runs/{id} (State.hs reads a stored owned label without a live worker that way). OPERATIONS.md "HTTP reads" still describes "lost" as a manager loss. Fix: report a terminal state for a stored run with a terminal observation, or document the current meaning.
+3. Low. cli/src/Agentic/Cli/LocalAdmin.hs:376 prints the Pi connect command with the placeholder AGENT_CAT_CHECKOUT. Fix: mark it as a placeholder or refer to ext-pi/README.md.
+4. Low. ext-pi/README.md and the agent-workflows emacs-native README.md do not mention --manager init, add-client or client/profile.json. Fix: one short paragraph in each.
+5. Low. cli/src/Agentic/Cli/LocalAdmin.hs:197 comment "A failure leaves the root as it is" suggests a failed init changes nothing. Fix: state that the root keeps what earlier steps made and must be removed before init runs again.
+6. Low. doc/examples/manager-serve.json:68 and manager-offline.json:67 bind the person profile PATH to /usr/bin:/bin, which needs /usr/bin/python3 (Command Line Tools). Fix: one sentence in OPERATIONS.md on what to change when it is absent.
+7. Low. manager/ci/bootstrap.sh is a new check script. The Integrator kept it as the executable form of the runbook. No action unless it grows.
+8. Low. README.md:446 has one line well over 80 columns after a reflow. Fix: rewrap.
+
+* DONE [#C] Bootstrap a manager and client profile in one command
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-r2-manager-bootstrap-c5op
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 00:18]
+:MODIFIED: [2026-10-04 Sun 00:19]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-04 Sun 00:19]
+:CLOSE_REASON: Acceptance met by recorded evidence (RD/R2)
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Readiness subtask R2 of 2026-10-03 (operator direction: functional readiness). One command takes an operator from nothing to a serving manager and a client profile. The ACP stub adapter is a Cabal data file and works from any working directory. agentic-run --manager init --root ABS_DIR [--port N] creates the layout (mode 0700), links bin/agentic-run, writes serve.json and offline.json from the reference pair with the root and port filled in, makes a self-signed certificate and key with the openssl on PATH, validates offline, issues one credential for every profile and writes client/profile.json (0600). agentic-run --manager add-client issues a credential and writes a further client profile. The reference pair gains a person profile and four execution reservations. serve prints one line with the listening URL. Refusals name the certificate file and rule, a missing manager, a symbolic-link component and an unknown profile id. OPERATIONS.md, CONFIGURATION.md, doc/api/README.md and the manual describe this.
+
+Evidence: resume-20260923/RD/R2/impl-r1 (acceptance a1-a14, bootstrap, builds, JOURNEY-ONCE(r2, 8), check-prose), fess/rd-R2-r1.md (audit, non-blocking).
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 798,
+    "issue_id": "acat-rd-r2-manager-bootstrap-c5op",
+    "author": "johnw",
+    "text": "All acceptance items passed: RD/R2/impl-r1 (a1-a14, bootstrap.sh exit 0, JOURNEY-ONCE(r2, 8) exit 0, check-prose exit 0). The audit fess/rd-R2-r1.md reran bootstrap.sh and check-prose with exit 0 and found nothing blocking. Follow-ups: acat-rd-r2-fess-followup.",
+    "created_at": "2026-10-04T07:19:01Z"
+  },
+  {
+    "id": 799,
+    "issue_id": "acat-rd-r2-manager-bootstrap-c5op",
+    "author": "johnw",
+    "text": "Follow-up issue id: acat-rd-r2-fess-followup-8hyu.",
+    "created_at": "2026-10-04T07:19:04Z"
+  }
+]
+#+end_src
+
 * DONE [#D] Give the remaining tool "cat" questions honest addressees
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

@@ -36,7 +36,8 @@
 
         # The runner reads only these files.  Documentation, tests, fixtures and
         # the Lean model stay outside the source, so their commits keep the
-        # derivation unchanged.
+        # derivation unchanged.  The data files of agentic.cabal are the one
+        # exception: the stub adapter and the manager reference pair.
         haskellSource = pkgs.lib.fileset.fileFilter
           (file: file.hasExt "hs" || file.hasExt "c" || file.hasExt "h");
         runnerSource = pkgs.lib.fileset.toSource {
@@ -48,6 +49,9 @@
             ./nix/haskell-overrides.nix
             ./nix/crypton-x509-validation-san.patch
             ./nix/process-close-fds-linux.patch
+            ./engine/acp/test/stub_adapter.py
+            ./doc/examples/manager-serve.json
+            ./doc/examples/manager-offline.json
           ] ++ map haskellSource [
             ./dsl/src
             ./plan/src
@@ -80,7 +84,8 @@
           LANG = "C.UTF-8";
           dontConfigure = true;
           # The same offline Cabal invocation as test/cabal.sh, against the GHC
-          # of the development shell.  No package repository is read.
+          # of the development shell.  No package repository is read.  The
+          # data directory is the one that installPhase fills.
           buildPhase = ''
             runHook preBuild
             export HOME="$TMPDIR/home"
@@ -88,6 +93,7 @@
             cabalOffline() {
               cabal --store-dir="$TMPDIR/cabal-store" --active-repositories=:none \
                 "$1" --offline --builddir="$TMPDIR/dist" \
+                --datadir="$out/share/agentic" --datasubdir=. \
                 --with-compiler="$(command -v ghc)" --with-hc-pkg="$(command -v ghc-pkg)" \
                 --enable-optimization=1 "''${@:2}"
             }
@@ -97,6 +103,9 @@
           installPhase = ''
             runHook preInstall
             install -D -m 0755 "$(cabalOffline list-bin exe:agentic-run)" "$out/bin/agentic-run"
+            for file in engine/acp/test/stub_adapter.py doc/examples/manager-serve.json doc/examples/manager-offline.json; do
+              install -D -m 0644 "$file" "$out/share/agentic/$file"
+            done
             runHook postInstall
           '';
           meta.mainProgram = "agentic-run";
