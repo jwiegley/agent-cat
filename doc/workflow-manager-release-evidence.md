@@ -479,9 +479,10 @@ These checks did not run, each for the reason stated:
   validation.
 - `engine/acp/ci/route-live.sh`: it uses a paid provider.
 - The Emacs 29.1 minimum-version check: no Emacs 29.1 is available locally.
-- `npm ci` in `ext-pi`: the stale `@earendil-works` entries of
-  `ext-pi/package-lock.json` do not support it, and their rewrite (PG18)
-  waits for operator authorization.
+- `npm ci` in `ext-pi`: `ext-pi/package-lock.json` is not an install
+  source. Its `@earendil-works` entries link the Pi fork by paths relative
+  to the main checkout, and it keeps registry entries that no linked
+  package uses.
 - A true `ENOSPC`, a Store that the quick check reports `corrupt`, root
   replacement under a running manager and a proxy on another host: no mode
   produces them, and root replacement is deferred to the security stage.

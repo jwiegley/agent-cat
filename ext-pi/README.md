@@ -53,13 +53,15 @@ and vitest 4.1.9.
 The links are never replaced by a registry install. The `devDependencies`
 strings of `package.json`, and of the root entry of `package-lock.json`, name
 the fork release 0.99.1 for `pi-client`, `pi-coding-agent`, `pi-server` and
-`pi-tui`. The `node_modules/@earendil-works` entries of `package-lock.json`
-keep their earlier registry descriptions: `pi-coding-agent` at 0.85.1, and
-`pi-ai`, `pi-client`, `pi-protocol`, `pi-server`, `pi-telemetry` and `pi-tui`
-at 0.84.3, each with a URL of the npm registry. These entries disagree with
-the root entry and with the linked fork. They are not an install source, and
-`npm ci` is not supported with this lock file. A rewrite of these entries as
-links to the fork waits for an operator authorization.
+`pi-tui`. In `package-lock.json`, the entry of each package of the table
+above is a link entry in the form that npm writes for a linked local package.
+Its `resolved` path names the fork directory relative to the main checkout
+`~/src/agent-cat/ext-pi`, for example `../../fork/pi/packages/ai`, and the
+target entry of that path records the fork package at 0.99.1. In a worktree
+under `~/src/agent-cat/.worktrees`, these relative paths do not reach the
+fork, and the links of `node_modules` are absolute. The lock file also keeps
+the registry entries of the dependencies of the earlier registry releases,
+and no linked package uses them. The lock file is not an install source.
 `node_modules` links the fork, and `test/host-versions.test.ts` enforces the
 supported set. The test enumerates every linked package, resolves it and
 `pi-agent-core` through the Node resolver, and fails when a version is outside
@@ -1586,10 +1588,10 @@ launch and lineage approval refuse when interactive approval is unavailable.
 ## Build and test
 
 The host packages link into the built Pi fork as the section "Supported host"
-states. Do not run `npm ci` or `npm install`. `npm ci` is not supported,
-because the `@earendil-works` entries of `package-lock.json` name earlier
-registry releases, and either command replaces the links with those
-releases.
+states. Do not run `npm ci` or `npm install`. Either command makes
+`node_modules` agree with `package-lock.json`, and the lock file is not an
+install source: its link paths are relative to the main checkout, and it
+keeps registry entries that no linked package uses.
 
 ```sh
 npm run check
