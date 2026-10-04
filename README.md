@@ -19,6 +19,20 @@ of test vectors and a live oracle process. A TypeScript extension under
 `ext-pi/` makes the workflows available inside the Pi coding agent. The Texinfo
 manual in `doc/agent-cat.texi` is the reference for all of these parts.
 
+## Getting started
+
+[`doc/getting-started.md`](doc/getting-started.md) is the guide for a new
+operator. It installs the runner, runs a first workflow in local mode, starts
+the workflow manager, connects the TUI, Pi and Emacs to it, adds real engines,
+and lists the daily operator commands. The user build is the Nix package of
+the root flake. From the root of a checkout, these commands install the runner
+and run the first workflow against its table of fixed replies:
+
+```sh
+nix profile add .#agentic-run
+agentic-run run hello --scripted
+```
+
 ## What a workflow is
 
 A workflow is a program that asks questions and acts on the answers. Each
@@ -254,20 +268,30 @@ conventions.
 ## The runner
 
 `agentic-run` is one executable with five verbs for human use over the
-registered programs. Run it from the repository root:
+registered programs. The section [Getting started](#getting-started) installs
+it, and these commands work in any directory:
 
 ```sh
-nix develop path:. -c cabal run agentic-run -- --routing
-nix develop path:. -c cabal run agentic-run -- list
-nix develop path:. -c cabal run agentic-run -- help harden
-nix develop path:. -c cabal run agentic-run -- plan harden --raw
-nix develop path:. -c cabal run agentic-run -- cost harden
-nix develop path:. -c cabal run agentic-run -- run harden --scripted
-nix develop path:. -c cabal run agentic-run -- run harden --engine acp --adapter stub
-nix develop path:. -c cabal run agentic-run -- adapter-options --adapter claude
-nix develop path:. -c cabal run agentic-run -- run hello --engine acp --adapter claude --model ID --effort LEVEL
-nix develop path:. -c cabal run agentic-run -- run harden --session <deck-id>
+agentic-run --routing
+agentic-run list
+agentic-run help harden
+agentic-run plan harden --raw
+agentic-run cost harden
+agentic-run run harden --scripted
+agentic-run run harden --engine acp --adapter stub
+agentic-run adapter-options --adapter claude
+agentic-run run hello --engine acp --adapter claude --model ID --effort LEVEL
+agentic-run run harden --session <deck-id>
 ```
+
+The same executable is the workflow manager. `agentic-run --manager init
+--root DIR` creates a manager root, and `agentic-run --manager serve --config
+DIR/serve.json` serves requests, reviews, runs and results to the TUI, Pi and
+Emacs clients over HTTPS on `127.0.0.1`. `agentic-run --manager admin`
+carries the operator requests, such as `status`, `drain` and `shutdown`. The
+[getting-started guide](doc/getting-started.md) starts a manager and connects
+each client, and [`manager/OPERATIONS.md`](manager/OPERATIONS.md) is the
+runbook of the operator.
 
 `--routing` reports the routing policy that a run without `--engine` or
 `--session` would use. When no routing file exists, it names the expected user
@@ -410,9 +434,15 @@ security posture.
 
 ## Building and verifying
 
-The Nix development shells are the only supported environments. Configure
-direnv for the root, model, and conformance directories before running their
-tools. The shared `test/cabal.sh` entry point builds into the directory that
+This section is the maintainer route. A user installs the Nix package as the
+section [Getting started](#getting-started) states.
+
+The Nix development shells are the only supported environments for a
+maintainer. The checkout tracks no `.envrc` file, so attach the shells with
+direnv once. In the root, write an `.envrc` that holds the line `use flake`.
+In `model` and in `bisim`, write an `.envrc` that holds the line `use flake
+path:../model`. Then run `direnv allow .` once in each of the three
+directories. The shared `test/cabal.sh` entry point builds into the directory that
 `CABAL_BUILDDIR` names. When `CABAL_BUILDDIR` is unset, it uses
 `dist-newstyle` in the current directory. It passes that directory explicitly,
 uses an isolated Cabal store inside it, and disables package repositories. It
@@ -421,17 +451,25 @@ fetching packages:
 
 ```sh
 direnv exec . test/cabal.sh build all
+"$(direnv exec . test/cabal.sh list-bin agentic-run)" run hello --scripted
 direnv exec . test/cabal.sh test all
 (cd model && direnv exec . lake build)
 (cd bisim && direnv exec . bash -c 'lake build && lake exe corpus-gen')
 ```
 
+The first command is the developer build. The second command runs the runner
+that it built.
+
 The root flake also defines the package `agentic-run`, which is its default
-package. The derivation builds `exe:agentic-run` with `cabal-install` offline,
-with no active package repository, against the GHC of the root shell. That GHC
-carries the dependency overrides and patches of `nix/haskell-overrides.nix`.
-The root shell already holds every input, so the build runs with substitution
-disabled and fetches nothing:
+package and the user build. The derivation builds `exe:agentic-run` with
+`cabal-install` offline, with no active package repository, against the GHC
+of the root shell. That GHC carries the dependency overrides and patches of
+`nix/haskell-overrides.nix`. The user command `nix build .#agentic-run` can
+fetch inputs from the binary caches that Nix is configured to use. When the
+store already holds the closure of the root development shell, for example
+after direnv has loaded that shell once, the build has every input, and a
+maintainer can disable substitution so that the build contacts no binary
+cache:
 
 ```sh
 nix build .#agentic-run --no-update-lock-file --option substitute false

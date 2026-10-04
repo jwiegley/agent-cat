@@ -1,5 +1,35 @@
 # Terminal interface
 
+## Start and use
+
+The [getting-started guide](../doc/getting-started.md) installs
+`agentic-run` and starts a workflow manager. The TUI has two modes:
+
+```sh
+agentic-run --tui
+agentic-run --tui --service "$HOME/agent-cat-manager/client/profile.json"
+```
+
+The first command opens local mode, which runs workflows on this machine with
+no manager. The second command connects to the manager that the client
+profile names. These keys cover daily use:
+
+| Action | Local mode | Service mode |
+|---|---|---|
+| Open a workflow | `Enter` on the Workflows list | `Enter` on a profile, then `Enter` on a workflow |
+| Submit | `Ctrl-D` accepts each input, and `s` (scripted) or `Enter` (routing) selects the target | `Enter` on the request screen requests the review |
+| Approve | `y` or `Enter` on the review | `y` on the review. `Enter` does not approve, and `X` discards. |
+| Answer a question | Type the answer, then `Ctrl-D` | Type the answer, then `Ctrl-D` |
+| Show the result | `r` | The live monitor shows it when the run ends |
+| Save the result | `s`, a new file path, then `Ctrl-D` | `s`, a new file path, then `Ctrl-D` |
+| Return | `Esc` | `Esc` |
+| Quit | `q` on the browser | `q`, which detaches. The runs continue at the manager. |
+
+`?` lists the keys of the current screen. The sections below describe each
+mode in full.
+
+## Local mode
+
 `Agentic.Tui` is the terminal frontend for an agent-cat runner. `agentic-run
 --tui` and its explicit form `agentic-run --tui --local` select local mode,
 which this section describes. Local mode discovers

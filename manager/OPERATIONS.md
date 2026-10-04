@@ -7,6 +7,9 @@ expected answers, the diagnostics to read and the bounded failure answers.
 The [command contract](COMMANDS.md#local-credential-administration) and the
 [storage contract](STORAGE.md) define the behavior that these procedures
 use. The [protocol document](../doc/api/README.md) defines the `/v1` routes.
+The [getting-started guide](../doc/getting-started.md) creates a manager,
+starts it, connects the TUI, Pi and Emacs, and runs the daily commands of this
+runbook in order.
 
 ## Create a manager root
 
@@ -269,8 +272,10 @@ of the manager root, which stands for every manager log in it, and the run
 store directories `runs/runs/RUN/runtime` of the runs to inspect. The verb
 writes one JSON object for each record and a final summary object. It exits
 0 when every verification passes, 2 when every verification passes and a run
-log ended without its stop, 1 when a verification fails, and 3 when it
-cannot open a store. The summary names the retained floor of each manager log
+log ended without its stop or a manager log holds a lifetime without its
+shutdown notice, 1 when a verification fails, and 3 when it cannot open a
+store. The lifetime of a manager that still serves has no shutdown notice, so
+the verb exits 2 until that manager stops. The summary names the retained floor of each manager log
 as `floor`.
 
 Each local administration operation of the live channel that changes state

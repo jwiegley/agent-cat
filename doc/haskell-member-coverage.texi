@@ -12,6 +12,9 @@ checked by the documentation gates.
 
 @multitable @columnfractions .42 .25 .33
 @headitem Public parent @tab Exported member @tab Documentation entry
+@c MEMBER Agentic.Cli.Command.member:AdapterOptions support
+@hsindex Agentic.Cli.Command.AdapterOptions
+@item @code{Agentic.Cli.Command} @tab @code{AdapterOptions} @tab @code{Agentic.Cli.Command}
 @c MEMBER Agentic.Cli.Command.member:Cost support
 @hsindex Agentic.Cli.Command.Cost
 @item @code{Agentic.Cli.Command} @tab @code{Cost} @tab @code{Agentic.Cli.Command}
@@ -66,6 +69,9 @@ checked by the documentation gates.
 @c MEMBER Agentic.Cli.Command.member:Usage support
 @hsindex Agentic.Cli.Command.Usage
 @item @code{Agentic.Cli.Command} @tab @code{Usage} @tab @code{Agentic.Cli.Command}
+@c MEMBER Agentic.Cli.Command.member:Version support
+@hsindex Agentic.Cli.Command.Version
+@item @code{Agentic.Cli.Command} @tab @code{Version} @tab @code{Agentic.Cli.Command}
 @c MEMBER Agentic.Cli.Registry.member:Registry support
 @hsindex Agentic.Cli.Registry.Registry
 @item @code{Agentic.Cli.Registry} @tab @code{Registry} @tab @code{Agentic.Cli.Registry}

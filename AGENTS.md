@@ -34,11 +34,15 @@ keyword in the authoring surface either says what it means or does not exist.
 
 ## Building
 
-The Nix development shells are the only supported environments. Run `direnv
-allow .` once to attach the root shell. The Haskell workspace builds from the
-repository root with `nix develop path:. -c cabal build all`. The Lean model
-builds with `nix develop path:./model -c bash -c 'cd model && lake build'`,
-and the conformance oracle builds with the same shell in `bisim`. Never run two
+A user installs the runner with `nix profile add .#agentic-run`, as
+`doc/getting-started.md` states. The Nix development shells are the only
+supported environments for a maintainer. The checkout tracks no `.envrc`, so
+write one that holds `use flake` in the root, and one that holds `use flake
+path:../model` in `model` and in `bisim`, and run `direnv allow .` once in each
+directory. The Haskell workspace builds from the repository root with
+`direnv exec . test/cabal.sh build all`. The Lean model builds with
+`(cd model && direnv exec . lake build)`, and the conformance oracle builds
+with the model shell in `bisim`. Never run two
 full Lean builds at once. `model/Agentic/Core/DslFlagship.lean` proves its
 theorems by running the checker inside the kernel, which takes minutes of wall
 clock and several gigabytes of memory.

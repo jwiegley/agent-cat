@@ -1302,20 +1302,72 @@ This chapter builds the smallest complete program, inspects it, and runs it
 against a deterministic table.  The example is the same compiled value that the
 project runner and its conformance tests use.
 
-@section Enter the Haskell development shell
+@section Install the runner
 
-The root Nix development shell contains the Haskell workspace.  Run these
-commands from the repository root:
+@cindex installation
+@cindex getting started
+The user build of @command{agentic-run} is the Nix package of the root flake.
+From the root of a checkout, these commands install it into the Nix profile of
+the account and check the installed version:
 
 @example
-nix develop path:. -c cabal build all
-nix develop path:. -c cabal run agentic-run -- list
+nix profile add .#agentic-run
+agentic-run --version
+@end example
+
+Nix places the runner in @file{~/.nix-profile/bin}, which the Nix installer
+puts on @code{PATH}.  Nix releases that have no @code{nix profile add} command
+give the same command the name @code{nix profile install}.  The command
+@code{nix build .#agentic-run} builds the runner without an installation, and
+the directory @file{result/bin} of the checkout then holds it.  The command
+@code{nix run .#agentic-run -- list} runs one command with no installation.
+The guide @file{doc/getting-started.md} follows these steps in full.  It also
+starts the workflow manager, connects the TUI, Pi and Emacs, adds real
+engines, and lists the daily commands of the operator.
+
+The first local runs need no manager and reach no model.  These commands
+work in any directory.  Each exits with status 0, and the last one opens the
+terminal interface, which @kbd{q} in its browser closes with status 0:
+
+@example
+agentic-run list
+agentic-run help hello
+agentic-run plan hello
+agentic-run run hello --scripted
+agentic-run run harden --scripted
+agentic-run run hello --engine acp --adapter stub
+agentic-run --tui
+@end example
+
+The workflow manager is the same executable.  The first command below
+creates a manager root.  The second command serves it in the foreground of a
+second terminal, and the third command connects the TUI to it from the first
+terminal:
+
+@example
+agentic-run --manager init --root "$HOME/agent-cat-manager"
+agentic-run --manager serve --config "$HOME/agent-cat-manager/serve.json"
+agentic-run --tui --service "$HOME/agent-cat-manager/client/profile.json"
+@end example
+
+@section Enter the Haskell development shell
+
+An author who compiles a new workflow module uses the maintainer route, which
+builds the repository with Cabal in the root Nix development shell.  The
+checkout tracks no @file{.envrc} file.  Write an @file{.envrc} in the
+repository root that holds the line @code{use flake}, and run
+@code{direnv allow .} once.  Then run these commands from the repository
+root:
+
+@example
+direnv exec . test/cabal.sh build all
+"$(direnv exec . test/cabal.sh list-bin agentic-run)" list
 @end example
 
 The build covers the library, the compiled examples, and the conformance and
 runner executables.  Nothing is installed globally.  A bare
-@command{agentic-run} in later examples means the executable that
-@code{nix develop -c cabal run agentic-run --} reaches.
+@command{agentic-run} in later examples means the installed runner or the
+executable that @code{test/cabal.sh list-bin agentic-run} names.
 
 @section A complete authoring module
 
@@ -1988,11 +2040,15 @@ service.  Scripted mode therefore exercises Plan scheduling, branching,
 memoization, decoding, and billing, and it leaves transports and external tools
 untouched.
 
-A standard rehearsal, from the repository root, is:
+A standard rehearsal, in any directory, is:
 
 @example
-nix develop path:. -c cabal run agentic-run -- run hello --scripted
+agentic-run run hello --scripted
 @end example
+
+The command uses the installed runner, as @ref{First Workflow} states.  The
+maintainer route runs the runner that @code{test/cabal.sh list-bin agentic-run}
+names in the same way.
 
 The closing report gives the workflow result, @code{billFresh}, and
 @code{billMemo}.  A workflow Program normally returns unit.  Its useful record
@@ -2247,13 +2303,20 @@ needs the first section and the scripted rehearsal in @ref{Running Workflows}.
 @section Environments
 
 @cindex development shell
-Two Nix development shells are the supported environments, and nothing is
-installed globally.  The root shell supplies one GHC with the external Haskell
-dependencies and @command{cabal-install}.  Enter it with
-@code{nix develop path:.} from the repository root, or run
-@code{direnv allow .} once to attach it to a terminal.  The model shell
-supplies Lean and @command{texinfo}, and @code{nix develop path:./model}
-enters it.  @file{model/lean-toolchain} pins Lean 4.30.0, and
+A user installs the Nix package with @code{nix profile add .#agentic-run}, as
+@ref{First Workflow} states, and needs no development shell.  The rest of this
+chapter is the maintainer route.
+
+Two Nix development shells are the supported environments of a maintainer,
+and nothing is installed globally.  The root shell supplies one GHC with the
+external Haskell dependencies and @command{cabal-install}.  The model shell
+supplies Lean and @command{texinfo}.  The checkout tracks no @file{.envrc}
+file, so a maintainer attaches each shell with direnv once.  In the repository
+root, write an @file{.envrc} that holds the line @code{use flake}.  In
+@file{model} and in @file{bisim}, write an @file{.envrc} that holds the line
+@code{use flake path:../model}.  Then run @code{direnv allow .} once in each of
+the three directories.  @code{direnv exec .} then runs one command in the shell
+of its directory.  @file{model/lean-toolchain} pins Lean 4.30.0, and
 @file{model/lakefile.toml} pins Mathlib at the matching tag.
 
 @section Building the Haskell workspace
@@ -2263,9 +2326,15 @@ The Haskell side is one Cabal package, @code{agentic}, and @file{agentic.cabal}
 declares its components:
 
 @example
-nix develop path:. -c cabal build all
-nix develop path:. -c cabal test all
+direnv exec . test/cabal.sh build all
+direnv exec . test/cabal.sh test all
 @end example
+
+The first command is the developer build.  @file{test/cabal.sh} builds offline
+into the directory that @env{CABAL_BUILDDIR} names, or into
+@file{dist-newstyle} when that variable is unset.  The command
+@code{direnv exec . test/cabal.sh list-bin agentic-run} prints the path of the
+runner that it built.
 
 The public library @code{agentic} gathers the source directories @file{dsl},
 @file{plan}, @file{cost}, @file{runtime}, @file{engine/api}, @file{engine/acp}
@@ -2287,8 +2356,12 @@ engine interface against a deterministic fake engine.
 @cindex Nix package
 @cindex source distribution
 The root flake defines the package @code{agentic-run}, which is also its
-default package.  @command{nix build} builds it from the same pinned package
-set as the root shell:
+default package and the user build.  @command{nix build} builds it from the
+same pinned package set as the root shell.  The user command
+@code{nix build .#agentic-run} can fetch inputs from the binary caches that Nix
+is configured to use.  When the store already holds the closure of the root
+development shell, for example after direnv has loaded that shell once, a
+maintainer can build with substitution disabled:
 
 @example
 nix build .#agentic-run --no-update-lock-file --option substitute false
@@ -2304,10 +2377,9 @@ derivation builds the component @code{exe:agentic-run} with optimization level
 1 and parallel compilation, and it installs @file{bin/agentic-run}.  It also
 installs the three data files of @file{agentic.cabal}, the stub adapter and
 the manager reference pair, below @file{share/agentic}, and the runner reads
-them from there.  The root
-shell already holds every input of the derivation.  The build therefore fetches
-nothing, and the option @code{--option substitute false} prevents any contact
-with a binary cache.
+them from there.  With the closure of the root shell in the store, the
+build has every input of the derivation, and the option
+@code{--option substitute false} prevents any contact with a binary cache.
 
 The source of the derivation is a filtered copy of the repository.  It holds
 @file{agentic.cabal}, @file{cabal.project}, the three files under @file{nix},
@@ -2360,8 +2432,8 @@ conformance package requires the model by a local path, so the model is built
 first:
 
 @example
-nix develop path:./model -c bash -c 'cd model && lake build'
-nix develop path:./model -c bash -c 'cd bisim && lake build && lake exe corpus-gen'
+(cd model && direnv exec . lake build)
+(cd bisim && direnv exec . bash -c 'lake build && lake exe corpus-gen')
 @end example
 
 The default targets of the model are @code{Agentic} and @code{Pollution}.  The
@@ -2412,12 +2484,12 @@ The deterministic gates for the runner and the engines use local process
 doubles and contact no paid service:
 
 @example
-./cli/ci/policies.sh
-./cli/ci/examples.sh
-nix develop path:. -c ./cli/ci/routing-config.sh
-./cli/ci/citations.sh
-./engine/acp/ci/acp.sh
-./engine/agent-deck/ci/deck.sh
+direnv exec . ./cli/ci/policies.sh
+direnv exec . ./cli/ci/examples.sh
+direnv exec . ./cli/ci/routing-config.sh
+direnv exec . ./cli/ci/citations.sh
+direnv exec . ./engine/acp/ci/acp.sh
+direnv exec . ./engine/agent-deck/ci/deck.sh
 @end example
 
 @file{cli/ci/policies.sh} checks the import policy between the source
@@ -2444,9 +2516,9 @@ backends.  It is manual and paid, and it is outside every automatic gate.
 The manual is checked against the source it describes:
 
 @example
-nix develop path:. -c make -C doc check
-make -C doc check-haskell
-python3 doc/check-prose.py
+direnv exec . make -C doc check
+direnv exec . make -C doc check-haskell
+direnv exec . python3 doc/check-prose.py
 @end example
 
 @code{make -C doc check} renders GNU Info and single-page HTML in a temporary
@@ -2598,8 +2670,9 @@ in @file{runtime/BROKER.md}.
 @c COVER API Agentic.Cli.Command support
 @item Command
 Parsed command with constructors @code{Tui}, @code{TuiService}, @code{Usage},
-@code{Help}, @code{List},
+@code{Version}, @code{Help}, @code{List},
 @code{Plan}, @code{Cost}, @code{Run}, @code{RoutingInspection},
+@code{AdapterOptions},
 @code{MigrateRouting}, @code{Machine}, @code{LineageCheck},
 @code{MachineLineage}, and @code{ReadFlow}.  This type is exported for policy tests and front ends
 that need to inspect a parse.

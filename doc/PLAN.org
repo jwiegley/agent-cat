@@ -16170,6 +16170,67 @@ Evidence: resume-20260923/RD/R6/impl-r1 (a1 to a7 acceptance logs, exit 0; ALLBU
 ]
 #+end_src
 
+* TODO [#D] Resolve the R7 getting-started guide fess findings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-r7-fess-followup-2tw0
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 03:19]
+:MODIFIED: [2026-10-04 Sun 03:19]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/rd-R7-r1.md on readiness subtask R7 (getting-started guide), with the implementer's disclosed limitations.
+
+1. Medium. agentic-run --manager init links bin/agentic-run to one exact Nix store path. After each nix profile upgrade the operator must stop the manager and relink by hand, and a garbage collection can remove the old build. Make init link a stable path (the profile entry), or make serve warn about a dangling link or a version change, then simplify the guide section "After an upgrade of the runner".
+2. Medium. TUI service request screen: an Enter pressed as the screen draws does not request the review (evidence r7-guide/driver-retry-18-tui-service-person.log, exit 99). The rerun passed with a 1.5-second pause. Make the screen queue or replay the key.
+3. Low. engine/acp/src/Agentic/Acp.hs:495 and 543-545: the run banner prints the checkout-relative path python3 engine/acp/test/stub_adapter.py while the run uses the installed data file. Print the resolved adapter path.
+4. Low. Each TUI quit writes "GET /v1/events started public=503 storage-unavailable class=unexpected InvalidRequest" to the fault log, and manager/OPERATIONS.md and the guide say that the line needs no action. Treat a client disconnect on /v1/events as a non-fault outcome, then remove the caveat.
+5. Low. The claim that a profile added later needs a new credential was not run. Run it once with a free second profile (a copy of scripted), reload-profiles and add-client --profile NEW_ID.
+6. Low. The maintainer route (write .envrc with use flake or use flake path:../model, then direnv allow .) in README.md, AGENTS.md and doc/agent-cat.texi was never run. Have the operator confirm it, or state the de-based setup.
+7. Low. workflow/README.md:29, engine/README.md:31-32, doc/workflows/README.md:26 and doc/model-routing-v2.md:629 still use nix develop path:. -c. Sweep them to direnv exec . test/cabal.sh.
+8. Low. The guide names the Emacs "Using service mode" section of the separate repository but gives no link. No change unless a stable URL for agent-workflows exists.
+
+Limitations disclosed by the implementer: the paid-provider steps (marked Operator login) were not run. Pi and Emacs were covered by links only (R5 and R4 ran them). The nix build queried the configured binary caches. The make -C doc targets check-api and check-model-routing-v2.hs were not run.
+
+* DONE [#C] Write one getting-started guide that works when followed exactly
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-r7-getting-started-rc34
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 03:19]
+:MODIFIED: [2026-10-04 Sun 03:19]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-04 Sun 03:19]
+:CLOSE_REASON: Acceptance met by recorded evidence (RD/R7)
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Readiness subtask R7 of 2026-10-03 (operator direction: functional readiness). One getting-started guide that works when followed exactly. doc/getting-started.md covers, in order: install (nix profile add .#agentic-run, nix build .#agentic-run with result/bin on PATH, nix run .#agentic-run -- list), a first local run (list, help, plan, run hello --scripted, run harden --scripted, run hello --engine acp --adapter stub, the local TUI and its keys), the manager (init, serve with the fault log, the startup line, status, the scripted and person profiles), the clients (TUI --tui --service, links to the Pi Install and start section and the Emacs "Using service mode" section), real engines (marked Operator login: adapters, adapter-options, --model, --effort, the routing file, routing-only requirements, a claude manager profile with its environment bindings), and daily commands (status, check-store, add-client, issue-credential, reload-profiles, flow, the fault log, drain, shutdown, offline status, backup, relink after an upgrade). README.md has a Getting started section and its runner section describes the manager. README.md, cli/README.md and the manual give one user build command (the Nix package) and one labelled maintainer route (direnv exec . test/cabal.sh build all), and --option substitute false appears only in the maintainer route with its prerequisite. No document tells a user to run direnv allow . on a checkout without an .envrc. tui/README.md has a short user section, and manager/OPERATIONS.md links the guide.
+
+Evidence: resume-20260923/RD/R7/impl-r1 (r7-guide NN-*.log and .exit, every non-paid guide command run once in an isolated HOME with exits as the guide states; doc-checks and check-manual-members exit 0; r7.diff), fess/rd-R7-r1.md (audit, non-blocking).
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 805,
+    "issue_id": "acat-rd-r7-getting-started-rc34",
+    "author": "johnw",
+    "text": "All acceptance items passed: RD/R7/impl-r1 (doc/getting-started.md with the six sections in order; README.md Getting started section and the manual First Workflow chapter mirror it; every non-paid guide command run once exactly as written in an isolated HOME, logs r7-guide/NN-*.log and .exit, each exit as the guide states, including run hello with no target at exit 1 and flow while serving at exit 2; the local, scripted-service and person-service TUI runs reached success; one user build command in README.md, cli/README.md and the manual, the maintainer route labelled; check-prose.py and check-manual-members.py exit 0; git status showed documentation changes only). The audit fess/rd-R7-r1.md found nothing blocking. Follow-ups: acat-rd-r7-fess-followup-2tw0.",
+    "created_at": "2026-10-04T10:19:27Z"
+  }
+]
+#+end_src
+
 * DONE [#D] Give the remaining tool "cat" questions honest addressees
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

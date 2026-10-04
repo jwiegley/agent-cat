@@ -108,15 +108,33 @@ imports Haskell modules.
 
 ## Build and use
 
+The user build is the Nix package of the root flake.
+[`doc/getting-started.md`](../doc/getting-started.md) is the complete guide.
+From the root of a checkout, this command installs the runner:
+
 ```sh
-nix develop path:. -c cabal build all
-nix develop path:. -c cabal run agentic-run -- list
-nix develop path:. -c cabal run agentic-run -- plan harden
-nix develop path:. -c cabal run agentic-run -- cost harden
-nix develop path:. -c cabal run agentic-run -- run harden --scripted
-nix develop path:. -c cabal run agentic-run -- --tui
-nix develop path:. -c cabal run agentic-run -- --routing --json --offline
-nix develop path:. -c cabal run agentic-run -- --migrate-routing old.yaml --output new.yaml
+nix profile add .#agentic-run
+```
+
+The installed runner works in any directory:
+
+```sh
+agentic-run list
+agentic-run plan harden
+agentic-run cost harden
+agentic-run run harden --scripted
+agentic-run --tui
+agentic-run --routing --json --offline
+agentic-run --migrate-routing old.yaml --output new.yaml
+```
+
+The maintainer route builds with Cabal in the root development shell, as the
+section "Building and verifying" of [`README.md`](../README.md#building-and-verifying)
+states. From the root of a checkout with that shell attached:
+
+```sh
+direnv exec . test/cabal.sh build all
+"$(direnv exec . test/cabal.sh list-bin agentic-run)" run harden --scripted
 ```
 
 ## Conventions

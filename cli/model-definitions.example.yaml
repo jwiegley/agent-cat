@@ -7,9 +7,9 @@
 #
 # It defines one engine for each built-in ACP adapter. It needs no environment
 # variable, no model catalogue and no secret. The default persona is "stub",
-# which uses the deterministic test adapter. That adapter is found relative to
-# the working directory, so a stub run starts from the root of the agent-cat
-# source tree. Select another persona with --persona NAME or AGENT_CAT_PERSONA.
+# which uses the deterministic test adapter. That adapter is a data file of the
+# package, so a stub run works from any working directory. Select another
+# persona with --persona NAME or AGENT_CAT_PERSONA.
 #
 # The model identifiers of the claude, codex and droid models are examples.
 # Replace each one with a model value that the adapter offers:

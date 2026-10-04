@@ -97,7 +97,7 @@ def main() -> int:
 
     manual = MANUAL.read_text()
     required = [
-        "nix develop path:. -c make -C doc check",
+        "direnv exec . make -C doc check",
         "make -C doc check-haskell",
         "./bisim/ci/tier0.sh",
         "./cli/ci/examples.sh",
