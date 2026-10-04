@@ -1261,12 +1261,13 @@ These measured values name no ceiling:
 | `storage.ledger-bytes-at-ceiling` | 524288 |
 | `storage.ledger-cancel-ms` | 29.0 |
 
-## Measured values of 2026-10-03 at e8c04cd4 on macOS 27.0 arm64
+## Measured values of 2026-10-03 at e454fbd7 on macOS 27.0 arm64
 
-These values were measured on 2026-10-03 on the platform of the section
+These values are the runs of record of the capacity and failure modes. They
+were measured on 2026-10-03 on the platform of the section
 [Tested platform](#tested-platform), macOS 27.0 (build 26A428) on arm64.
-Each mode ran once at N8 on a tree whose content equals commit `e8c04cd4`,
-one mode at a time. The six capacity modes `capacity-admission`, `capacity-inputs` (with
+Each mode ran once at N8 on the tree of commit `e454fbd7`, one mode at a
+time. The six capacity modes `capacity-admission`, `capacity-inputs` (with
 `ARTIFACT_CHECK`), `capacity-streams`, `faults-io`, `storage` and `routes`
 ran first. The five failure modes `failures-worker`, `failures-manager`,
 `failures-launched`, `tui-failures` and `failures-backup` ran after them.
@@ -1282,152 +1283,154 @@ manager/test/capacity-ceilings.json` with the eleven measurement files
 the 129 ceiling keys. It lists the host-load keys as unchecked, because they
 name no ceiling. No ceiling changed after a measurement.
 
-Each of the 22 workloads started at a one-minute load average of at most 16.
-The largest value at a start was 15.58, at the start of `cohorts`. Before
-`failures.worker`, the harness waited 181 seconds for the load to fall to 16.
-At the start of each workload, the harness also counted one other
-`--manager serve` process. That process is a manager of an earlier capacity
-run with the configuration of another fixture. Under the host-load rule of
-the section [Measurement rules](#measurement-rules), no workload of this run
-is therefore a run of record. The values below state the measurement with its
-conditions.
+Each of the 22 workloads started at a one-minute load average of at most 16,
+and the harness counted no other `--manager serve` process at the start of
+any workload. Each workload thus meets the host-load rule of the section
+[Measurement rules](#measurement-rules). The largest value at a start was
+15.92, at the start of `reservations.r1`. Before `reservations.r1`, the
+harness waited 30 seconds for the load to fall to 16.
+
+The nine accepted first pages of `/v1/runs` in the `pages` lifetime took
+977, 123, 129, 117, 140, 134, 111, 151 and 99 milliseconds in their order,
+for a median of 129.1 milliseconds. The first of them also retains the
+handles of the 4096 legacy entries for the first time in the lifetime.
 
 In the `failures-backup` mode, the kill of case 2 and the kill of case 3 both
 landed inside their windows, so all three cases counted. Under the file-size
 limit of 1576960 bytes, the backup of case 1 refused with
-`storage-unavailable` after 134.7 milliseconds.
+`storage-unavailable` after 102.6 milliseconds.
 
 | Key | Measured | Result |
 | --- | --- | --- |
 | `captures.aggregate-accepted-bytes` | 134217728 | PASS |
 | `captures.aggregate-refusal-code` | `storage-quota` | PASS |
-| `captures.aggregate-refusal-ms` | 1.3 | PASS |
+| `captures.aggregate-refusal-ms` | 1.1 | PASS |
 | `captures.aggregate-refusal-status` | 429 | PASS |
-| `captures.manager-rss-peak-bytes` | 285523968 | PASS |
+| `captures.manager-rss-peak-bytes` | 276545536 | PASS |
 | `captures.max-accepted` | true | PASS |
 | `captures.oversize-refusal-code` | `size-limit` | PASS |
-| `captures.oversize-refusal-ms` | 0.5 | PASS |
+| `captures.oversize-refusal-ms` | 0.4 | PASS |
 | `captures.oversize-refusal-status` | 413 | PASS |
 | `captures.root-growth-overhead-bytes` | 137706 | PASS |
-| `captures.upload-max-ms` | 1393.8 | PASS |
-| `disk.manager-rss-peak-bytes` | 97222656 | PASS |
+| `captures.upload-max-ms` | 690.4 | PASS |
+| `disk.manager-rss-peak-bytes` | 95895552 | PASS |
 | `disk.no-receipt` | true | PASS |
 | `disk.refusal-code` | `storage-unavailable` | PASS |
-| `disk.refusal-ms` | 11.0 | PASS |
+| `disk.refusal-ms` | 10.4 | PASS |
 | `disk.refusal-status` | 503 | PASS |
 | `disk.reopen-verified` | true | PASS |
 | `drafts.client-accepted` | 4 | PASS |
 | `drafts.client-refusal-code` | `storage-quota` | PASS |
-| `drafts.client-refusal-ms` | 1.9 | PASS |
+| `drafts.client-refusal-ms` | 1.3 | PASS |
 | `drafts.client-refusal-status` | 429 | PASS |
-| `drafts.create-p50-ms` | 11.7 | PASS |
-| `drafts.create-p95-ms` | 14.2 | PASS |
+| `drafts.create-p50-ms` | 10.2 | PASS |
+| `drafts.create-p95-ms` | 13.1 | PASS |
 | `drafts.global-accepted` | 10 | PASS |
 | `drafts.global-refusal-code` | `storage-quota` | PASS |
-| `drafts.global-refusal-ms` | 3.7 | PASS |
+| `drafts.global-refusal-ms` | 1.5 | PASS |
 | `drafts.global-refusal-status` | 429 | PASS |
-| `drafts.manager-rss-peak-bytes` | 93700096 | PASS |
-| `events.catch-up-p50-ms` | 5.5 | PASS |
-| `events.catch-up-p95-ms` | 225.0 | PASS |
-| `events.manager-rss-peak-bytes` | 136265728 | PASS |
+| `drafts.manager-rss-peak-bytes` | 95010816 | PASS |
+| `events.catch-up-p50-ms` | 2.3 | PASS |
+| `events.catch-up-p95-ms` | 106.1 | PASS |
+| `events.manager-rss-peak-bytes` | 135331840 | PASS |
 | `events.reader-complete` | true | PASS |
 | `failures.backup.passed` | true | PASS |
 | `failures.launched.manager-rss-peak-bytes` | 101302272 | PASS |
 | `failures.launched.passed` | true | PASS |
-| `failures.launched.release-to-review-ms` | 328.4 | PASS |
-| `failures.manager.manager-rss-peak-bytes` | 111804416 | PASS |
+| `failures.launched.release-to-review-ms` | 120.4 | PASS |
+| `failures.manager.manager-rss-peak-bytes` | 111149056 | PASS |
 | `failures.manager.passed` | true | PASS |
-| `failures.manager.restart-ready-ms` | 1072.1 | PASS |
-| `failures.tui.manager-rss-peak-bytes` | 103743488 | PASS |
+| `failures.manager.restart-ready-ms` | 1181.1 | PASS |
+| `failures.tui.manager-rss-peak-bytes` | 103055360 | PASS |
 | `failures.tui.passed` | true | PASS |
-| `failures.tui.reconnect-ms` | 1035.4 | PASS |
-| `failures.tui.unreachable-ms` | 2155.2 | PASS |
-| `failures.worker.lost-ms` | 6.4 | PASS |
-| `failures.worker.manager-rss-peak-bytes` | 99893248 | PASS |
+| `failures.tui.reconnect-ms` | 1085.6 | PASS |
+| `failures.tui.unreachable-ms` | 1538.7 | PASS |
+| `failures.worker.lost-ms` | 8.5 | PASS |
+| `failures.worker.manager-rss-peak-bytes` | 100188160 | PASS |
 | `failures.worker.passed` | true | PASS |
 | `growth.ledger-bytes-per-command` | 131072 | PASS |
-| `growth.manager-log-bytes-per-command` | 3293.4 | PASS |
-| `growth.run-log-bytes-per-run` | 4979 | PASS |
+| `growth.manager-log-bytes-per-command` | 3294.6 | PASS |
+| `growth.run-log-bytes-per-run` | 5017 | PASS |
 | `growth.wal-bytes-after-close` | 0 | PASS |
-| `growth.wal-bytes-per-command` | 298733.2 | PASS |
+| `growth.wal-bytes-per-command` | 297470.6 | PASS |
 | `pages.client-refusal-code` | `storage-quota` | PASS |
-| `pages.client-refusal-ms` | 296.0 | PASS |
+| `pages.client-refusal-ms` | 33.7 | PASS |
 | `pages.client-refusal-status` | 429 | PASS |
 | `pages.continuation-before-expiry-status` | 200 | PASS |
 | `pages.expired-continuation-code` | `view-expired` | PASS |
 | `pages.expired-continuation-status` | 410 | PASS |
 | `pages.first-page-after-expiry-status` | 200 | PASS |
-| `pages.first-page-p50-ms` | 399.8 | PASS |
-| `pages.first-page-p95-ms` | 1434.9 | PASS |
+| `pages.first-page-p50-ms` | 129.1 | PASS |
+| `pages.first-page-p95-ms` | 977.4 | PASS |
 | `pages.global-refusal-code` | `storage-quota` | PASS |
-| `pages.global-refusal-ms` | 40.3 | PASS |
+| `pages.global-refusal-ms` | 44.1 | PASS |
 | `pages.global-refusal-status` | 429 | PASS |
 | `pages.held-sets` | 8 | PASS |
-| `pages.manager-rss-peak-bytes` | 116391936 | PASS |
+| `pages.manager-rss-peak-bytes` | 117293056 | PASS |
 | `pages.set-bytes-max` | 1341617 | PASS |
 | `queue.accepted-queued` | 100 | PASS |
-| `queue.enqueue-p50-ms` | 19.1 | PASS |
-| `queue.enqueue-p95-ms` | 49.2 | PASS |
-| `queue.manager-rss-peak-bytes` | 100663296 | PASS |
+| `queue.enqueue-p50-ms` | 17.5 | PASS |
+| `queue.enqueue-p95-ms` | 22.0 | PASS |
+| `queue.manager-rss-peak-bytes` | 100925440 | PASS |
 | `queue.mutations-per-credential-minute` | 27 | PASS |
 | `queue.refusal-code` | `state-conflict` | PASS |
-| `queue.refusal-ms` | 4.8 | PASS |
+| `queue.refusal-ms` | 5.3 | PASS |
 | `queue.refusal-status` | 409 | PASS |
-| `queue.requests-first-page-p50-ms` | 51.3 | PASS |
-| `queue.requests-first-page-p95-ms` | 254.5 | PASS |
+| `queue.requests-first-page-p50-ms` | 52.5 | PASS |
+| `queue.requests-first-page-p95-ms` | 109.1 | PASS |
 | `readers.holders-accepted` | 2 | PASS |
 | `readers.holders-verified` | true | PASS |
-| `readers.manager-rss-peak-bytes` | 74006528 | PASS |
+| `readers.manager-rss-peak-bytes` | 74055680 | PASS |
 | `readers.third-refusal-code` | `storage-quota` | PASS |
 | `readers.third-refusal-status` | 429 | PASS |
-| `readers.third-wait-ms` | 5001.8 | PASS |
-| `reservations.r1.answer-p50-ms` | 30.8 | PASS |
-| `reservations.r1.answer-p95-ms` | 61.2 | PASS |
-| `reservations.r1.approve-p50-ms` | 26.4 | PASS |
-| `reservations.r1.approve-p95-ms` | 31.3 | PASS |
+| `readers.third-wait-ms` | 5001.7 | PASS |
+| `reservations.r1.answer-p50-ms` | 22.9 | PASS |
+| `reservations.r1.answer-p95-ms` | 30.4 | PASS |
+| `reservations.r1.approve-p50-ms` | 21.2 | PASS |
+| `reservations.r1.approve-p95-ms` | 25.6 | PASS |
 | `reservations.r1.fifo-order` | true | PASS |
-| `reservations.r1.manager-rss-peak-bytes` | 105037824 | PASS |
+| `reservations.r1.manager-rss-peak-bytes` | 104087552 | PASS |
 | `reservations.r1.peak-concurrent-runs` | 1 | PASS |
-| `reservations.r1.release-to-review-p50-ms` | 209.4 | PASS |
-| `reservations.r1.release-to-review-p95-ms` | 632.5 | PASS |
-| `reservations.r16.answer-p50-ms` | 33.6 | PASS |
-| `reservations.r16.answer-p95-ms` | 318.5 | PASS |
-| `reservations.r16.approve-p50-ms` | 42.1 | PASS |
-| `reservations.r16.approve-p95-ms` | 94.1 | PASS |
+| `reservations.r1.release-to-review-p50-ms` | 214.1 | PASS |
+| `reservations.r1.release-to-review-p95-ms` | 278.8 | PASS |
+| `reservations.r16.answer-p50-ms` | 23.8 | PASS |
+| `reservations.r16.answer-p95-ms` | 29.0 | PASS |
+| `reservations.r16.approve-p50-ms` | 22.6 | PASS |
+| `reservations.r16.approve-p95-ms` | 28.7 | PASS |
 | `reservations.r16.fifo-order` | true | PASS |
-| `reservations.r16.manager-rss-peak-bytes` | 114114560 | PASS |
+| `reservations.r16.manager-rss-peak-bytes` | 119504896 | PASS |
 | `reservations.r16.peak-concurrent-runs` | 16 | PASS |
 | `reservations.r16.queued-capacity-reason` | true | PASS |
-| `reservations.r16.release-to-review-p50-ms` | 286.0 | PASS |
-| `reservations.r16.release-to-review-p95-ms` | 306.2 | PASS |
-| `routes.batch-p50-ms` | 8.9 | PASS |
-| `routes.batch-p95-ms` | 143.3 | PASS |
+| `reservations.r16.release-to-review-p50-ms` | 286.3 | PASS |
+| `reservations.r16.release-to-review-p95-ms` | 307.5 | PASS |
+| `routes.batch-p50-ms` | 7.6 | PASS |
+| `routes.batch-p95-ms` | 37.2 | PASS |
 | `routes.below-floor-code` | `cursor-expired` | PASS |
 | `routes.below-floor-status` | 410 | PASS |
-| `routes.manager-rss-peak-bytes` | 100384768 | PASS |
+| `routes.manager-rss-peak-bytes` | 100352000 | PASS |
 | `routes.prune-floor` | true | PASS |
 | `routes.seal-resume` | true | PASS |
 | `safety.cancel-accepted` | true | PASS |
-| `safety.cancel-ms` | 19.5 | PASS |
-| `safety.cancel-to-cancelled-ms` | 6.2 | PASS |
-| `safety.manager-rss-peak-bytes` | 101957632 | PASS |
+| `safety.cancel-ms` | 18.3 | PASS |
+| `safety.cancel-to-cancelled-ms` | 5.0 | PASS |
+| `safety.manager-rss-peak-bytes` | 101171200 | PASS |
 | `safety.rate-refusal-code` | `rate-limit` | PASS |
-| `safety.rate-refusal-ms` | 1.4 | PASS |
+| `safety.rate-refusal-ms` | 1.2 | PASS |
 | `safety.rate-refusal-status` | 429 | PASS |
-| `slow.independent-answer-ms` | 107.0 | PASS |
+| `slow.independent-answer-ms` | 32.6 | PASS |
 | `slow.independent-run-succeeded` | true | PASS |
-| `slow.manager-rss-peak-bytes` | 136265728 | PASS |
+| `slow.manager-rss-peak-bytes` | 135331840 | PASS |
 | `slow.no-loss` | true | PASS |
-| `slow.pending-bytes-max` | 421246 | PASS |
+| `slow.pending-bytes-max` | 426823 | PASS |
 | `storage.append-cancel-accepted` | true | PASS |
 | `storage.append-refusal-code` | `storage-unavailable` | PASS |
 | `storage.append-refusal-ms` | 2.1 | PASS |
 | `storage.append-refusal-status` | 503 | PASS |
 | `storage.ledger-cancel-accepted` | true | PASS |
 | `storage.ledger-refusal-code` | `storage-quota` | PASS |
-| `storage.ledger-refusal-ms` | 2.4 | PASS |
+| `storage.ledger-refusal-ms` | 1.2 | PASS |
 | `storage.ledger-refusal-status` | 429 | PASS |
-| `storage.manager-rss-peak-bytes` | 101875712 | PASS |
+| `storage.manager-rss-peak-bytes` | 100548608 | PASS |
 
 These measured values name no ceiling:
 
@@ -1438,40 +1441,40 @@ These measured values name no ceiling:
 | `disk.limit-bytes` | 4760728 |
 | `disk.no-run-started` | true |
 | `disk.withdraw-accepted` | false |
-| `disk.withdraw-ms` | 0.6 |
-| `events.burst-per-second` | 287.0 |
-| `events.burst.catch-up-p50-ms` | 7.8 |
-| `events.burst.catch-up-p95-ms` | 256.8 |
-| `events.burst.delivery-p50-ms` | 14475.7 |
-| `events.burst.delivery-p95-ms` | 16170.4 |
+| `disk.withdraw-ms` | 0.4 |
+| `events.burst-per-second` | 489.4 |
+| `events.burst.catch-up-p50-ms` | 4.2 |
+| `events.burst.catch-up-p95-ms` | 113.4 |
+| `events.burst.delivery-p50-ms` | 8288.7 |
+| `events.burst.delivery-p95-ms` | 9144.6 |
 | `events.count` | 8384 |
-| `events.delivery-p50-ms` | 273.8 |
-| `events.delivery-p95-ms` | 14872.7 |
+| `events.delivery-p50-ms` | 126.9 |
+| `events.delivery-p95-ms` | 9009.2 |
 | `events.dropped-reads` | 0 |
 | `events.mutations-per-credential-minute` | 27 |
-| `events.poll-slowest-at` | `2026-10-03T20:44:19.244039+00:00` |
-| `events.poll-slowest-ms` | 715.3 |
-| `events.reader.e0.catch-up-p50-ms` | 231.3 |
-| `events.reader.e0.catch-up-p95-ms` | 659.6 |
-| `events.reader.e1-2.catch-up-p50-ms` | 3.2 |
-| `events.reader.e1-2.catch-up-p95-ms` | 106.8 |
-| `events.reader.e2-1.catch-up-p50-ms` | 11.5 |
-| `events.reader.e2-1.catch-up-p95-ms` | 236.4 |
-| `events.reader.e3-1.catch-up-p50-ms` | 0.3 |
-| `events.reader.e3-1.catch-up-p95-ms` | 217.9 |
+| `events.poll-slowest-at` | `2026-10-04T00:36:11.798351+00:00` |
+| `events.poll-slowest-ms` | 217.3 |
+| `events.reader.e0.catch-up-p50-ms` | 171.8 |
+| `events.reader.e0.catch-up-p95-ms` | 557.2 |
+| `events.reader.e1-2.catch-up-p50-ms` | 1.4 |
+| `events.reader.e1-2.catch-up-p95-ms` | 14.5 |
+| `events.reader.e2-1.catch-up-p50-ms` | 2.0 |
+| `events.reader.e2-1.catch-up-p95-ms` | 82.4 |
+| `events.reader.e3-1.catch-up-p50-ms` | 2.9 |
+| `events.reader.e3-1.catch-up-p95-ms` | 115.9 |
 | `events.reconnects` | 1 |
-| `events.refused-reads` | 7 |
-| `events.round1-per-second` | 65.1 |
-| `events.round2-per-second` | 57.2 |
-| `events.rounds.catch-up-p50-ms` | 4.0 |
-| `events.rounds.catch-up-p95-ms` | 71.1 |
-| `events.rounds.delivery-p50-ms` | 234.8 |
-| `events.rounds.delivery-p95-ms` | 490.8 |
-| `events.route.e1-1.bytes` | 659478 |
+| `events.refused-reads` | 5 |
+| `events.round1-per-second` | 122.6 |
+| `events.round2-per-second` | 121.5 |
+| `events.rounds.catch-up-p50-ms` | 1.8 |
+| `events.rounds.catch-up-p95-ms` | 14.1 |
+| `events.rounds.delivery-p50-ms` | 108.8 |
+| `events.rounds.delivery-p95-ms` | 178.2 |
+| `events.route.e1-1.bytes` | 659730 |
 | `events.route.e1-1.records` | 512 |
-| `events.route.e2-2.bytes` | 659478 |
+| `events.route.e2-2.bytes` | 659730 |
 | `events.route.e2-2.records` | 512 |
-| `events.route.e3-2.bytes` | 9494 |
+| `events.route.e3-2.bytes` | 9574 |
 | `events.route.e3-2.records` | 19 |
 | `events.uncertain-approvals` | 0 |
 | `failures.backup.capture-bytes` | 67108864 |
@@ -1480,61 +1483,61 @@ These measured values name no ceiling:
 | `failures.backup.largest-file-bytes` | 528384 |
 | `failures.backup.limit-bytes` | 1576960 |
 | `failures.backup.limited-code` | `storage-unavailable` |
-| `failures.backup.limited-ms` | 134.7 |
-| `failures.manager.release-7-to-review-ms` | 181.3 |
-| `failures.manager.release-9-to-review-ms` | 248.0 |
-| `failures.tui.delayed-switch-ms` | 2503.0 |
-| `failures.tui.direct-overview-ms` | 52.8 |
+| `failures.backup.limited-ms` | 102.6 |
+| `failures.manager.release-7-to-review-ms` | 227.2 |
+| `failures.manager.release-9-to-review-ms` | 673.9 |
+| `failures.tui.delayed-switch-ms` | 1933.0 |
+| `failures.tui.direct-overview-ms` | 34.7 |
 | `growth.commands` | 124 |
-| `growth.wal-bytes-serving` | 38616792 |
-| `pages.legacy-setup-load-1m-end` | 11.01 |
-| `pages.legacy-setup-load-1m-start` | 11.9 |
-| `pages.legacy-setup-ms` | 27233.1 |
-| `queue.capabilities-saturated-ms` | 2.9 |
-| `reservations.r16.capabilities-saturated-ms` | 3.1 |
+| `growth.wal-bytes-serving` | 38451992 |
+| `pages.legacy-setup-load-1m-end` | 7.44 |
+| `pages.legacy-setup-load-1m-start` | 7.85 |
+| `pages.legacy-setup-ms` | 21962.8 |
+| `queue.capabilities-saturated-ms` | 2.7 |
+| `reservations.r16.capabilities-saturated-ms` | 1.9 |
 | `routes.batches` | 41 |
 | `routes.create-after-seal-position` | 31 |
 | `routes.prune-floor-position` | 30 |
 | `routes.seal-position` | 30 |
 | `routes.second-segment-records` | 4 |
-| `safety.capabilities-saturated-ms` | 5.9 |
-| `slow.burst-run-log-bytes-max` | 39196 |
-| `slow.independent-runtime-terminal-ms` | -68.0 |
+| `safety.capabilities-saturated-ms` | 3.4 |
+| `slow.burst-run-log-bytes-max` | 39596 |
+| `slow.independent-runtime-terminal-ms` | -23.6 |
 | `slow.independent-terminal-in-round` | true |
-| `slow.independent-terminal-ms` | 3200.2 |
-| `slow.peer-bytes-while-stopped` | 1666375 |
+| `slow.independent-terminal-ms` | 1569.5 |
+| `slow.peer-bytes-while-stopped` | 1666567 |
 | `slow.reconnects-after-stop` | 1 |
-| `slow.stopped-bytes-before` | 298279 |
-| `slow.stopped-ms` | 26026 |
+| `slow.stopped-bytes-before` | 298473 |
+| `slow.stopped-ms` | 15824 |
 | `slow.stream-ended` | true |
-| `storage.append-cancel-ms` | 8.8 |
+| `storage.append-cancel-ms` | 5.8 |
 | `storage.ledger-bytes-at-ceiling` | 524288 |
-| `storage.ledger-cancel-ms` | 25.3 |
+| `storage.ledger-cancel-ms` | 22.8 |
 
 The host-load keys of each workload have these values. The wait is the time
 that the harness waited for the load rule before the start of the workload.
 
 | Workload | Load 1m at start | Load 1m at end | Wait ms | Other managers at start |
 | --- | --- | --- | --- | --- |
-| `reservations.r1` | 12.16 | 11.25 | 0.0 | 1 |
-| `reservations.r16` | 11.25 | 15.58 | 0.0 | 1 |
-| `cohorts` | 15.58 | 16.34 | 0.0 | 1 |
-| `queue` | 14.72 | 12.19 | 15056.6 | 1 |
-| `drafts` | 11.9 | 11.9 | 0.0 | 1 |
-| `pages` | 11.01 | 10.05 | 0.0 | 1 |
-| `captures` | 10.05 | 10.05 | 0.0 | 1 |
-| `streams` | 8.78 | 15.39 | 0.0 | 1 |
-| `io-1` | 14.56 | 15.39 | 0.0 | 1 |
-| `io-2` | 15.39 | 15.39 | 0.0 | 1 |
-| `io-3` | 15.39 | 15.39 | 0.0 | 1 |
-| `storage` | 15.13 | 14.98 | 15127.1 | 1 |
-| `routes` | 15.15 | 30.78 | 0.0 | 1 |
-| `failures.worker` | 15.55 | 11.85 | 181146.5 | 1 |
-| `failures.manager` | 11.38 | 6.89 | 0.0 | 1 |
-| `failures.launched` | 7.22 | 7.37 | 0.0 | 1 |
-| `failures.tui` | 7.26 | 18.12 | 0.0 | 1 |
-| `bk-setup` | 13.83 | 13.37 | 0.0 | 1 |
-| `bk-case-1` | 13.37 | 13.37 | 0.0 | 1 |
-| `bk-case-2` | 12.94 | 12.94 | 0.0 | 1 |
-| `bk-other` | 12.94 | 12.94 | 0.0 | 1 |
-| `bk-restored` | 13.5 | 13.5 | 0.0 | 1 |
+| `reservations.r1` | 15.92 | 13.11 | 30214.8 | 0 |
+| `reservations.r16` | 13.11 | 11.03 | 0.0 | 0 |
+| `cohorts` | 11.03 | 10.55 | 0.0 | 0 |
+| `queue` | 10.55 | 7.93 | 0.0 | 0 |
+| `drafts` | 7.93 | 7.85 | 0.0 | 0 |
+| `pages` | 7.44 | 3.64 | 0.0 | 0 |
+| `captures` | 3.64 | 3.64 | 0.0 | 0 |
+| `streams` | 3.53 | 3.21 | 0.0 | 0 |
+| `io-1` | 3.36 | 3.25 | 0.0 | 0 |
+| `io-2` | 3.25 | 3.25 | 0.0 | 0 |
+| `io-3` | 3.25 | 3.25 | 0.0 | 0 |
+| `storage` | 3.31 | 10.28 | 0.0 | 0 |
+| `routes` | 11.22 | 14.47 | 0.0 | 0 |
+| `failures.worker` | 14.67 | 15.74 | 0.0 | 0 |
+| `failures.manager` | 15.12 | 10.94 | 0.0 | 0 |
+| `failures.launched` | 10.94 | 7.3 | 0.0 | 0 |
+| `failures.tui` | 7.3 | 4.31 | 0.0 | 0 |
+| `bk-setup` | 4.13 | 4.13 | 0.0 | 0 |
+| `bk-case-1` | 4.13 | 4.13 | 0.0 | 0 |
+| `bk-case-2` | 4.04 | 4.04 | 0.0 | 0 |
+| `bk-other` | 4.04 | 4.04 | 0.0 | 0 |
+| `bk-restored` | 4.04 | 4.04 | 0.0 | 0 |

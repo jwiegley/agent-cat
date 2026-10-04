@@ -7616,7 +7616,7 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 17:28]
+:MODIFIED: [2026-10-03 Sat 17:50]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G5
 :SOURCE_REPO: agent-cat
@@ -7855,6 +7855,13 @@ Full failure/capacity evidence, operational procedures, reproducible packages, r
     "author": "johnw",
     "text": "PH1 (PG18, operator approval of 2026-10-03) rewrites ext-pi/package-lock.json as a JSON-only edit, with no npm install, ci or update. The seven node_modules/@earendil-works registry entries (pi-ai, pi-client, pi-coding-agent, pi-protocol, pi-server, pi-telemetry, pi-tui) are now npm link entries to ../../fork/pi/packages/<dir>, relative to ~/src/agent-cat/ext-pi. A link entry for @earendil-works/chord is added. The nested registry subtree under pi-coding-agent/node_modules is deleted. Eight fork target entries at 0.99.1 are added from the fork package.json files. ext-pi/README.md and doc/workflow-manager-release-evidence.md state the current lock. Checks: npm run check exit 0, npm test exit 0 (220 passed, 29 skipped), make -C doc check exit 0. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PH/PH1/impl-r1. Fess non-blocking: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/ph-PH1-r1.md, filed as acat-ph1-fess-followup-at5i.",
     "created_at": "2026-10-04T00:28:32Z"
+  },
+  {
+    "id": 784,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "PH2 run of record (evidence $R/PH/PH2/impl-r1, commit e454fbd7, clean tree): ps found no foreign manager before or after. All 11 modes (capacity-admission, capacity-inputs with ARTIFACT_CHECK, capacity-streams, faults-io, storage, routes, failures-worker, failures-manager, failures-launched, tui-failures, failures-backup) exited 0 once at N8. All 22 workloads recorded other-managers-start=0, highest start load 15.92. capacity_summary.py: 129 PASS, 0 FAIL, 0 MISSING (13-summary.log). events.catch-up-p50-ms 2.3, p95 106.1, pages.first-page-p50-ms 129.1, failures.backup.passed true. No ceiling moved. manager/CAPACITY.md Measured values updated. make -C doc check passed. This closes the WM-041 runs-of-record item; the package and gate stay open for closeout review.",
+    "created_at": "2026-10-04T00:50:52Z"
   }
 ]
 #+end_src
@@ -9263,15 +9270,17 @@ Replace the remaining /workflow command namespace in the Pi extension with /wf n
 ]
 #+end_src
 
-* TODO [#B] Run the PG4 capacity-inputs confirmation inside the PG1 rule
+* DONE [#B] Run the PG4 capacity-inputs confirmation inside the PG1 rule
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-jkas
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-03 Sat 06:15]
-:MODIFIED: [2026-10-03 Sat 13:54]
+:MODIFIED: [2026-10-03 Sat 17:50]
 :CREATED_BY: johnw
+:FINISHED: [2026-10-03 Sat 17:50]
+:CLOSE_REASON: Run of record met acceptance in PH2
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -9302,6 +9311,13 @@ Current values (not a run of record, PID 61004 present, start loads 5.66 to 12.4
     "author": "johnw",
     "text": "PG26 round 2 (2026-10-03) hit the same gate: PID 61004 ran during all capacity workloads. The combined run of record is acat-pg26-capacity-run-of-record-2z6q.",
     "created_at": "2026-10-03T20:54:03Z"
+  },
+  {
+    "id": 780,
+    "issue_id": "acat-jkas",
+    "author": "johnw",
+    "text": "PH2 run of record (evidence $R/PH/PH2/impl-r1, commit e454fbd7, clean tree): ps found no foreign manager before or after. All 11 modes (capacity-admission, capacity-inputs with ARTIFACT_CHECK, capacity-streams, faults-io, storage, routes, failures-worker, failures-manager, failures-launched, tui-failures, failures-backup) exited 0 once at N8. All 22 workloads recorded other-managers-start=0, highest start load 15.92. capacity_summary.py: 129 PASS, 0 FAIL, 0 MISSING (13-summary.log). events.catch-up-p50-ms 2.3, p95 106.1, pages.first-page-p50-ms 129.1, failures.backup.passed true. No ceiling moved. manager/CAPACITY.md Measured values updated. make -C doc check passed.",
+    "created_at": "2026-10-04T00:50:50Z"
   }
 ]
 #+end_src
@@ -10342,15 +10358,17 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
 :ORIGINAL_SIZE: 0
 :END:
 
-* TODO [#B] Run the PG3 capacity-streams confirmation inside the PG1 rule
+* DONE [#B] Run the PG3 capacity-streams confirmation inside the PG1 rule
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-n50o
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-03 Sat 03:16]
-:MODIFIED: [2026-10-03 Sat 13:54]
+:MODIFIED: [2026-10-03 Sat 17:50]
 :CREATED_BY: johnw
+:FINISHED: [2026-10-03 Sat 17:50]
+:CLOSE_REASON: Run of record met acceptance in PH2
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -10381,6 +10399,13 @@ Current values (not a run of record, PID 61004 present, load 5.6 to 6.7): catch-
     "author": "johnw",
     "text": "PG26 round 2 (2026-10-03) hit the same gate: PID 61004 ran during all capacity workloads. The combined run of record is acat-pg26-capacity-run-of-record-2z6q.",
     "created_at": "2026-10-03T20:54:05Z"
+  },
+  {
+    "id": 779,
+    "issue_id": "acat-n50o",
+    "author": "johnw",
+    "text": "PH2 run of record (evidence $R/PH/PH2/impl-r1, commit e454fbd7, clean tree): ps found no foreign manager before or after. All 11 modes (capacity-admission, capacity-inputs with ARTIFACT_CHECK, capacity-streams, faults-io, storage, routes, failures-worker, failures-manager, failures-launched, tui-failures, failures-backup) exited 0 once at N8. All 22 workloads recorded other-managers-start=0, highest start load 15.92. capacity_summary.py: 129 PASS, 0 FAIL, 0 MISSING (13-summary.log). events.catch-up-p50-ms 2.3, p95 106.1, pages.first-page-p50-ms 129.1, failures.backup.passed true. No ceiling moved. manager/CAPACITY.md Measured values updated. make -C doc check passed.",
+    "created_at": "2026-10-04T00:50:50Z"
   }
 ]
 #+end_src
@@ -14143,15 +14168,17 @@ Non-blocking fess findings of subtask PG25 (fess report pg-PG25-r1.md).
 - Low: PG25/impl-r1/openapi-additive.py reads the accepted list from doc/api/README.md in the working tree, not from the NEW revision. Action: read it with git show NEW:doc/api/README.md.
 - Low: the two PLAIN steps (13-corpus-status and 15-broker-diff) did not go through run-step.sh, so their .commit records have no end time and no load. Action: record the end time and load for PLAIN steps too.
 
-* TODO [#B] Run the PG26 capacity modes as runs of record inside the PG1 rule
+* DONE [#B] Run the PG26 capacity modes as runs of record inside the PG1 rule
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-pg26-capacity-run-of-record-2z6q
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-03 Sat 13:53]
-:MODIFIED: [2026-10-03 Sat 14:30]
+:MODIFIED: [2026-10-03 Sat 17:50]
 :CREATED_BY: johnw
+:FINISHED: [2026-10-03 Sat 17:50]
+:CLOSE_REASON: Run of record met acceptance in PH2
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -14175,6 +14202,13 @@ Current values (round 2, not a run of record, PID 61004 present): all six modes 
     "author": "johnw",
     "text": "PG27 round 1 hit the same gate (PID 61004 during all five failure modes). The combined rerun of all eleven modes is acat-pg27-run-of-record-21e9.",
     "created_at": "2026-10-03T21:30:40Z"
+  },
+  {
+    "id": 781,
+    "issue_id": "acat-pg26-capacity-run-of-record-2z6q",
+    "author": "johnw",
+    "text": "PH2 run of record (evidence $R/PH/PH2/impl-r1, commit e454fbd7, clean tree): ps found no foreign manager before or after. All 11 modes (capacity-admission, capacity-inputs with ARTIFACT_CHECK, capacity-streams, faults-io, storage, routes, failures-worker, failures-manager, failures-launched, tui-failures, failures-backup) exited 0 once at N8. All 22 workloads recorded other-managers-start=0, highest start load 15.92. capacity_summary.py: 129 PASS, 0 FAIL, 0 MISSING (13-summary.log). events.catch-up-p50-ms 2.3, p95 106.1, pages.first-page-p50-ms 129.1, failures.backup.passed true. No ceiling moved. manager/CAPACITY.md Measured values updated. make -C doc check passed.",
+    "created_at": "2026-10-04T00:50:51Z"
   }
 ]
 #+end_src
@@ -14221,15 +14255,17 @@ Non-blocking findings of fess pg-PG27-r1 (2026-10-03):
 2. (low) manager/CAPACITY.md said each mode ran "on the tree of commit e8c04cd4", while the PG26 round-2 modes ran on 1ac80da968 plus an uncommitted diff equal in content to e8c04cd4. Fixed by the Integrator in the PG27 commit: the text now says "on a tree whose content equals commit e8c04cd4".
 3. (low) The G5 gate summary exists only as copies in the stage directories PG24 to PG27 (newest: PG/PG27/impl-r1/g5-summary.md in the private evidence directory). Pick one canonical gate-summary location for the closeout and copy the part 4 rows into it.
 
-* TODO [#B] Run the PG26 and PG27 modes as runs of record without PID 61004
+* DONE [#B] Run the PG26 and PG27 modes as runs of record without PID 61004
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-pg27-run-of-record-21e9
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-03 Sat 14:30]
-:MODIFIED: [2026-10-03 Sat 14:30]
+:MODIFIED: [2026-10-03 Sat 17:50]
 :CREATED_BY: johnw
+:FINISHED: [2026-10-03 Sat 17:50]
+:CLOSE_REASON: Run of record met acceptance in PH2
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -14244,6 +14280,20 @@ After that: run all eleven modes once at N8 under the PG1 load rule, one at a ti
 Acceptance: every workload records other-managers-start 0 and a start load of at most 16, 0 FAIL and 0 MISSING over the 129 ceiling keys, no ceiling row changed, make -C doc check passes.
 
 Current values (not a run of record, PID 61004 present): 129 PASS, 0 FAIL, 0 MISSING; largest start load 15.58; every mode exited 0. Evidence: PG/PG27/impl-r1 in the private evidence directory.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 782,
+    "issue_id": "acat-pg27-run-of-record-21e9",
+    "author": "johnw",
+    "text": "PH2 run of record (evidence $R/PH/PH2/impl-r1, commit e454fbd7, clean tree): ps found no foreign manager before or after. All 11 modes (capacity-admission, capacity-inputs with ARTIFACT_CHECK, capacity-streams, faults-io, storage, routes, failures-worker, failures-manager, failures-launched, tui-failures, failures-backup) exited 0 once at N8. All 22 workloads recorded other-managers-start=0, highest start load 15.92. capacity_summary.py: 129 PASS, 0 FAIL, 0 MISSING (13-summary.log). events.catch-up-p50-ms 2.3, p95 106.1, pages.first-page-p50-ms 129.1, failures.backup.passed true. No ceiling moved. manager/CAPACITY.md Measured values updated. make -C doc check passed.",
+    "created_at": "2026-10-04T00:50:51Z"
+  }
+]
+#+end_src
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PG28
 :PROPERTIES:
@@ -14404,6 +14454,22 @@ Non-blocking fess findings of subtask PH1 (PG18, the ext-pi lock link entries). 
 2. Low. ext-pi/package-lock.json keeps 90 entries (86 top level, 4 nested, for example node_modules/@anthropic-ai/sdk and node_modules/@aws-sdk/*) that the root devDependencies cannot reach. They belonged to the old registry releases, and npm would treat them as extraneous. ext-pi/README.md documents them. Pruning them is a further dependency change and needs operator authorization.
 3. Low. No npm tool has parsed the new lock. npm run check and npm test do not read package-lock.json. Fix, if more assurance is wanted: from the main checkout, run a read-only command such as npm ls --package-lock-only and confirm that it reports the eight links without errors.
 4. Low (no change needed). The acceptance expected git diff --stat to show only ext-pi/package-lock.json. ext-pi/README.md and doc/workflow-manager-release-evidence.md also changed, as the documentation rule requires.
+
+* TODO [#D] Record the PG26 first-page attribution as an inference or profile a loaded run
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ph2-fess-followup-llpn
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 17:50]
+:MODIFIED: [2026-10-03 Sat 17:50]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking fess finding of PH2 (fess/ph-PH2-r1.md, low): the PG26 pages.first-page-p50-ms values near 400 ms are attributed to host load and the stale PF17 manager only by comparison (same page-path source since 76da0f5c; PG4 131.2 ms and PH2 129.1 ms agree). No profile confirms the cause. The handoff now states it is an inference. Optional: profile a PG26-like loaded run. The two medium findings (stale release-evidence rows 78 and 82, stale handoff WM-041 statements) were fixed by the Integrator in the PH2 commit.
 
 * TODO [#C] Phase B part 1 review follow-ups: download quota, id row bound, legacy history, precision gaps
 :PROPERTIES:
@@ -25345,7 +25411,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 15:48]
+:MODIFIED: [2026-10-03 Sat 17:50]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -25627,6 +25693,13 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "Phase G closeout (99cef5cf, handoff section \"Phase G of 2026-10\"; evidence under resume-20260923/PG). Status: partial (verdicts partial, partial). All 129 ceiling keys passed in the PG26 and PG27 gate runs at N8, but no run is a run of record while the stale PF17 manager PID 61004 and the stopped frontends PIDs 111 and 9444 run. Next: end those PIDs, run the six capacity and five failure modes once each at N8, run capacity_summary.py, and record the result (acat-n50o, acat-jkas). Root replacement and the security part are deferred (acat-phase-g-deferred-security-1y4o). Stays open.",
     "created_at": "2026-10-03T22:48:36Z"
+  },
+  {
+    "id": 783,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PH2 run of record (evidence $R/PH/PH2/impl-r1, commit e454fbd7, clean tree): ps found no foreign manager before or after. All 11 modes (capacity-admission, capacity-inputs with ARTIFACT_CHECK, capacity-streams, faults-io, storage, routes, failures-worker, failures-manager, failures-launched, tui-failures, failures-backup) exited 0 once at N8. All 22 workloads recorded other-managers-start=0, highest start load 15.92. capacity_summary.py: 129 PASS, 0 FAIL, 0 MISSING (13-summary.log). events.catch-up-p50-ms 2.3, p95 106.1, pages.first-page-p50-ms 129.1, failures.backup.passed true. No ceiling moved. manager/CAPACITY.md Measured values updated. make -C doc check passed. This closes the WM-041 runs-of-record item; the package and gate stay open for closeout review.",
+    "created_at": "2026-10-04T00:50:52Z"
   }
 ]
 #+end_src

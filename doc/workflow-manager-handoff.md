@@ -87,13 +87,18 @@ step with its commit, its exit status and its evidence path.
 
 No run of PG26 or PG27 is a run of record under the host-load rule of
 `manager/CAPACITY.md`, because the PF17 manager, PID 61004, ran on the host
-during every workload (`other-managers-start=1`). Apart from that process,
-every workload started inside the rule.
+during every workload (`other-managers-start=1`). The orchestrator stopped
+PIDs 61004, 111 and 9444 on 2026-10-03. PH2 then ran the six capacity modes
+and the five failure modes once each at N8 on `e454fbd7` as the runs of
+record (`$R/PH/PH2/impl-r1`). All 22 workloads recorded
+`other-managers-start=0` and a one-minute start load of at most 16, and
+`capacity_summary.py` reports 129 keys pass, none fails and none is missing.
+`pages.first-page-p50-ms` is 129.1 ms. `manager/CAPACITY.md` records these
+values.
 
 **Functional G5 status.** G5 is partial. Every functional step of the gate
-passed on local macOS (`aarch64-darwin`). One gate item is not met: the
-WM-041 summary over runs of record, which needs a host with no other
-manager. The items below also stay pending:
+passed on local macOS (`aarch64-darwin`), and the WM-041 summary over the
+runs of record of PH2 passed. The items below stay pending:
 
 - the security stage, which the operator direction of 2026-09-30 defers,
 - the exercise of `manager/OPERATIONS.md` by another human operator,
@@ -125,7 +130,7 @@ Each subtask ran its listed checks once and kept light evidence in its
 stage directory. PG3 and PG4 ran `capacity-streams` and `capacity-inputs`
 at N8 once each, and every ceiling key passed. Neither run is a run of
 record under the PG1 rule, because the PF17 manager, PID 61004, ran on the
-host during both runs. PG10 ran `failures-backup` at N8, PG13 ran
+host during both runs. PH2 later produced the runs of record. PG10 ran `failures-backup` at N8, PG13 ran
 `operations` with case 7, PG15 and PG16 ran `package`, and PG17 ran
 `rollback`. PG19 and PG20 ran `make -C doc check`. PG20 also validated the
 offline reference configuration with offline `reload-profiles`. The
@@ -145,9 +150,8 @@ closeout ran `make -C doc check` after this change.
 - `engine/acp/ci/route-live.sh` and the live-gated tests of `npm test`,
   because they need a paid provider. `engine/acp/ci/acp.sh` did not run,
   because no subtask changed engine code.
-- No capacity run of record exists (`acat-n50o`, `acat-jkas`). The modes of
-  PG26 and PG27 need one run each while no other manager runs on the host.
-  Each mode ran once at N8 only, with no N1 run and no repeated sample.
+- Capacity runs at N1 and repeated samples. Each capacity and failure mode
+  ran once at N8 only, in the runs of record of PH2.
 - A bit-for-bit comparison of two package builds. Equal derivation paths
   from the worktree, from a copy of its tracked files and after a
   documentation-only edit, and the recorded output path and binary digest
@@ -253,17 +257,9 @@ report:
 
 ### Authorizations
 
-- **PG3, PG4, PG26 and PG27 (pending).** The operator or the Integrator
-  ends the stale PF17 manager, PID 61004
-  (`routing-fixed-point-probe --manager serve --config
-  /Users/johnw/Products/k.M0a5ItPm/tmp/pf17-capacity.ocD2VsSb/N8/configuration.json
-  +RTS -N8`), with `kill -TERM 61004` and, after 25 seconds,
-  `kill -KILL 61004` if it still runs. The stopped frontends, PIDs 111 and
-  9444, end with `kill -CONT` and then `kill -TERM`. No stage of this run
-  had the authority to stop them. After that, the six capacity modes and
-  the five failure modes run once each at N8 under the host-load rule
-  (the scripts are `PG/PG3/impl-r2/run-streams.sh`,
-  `PG/PG4/impl-r1/run-inputs.sh record` and `PG/PG26/impl-r2/step.sh`).
+- **PG3, PG4, PG26 and PG27 (done).** The orchestrator stopped the stale
+  PF17 manager, PID 61004, and the stopped frontends, PIDs 111 and 9444,
+  on 2026-10-03. PH2 produced the runs of record (`$R/PH/PH2/impl-r1`).
 - **PG18 (pending).** A JSON edit of `ext-pi/package-lock.json` with no
   install: replace the registry entries of
   `node_modules/@earendil-works/{pi-ai, pi-client, pi-coding-agent,
@@ -278,11 +274,11 @@ report:
 
 | Package or item | Status | Tracker |
 | --- | --- | --- |
-| WM-041 | Partial. All 129 ceiling keys passed in the gate runs of PG26 and PG27. The runs of record wait for a host with no other manager. Root replacement and the security part are deferred. | `acat-wm-041-17ax`, `acat-wm-041-core-3vvz`, `acat-n50o`, `acat-jkas` |
+| WM-041 | Partial. All 129 ceiling keys passed in the runs of record of PH2 (`$R/PH/PH2/impl-r1`). Root replacement and the security part are deferred. | `acat-wm-041-17ax`, `acat-wm-041-core-3vvz`, `acat-n50o`, `acat-jkas` |
 | WM-042 | Met for function apart from the exercise by another human operator, which is pending. | `acat-wm-042-sdg9` |
 | WM-043 | Met for function on `aarch64-darwin`: the package, its acceptance, the schema upgrades, the newer-schema refusal and the rollback. | `acat-wm-043-zm3d` |
 | WM-044 | Met for function. PG19 and PG20 reconcile the documentation, PG21 adds the release evidence matrix, PG22 is the integrated review with no critical or high finding, and the gate and the closeout record its result. The independent human review is pending, and the security review is deferred. | `acat-wm-044-6utw`, `acat-gbh8` |
-| G5 | Partial. Every functional step passed. The WM-041 runs of record are missing. The security stage, the human operator exercise, cross-machine evidence and the independent closure review are pending. Production activation is not authorized. | `acat-g5-u0w2` |
+| G5 | Partial. Every functional step passed, including the WM-041 runs of record. The security stage, the human operator exercise, cross-machine evidence and the independent closure review are pending. Production activation is not authorized. | `acat-g5-u0w2` |
 
 The fess follow-up issues of Phase G are `acat-pg1-fess-followup-s4dp`,
 `acat-sicz` (PG2), `acat-0rda` (PG3), `acat-uvwy` (PG4), `acat-g971`
@@ -292,16 +288,12 @@ to `acat-pg17-fess-followup-ngjm`, `acat-gbh8` (PG19) and
 
 ### Open findings
 
-- **No capacity run of record (medium).** This is R3 of the PG22 review
-  and the medium finding of both closeout lenses. See "Authorizations".
-- **First page of `/v1/runs` (medium).** `pages.first-page-p50-ms` passes
-  by a thin margin. The first PG26 run measured 740.5 ms against the
-  ceiling of 500 ms, and later runs measured 397 ms and 399.8 ms. PG4
-  measured 131.2 ms on the same `History.hs`. PG26 round 2 refuted its own
-  explanation by host load, and the cause is not known. When the runs of
-  record run on an idle host, compare the value with 131 ms. If it stays
-  near 400 ms, measure the first-page path between `76da0f5c` and the
-  head before G5 is declared.
+- **First page of `/v1/runs` (low).** The run of record of PH2 measured
+  `pages.first-page-p50-ms` at 129.1 ms, which agrees with the 131.2 ms of
+  PG4. No module on the page path changed between `76da0f5c` and
+  `e454fbd7`. The PG26 values near 400 ms ran at loads of 11 to 15 beside
+  the stale PF17 manager. The attribution of those values to the host is
+  an inference from this comparison, and no profile confirms it.
 - **Reload and the authorization revision (low, PG22 R1).** A live reload
   installs the new profile revisions and probes every profile before it
   advances the authorization revision. During that window the fast path
@@ -329,9 +321,6 @@ to `acat-pg17-fess-followup-ngjm`, `acat-gbh8` (PG19) and
   import graph of manager modules without building every executable that
   imports them, and the first ALLBUILD of the gate found it. A subtask that
   changes that graph builds every executable that imports the module.
-- **Orphaned processes (low).** The PF17 manager, PID 61004, and the
-  stopped frontends, PIDs 111 and 9444, still run with parent 1 at the
-  closeout of 2026-10-03.
 - **Service-mode limits of the Emacs client (low).** An uncertain send of
   a request or review command is not reconciled, a command waits in the
   foreground for up to 120 seconds, the snapshot is read as its first page
@@ -349,7 +338,7 @@ to `acat-pg17-fess-followup-ngjm`, `acat-gbh8` (PG19) and
 ### Functional first version
 
 The functional first version of the actor-flow architecture is complete on
-local macOS, apart from the WM-041 runs of record. The runtime stays the
+local macOS, including the WM-041 runs of record. The runtime stays the
 sole workflow interpreter. The broker appends, carries and serves, and
 `DataBroker` keeps its nine operations. The `/v1` contract changed only by
 additions. One `agentic-run --manager serve` process owns the Store, admits
@@ -370,18 +359,13 @@ evidence and the independent closure review remain.
 
 ### Next action
 
-1. The operator or the Integrator ends PIDs 61004, 111 and 9444. Then the
-   six capacity modes and the five failure modes run once each at N8 as
-   runs of record, `capacity_summary.py` runs over the 11 files, and
-   `manager/CAPACITY.md` and the release evidence record the result. This
-   closes the last unmet item of G5 for function.
-2. The operator decides PG18.
-3. Another human operator exercises `manager/OPERATIONS.md` against a
+1. The operator decides PG18.
+2. Another human operator exercises `manager/OPERATIONS.md` against a
    disposable local fixture.
-4. The deferred security stage runs over the items of "Deferred security
+3. The deferred security stage runs over the items of "Deferred security
    items", followed by an independent closure review of G5. Cross-machine
    evidence waits for the operator to schedule it.
-5. The Integrator pushes the Phase G commits `86c1e9e9` to `c2355ca8` and
+4. The Integrator pushes the Phase G commits `86c1e9e9` to `c2355ca8` and
    the closeout commit when the operator permits it. The `emacs-native`
    commit `db7d212` stays local under the operator decision of 2026-10-01.
 
