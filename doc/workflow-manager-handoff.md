@@ -14,12 +14,20 @@ the issues that stood between the operator and daily use, and a final
 walkthrough followed the getting-started guide exactly as written. The run
 added no test framework, no harness layer and no security work.
 
+A short follow-up run on the same day (subtasks PO1, PO2 and PO3) moved the
+supported Pi host to the fork 1.0.1, fixed five paper cuts that the final
+walkthrough had noted, and removed the stored admission lines from the
+Emacs review buffer. A re-check then followed every touched step of the
+guide in a clean temporary HOME, and every step worked as the guide states.
+
 This section describes the current state for daily use. Where any section
 below differs, this section supersedes it. The evidence of each subtask is
 under `RD/<subtask>/impl-r1` in the resume directory, the audits are
 under `RD/audit-<surface>`, the walkthroughs are under `RD/walkthrough-1`
-and `RD/walkthrough-2`, and the fess audits are `fess/rd-<subtask>-r1.md`. The closeout ran
-`make -C doc check`, which exited 0 (`RD/closeout/doc-check.log`).
+and `RD/walkthrough-2`, and the fess audits are `fess/rd-<subtask>-r1.md`.
+The evidence of the follow-up run is under `PO/<subtask>/impl-r1`, and the
+re-check is under `PO/recheck`. The closeout of the follow-up run ran
+`make -C doc check`, which exited 0 (`PO/closeout/doc-check.log`).
 
 ### What the operator can do now
 
@@ -43,7 +51,13 @@ and `RD/walkthrough-2`, and the fess audits are `fess/rd-<subtask>-r1.md`. The c
 - Connect the TUI with `agentic-run --tui --service PROFILE`, request and
   approve the exact review, answer a person question, watch the run, and
   save the verified result. A finished run reads as finished, not as lost,
-  and a failed review preparation names its code.
+  and a failed review preparation names its code. `Esc` on the review
+  summary detaches as `q` does, approves nothing and discards nothing, and
+  `O` then `Enter` reopens the review later. `q` closes the discard,
+  withdraw, cancel and exact-resend confirmations and sends nothing. A save
+  in service mode shows the status `saved verified final result to PATH`.
+  A run whose adapter is not on `PATH` shows `Run failed` with a message
+  that names the adapter, and it adds no line to the fault log.
 - Connect Pi through the "Install and start" section of `ext-pi/README.md`
   (`/wf-launch` in local mode, `/wfm` in service mode). The supported host
   is the built Pi fork 1.0.1 (commit `1ad18c15d`). Subtask PO1 moved the
@@ -55,7 +69,11 @@ and `RD/walkthrough-2`, and the fess audits are `fess/rd-<subtask>-r1.md`. The c
 - Connect Emacs through the section "Using service mode" of the README of
   the `emacs-native` branch of agent-workflows. A review that is closed with
   `q` is discarded on confirmation, `M-x wf-requests` lists open requests,
-  and the run view opens after approval.
+  and the run view opens after approval. After an approval or a `g`
+  refresh, the review buffer shows only the current admission: the
+  Current, Queue position and Blocking reasons lines.
+- Run `nix build .#agentic-run` in the checkout without a change to
+  `git status`, because `.gitignore` ignores the `/result` link.
 - Operate the manager: `status`, `check-store`, `reload-profiles`, `drain`,
   `shutdown`, offline `backup`, the `flow` reader of the manager log and the
   run logs, and the relink of `bin/agentic-run` after an upgrade.
@@ -86,6 +104,9 @@ links it.
 | R6 | `ede90197` | None | Complete usage text, a usage line for each incomplete form, `--version`, TLS failures reported apart from an unreachable manager, and a default `CABAL_BUILDDIR` of `dist-newstyle` in `test/cabal.sh`. |
 | R7 | `004221ea` | None | `doc/getting-started.md`, the "Getting started" section of `README.md`, and one user build command (the Nix package) with one labelled maintainer route in `README.md`, `cli/README.md` and the manual. |
 | RW | `053225ab` | `143833a` | The seven findings of the first walkthrough: the Emacs branch and its `load-path` in the guide and the client README, a Nix route and the Pi prerequisites in `ext-pi/README.md`, `mkdir -p` and the use of an issued credential in section 6, `q` closes the discard, withdraw and cancel confirmations of the TUI, `O` in the guide, the adapter name in the ACP session-option refusal, and the refresh of the Emacs review after approval. |
+| PO1 | `c7c4b5a2` | None | The supported Pi host is the fork 1.0.1 (commit `1ad18c15d`). The `@earendil-works` version strings of `ext-pi/package.json`, `ext-pi/package-lock.json` and `ext-pi/test/host-versions.test.ts` read 1.0.1, with no install. `npm run check` and `npm test` pass (223 passed, 29 skipped). |
+| PO2 | `1d1bec1e` | None | Five paper cuts: `.gitignore` ignores `/result`, `Esc` on the review summary detaches, a service-mode save shows the local-mode status line, `q` closes the exact-resend confirmation, and the manager worker accepts a nonzero runner exit after a terminal `RunFailed` or `RunCancelled` event, so a run with a missing adapter no longer logs `WorkerUnexpectedExit StorageUnavailable`. The run log and the client run views name the adapter. |
+| PO3 | `4c06a8bc` (tracker record) | `0ff309b` | Emacs: an approval or a `g` refresh reads the request again and clears the stored `Admission:` lines, so the review buffer shows only the current admission. |
 
 ### Final walkthrough
 
@@ -107,6 +128,41 @@ message that `claude-agent-acp` is not on `PATH`.
 The first walkthrough (`RD/walkthrough-1`, on `004221ea`) found the seven
 problems that RW fixed.
 
+### Re-check of the follow-up run
+
+The re-check ran on `4c06a8bc` with `emacs-native` at `0ff309b`. It used a
+clean temporary HOME with its own XDG directories, `TMPDIR` and `PATH`, no
+paid adapter on `PATH` and no `AGENT_CAT_*` variable. Its record is
+`PO/recheck/commands.log`, and every step passed:
+
+- Section 1: `nix build .#agentic-run` exited 0, and `git status --short`
+  printed nothing afterwards.
+- Section 3: `init`, `serve` and `status` exited 0, and `status` read
+  `serving`, live and ready.
+- Section 4, TUI: `Esc` on the review summary exited 0 with the review
+  open, and `O` then `Enter` reopened it. `q` closed the discard
+  confirmation and sent nothing. `Enter` did not approve, and `y` ran the
+  review to `Terminal: succeeded` and `Result: verified`. The save wrote
+  the file with mode 0600 and showed the status line. `q` exited 0, and `H`
+  listed the run.
+- Section 4, Pi: the fork 1.0.1 with `ext-pi` and the faux provider
+  connected to the manager. `/wfm hello` with `scripted` started a run,
+  `/wfm-monitor` showed `Terminal: succeeded` and `Result: verified`,
+  `/wfm-history` listed the run, and `/quit` exited 0.
+- Section 4, Emacs: `emacs -nw -Q` with the three lines of the client README
+  connected, ran `hello` with `scripted` to `Terminal: succeeded`, and the
+  review buffer then showed only the current admission lines.
+- Section 5: a run on a profile whose `PATH` holds no adapter showed
+  `Run failed` and named `claude-agent-acp`, and the fault log got no new
+  line. In local mode, an unknown adapter or model exited 2 and named the
+  adapter.
+- Section 6: `shutdown` exited 0, and `flow` exited 0 with `verified`
+  true. The fault log held only the `/v1/events` lines after a client
+  detached, which the guide states need no action.
+
+Some steps passed on a second or third attempt of the re-check driver. Each
+first failure was a defect of the driver, not of the product.
+
 ### Remaining readiness issues
 
 None of these issues blocks the steps of the guide.
@@ -121,24 +177,24 @@ None of these issues blocks the steps of the guide.
    collection can remove the old build (`acat-rd-r7-fess-followup-2tw0`).
 3. **TUI key timing.** An `Enter` pressed on the service request screen
    while the screen draws can be lost. A second `Enter` requests the review
-   (`acat-rd-r7-fess-followup-2tw0`). The resend confirmation of an
-   uncertain command still detaches on `q`
-   (`acat-rd-rw-fess-followup-brdl`).
+   (`acat-rd-r7-fess-followup-2tw0`). The box of the discard confirmation
+   reads `n BACK`, but its footer reads `n/q/Esc BACK`. Both `n` and `q`
+   close it.
 4. **Emacs client location.** The service client is only on the local
-   branch `emacs-native` of `~/src/agent-workflows-emacs-native`, 34
+   branch `emacs-native` of `~/src/agent-workflows-emacs-native`, 35
    commits ahead of `origin/emacs-native` and never pushed. The branch
-   `main` of agent-workflows has the old client. After approval the Emacs
-   review buffer still prints its stored admission lines
-   (`acat-rd-rw-fess-followup-brdl`).
+   `main` of agent-workflows has the old client.
 5. **Follow-up findings.** The fess audits of R1 to RW filed one follow-up
    each, all P3: `acat-rd-r1-fess-followup-y8oy`,
    `acat-rd-r2-fess-followup-8hyu`, `acat-rd-r3-fess-followup-iyb4`,
    `acat-rd-r4-fess-followup-hp9n`, `acat-rd-r5-fess-followup-woyy`,
    `acat-rd-r6-fess-followup-mbtm`, `acat-rd-r7-fess-followup-2tw0` and
-   `acat-rd-rw-fess-followup-brdl`.
+   `acat-rd-rw-fess-followup-brdl`. The fess audits of PO2 and PO3 filed
+   `acat-po2-paper-cut-fess-vs16` and `acat-po3-emacs-admission-fess-o40u`,
+   also P3.
 6. **Publication.** `origin/workflow-manager-checkpoint-20260923` and the
-   local branch `tui` read `bacc4dc6`, the PH closeout. The readiness
-   commits `3f771499` to `053225ab` are not pushed.
+   local branch `tui` read `b93617d3`, the readiness record. The commits of
+   the follow-up run, `c7c4b5a2` to `4c06a8bc`, are not pushed.
 
 The security items of "Deferred security items" below stay deferred under
 the operator direction of 2026-09-30.
@@ -146,7 +202,7 @@ the operator direction of 2026-09-30.
 ### Next action
 
 1. The operator follows `doc/getting-started.md` and starts daily use.
-2. The operator decides on a push of the readiness commits and of the
+2. The operator decides on a push of the follow-up commits and of the
    `emacs-native` branch.
 3. The medium findings of items 2, 3 and 4 above go to their owners when
    the operator schedules them.
