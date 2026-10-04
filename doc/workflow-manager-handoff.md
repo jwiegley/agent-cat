@@ -12,10 +12,14 @@ directions of 2026-09-29 for fast validation and of 2026-09-30 for
 functionality first, and the operator decisions of 2026-10-01 for the
 Emacs client and of 2026-10-02 for the Lean builds of WM-040 and the
 `ext-pi` pins. The Phase G commits are `86c1e9e9` to `c2355ca8`, 27
-commits after `1bb9dba4`, and the closeout change that follows them.
-`origin/workflow-manager-checkpoint-20260923` reads `1bb9dba4`, so no
-Phase G commit is pushed. The run did not stop early. It ends with the
-pending authorizations of PG3, PG4, PG18, PG26 and PG27. The PG20 change to the
+commits after `1bb9dba4`, and the closeout `99cef5cf`. The run did not stop
+early. It ended with the pending authorizations of PG3, PG4, PG18, PG26 and
+PG27. The operator decisions of 2026-10-03 resolved them, and the PH run
+closed the last functional items of G5: PH1 `e454fbd7` applies PG18, PH2
+`4d078647` produces the WM-041 runs of record, and PH3 records the final
+functional result of G5. `origin/workflow-manager-checkpoint-20260923`
+reads `1bb9dba4`, so no commit of Phase G or of the PH run is pushed. The
+PG20 change to the
 README of the `emacs-native` branch of agent-workflows in
 `~/src/agent-workflows-emacs-native` is the local commit `db7d212` after
 `6e8eac0`. Nothing on that branch is pushed.
@@ -46,7 +50,7 @@ directory.
 | PG15 | `8fcb4999` | The `package` mode runs the packaged executable as the manager and the runner and completes a verified request through `shutdown`. |
 | PG16 | `ab186c91` | The `package` mode upgrades copies of the schema 1 to 11 roots to schema 12 through the packaged executable and refuses a schema 13 root through offline administration and serve. |
 | PG17 | `c901a10f` | The `rollback` mode drains, cancels, shuts down and backs up, rolls back to `agentic-run --tui --local` with the manager history read only, and rolls forward with the queued request served once. |
-| PG18 | None | Not applied. It waits for the operator authorization in "Authorizations" below. |
+| PG18 | `e454fbd7` (PH1) | `ext-pi/package-lock.json` gives each `node_modules/@earendil-works` package of the Pi fork as a link entry to `../../fork/pi/packages/<dir>`, relative to the main checkout, with a link entry for `@earendil-works/chord` and the fork target entries at 0.99.1. The edit is JSON only, and no install ran. `ext-pi/README.md` states the lock file. |
 | PG19 | `2c56102d` | The manual section "Workflow manager service", the version and compatibility matrix, the truncated-GET rule and the SSE 429 rule of `doc/api/README.md`. |
 | PG20 | `5951ad37` | The client and owner documents. `tui/README.md` and `doc/tui-design.md` state the service-mode behavior during a drain, a shutdown and a restoration, and the SSE 429 rule. `ext-pi/README.md` states the stale lock entries and that `npm ci` is not supported. The Emacs README lists the service-mode limits that stay open and the 429 rule. `manager/CAPACITY.md` and `manager/STORAGE.md` state that a disk write failure stops the Store until a restart, and `manager/STORAGE.md` states the bound of a POST route. `runtime/BROKER.md` and `manager/CONTROLS.md` state the order of a redirect that arrives after the attempt returned its answer. `manager/README.md` states the client targets, Emacs 30.2 and the Pi fork 0.99.1. The reference pair `doc/examples/manager-serve.json` and `doc/examples/manager-offline.json`, which `manager/OPERATIONS.md` links, passes offline `reload-profiles` validation with private fixture paths. |
 | PG21 | `b94421c6` | `doc/workflow-manager-release-evidence.md` maps each obligation of section 12 of the implementation plan, each package WM-001 to WM-044, each gate G0 to G5 and each scenario A01 to A24 to its implementation evidence, executable evidence, evidence ceiling and status. It adds the source identities of PG14 to PG17, the accepted additive fields, the tested platform, the conditional and unavailable checks and the statement that production activation is not authorized. `make -C doc check` requires the matrix header and the section headings. |
@@ -57,7 +61,9 @@ directory.
 | PG27 | `e898b8b9` | `manager/CAPACITY.md` records the measured values of the G5 capacity and failure modes. |
 | PG28 | `381875e7` | `doc/workflow-manager-release-evidence.md` records the package identities and the latest package, schema and rollback runs. |
 | PG30 | `c2355ca8` | This section and the release evidence record the result of the gate. |
-| Closeout | This change | This section records the closeout review, and the G5 row of the release evidence reads partial. |
+| Closeout | `99cef5cf` | This section records the closeout review. |
+| PH2 | `4d078647` | The WM-041 runs of record. `manager/CAPACITY.md` records their measured values. |
+| PH3 | This change | This section and the release evidence record the final functional result of G5. |
 
 ### Gate of Phase G
 
@@ -84,6 +90,9 @@ step with its commit, its exit status and its evidence path.
 | PG29 | BUILD, `cross-client`, `cross-client-lifecycle`, `cross-client-lineage`, `emacs-service`, `emacs-service-lifecycle`, `emacs-service-controls`, the controls `cross-client-broken-answer` and `emacs-service-broken-answer`, `ci/emacs.sh` and `ci/emacs-ui.py` | `381875e7` with `emacs-native` `db7d212` | Passed. |
 | PG30 | BUILD, `npm run check`, `npm test` (220 passed, 29 live-gated skipped), `npm run test:integration` (9 of 9), `pi-host` at N8, `bash tui/ci/tui.sh`, the incremental BUILD after it and `make -C doc check` | `17a5ec73` | Passed. |
 | Closeout review | BUILD of `agentic-run` and `routing-fixed-point-probe`, then the journey pair at N1 and N8 | `c2355ca8` | Passed, with 46 PASS lines and no process left after the run. |
+| PH1 | `npm run check`, `npm test` (220 passed, 29 live-gated skipped), the JSON validation of the lock file and `make -C doc check` | `99cef5cf` with the lock change, committed as `e454fbd7` | Passed. |
+| PH2 | The six capacity modes and the five failure modes at N8 with no other manager, `capacity_summary.py` over the 11 measurement files, the ceilings check and `make -C doc check` | `e454fbd7` | Passed: 129 keys pass, none fails and none is missing. The runs of record. |
+| PH3 | `make -C doc check`, BUILD of `agentic-run` and `routing-fixed-point-probe`, then the journey at N8 | `4d078647` with this change | Passed, with 23 PASS lines and no process left after the run. |
 
 No run of PG26 or PG27 is a run of record under the host-load rule of
 `manager/CAPACITY.md`, because the PF17 manager, PID 61004, ran on the host
@@ -96,11 +105,16 @@ record (`$R/PH/PH2/impl-r1`). All 22 workloads recorded
 `pages.first-page-p50-ms` is 129.1 ms. `manager/CAPACITY.md` records these
 values.
 
-**Functional G5 status.** G5 is partial. Every functional step of the gate
-passed on local macOS (`aarch64-darwin`), and the WM-041 summary over the
-runs of record of PH2 passed. The items below stay pending:
+**Functional G5 status.** G5 is met for function on local macOS
+(`aarch64-darwin`). Every functional step of the gate PG24 to PG30 passed
+(`$R/PG/PG30/impl-r1/g5-summary.md`), the WM-041 summary over the runs of
+record of PH2 passed (`$R/PH/PH2/impl-r1/13-summary.log`), the `ext-pi`
+lock file links the Pi fork (PH1, `$R/PH/PH1/impl-r1`), and the journey
+at N8 passed on the result (`$R/PH/PH3/impl-r1/journey-N8.log`). G5
+stays open in the tracker, because these items remain:
 
-- the security stage, which the operator direction of 2026-09-30 defers,
+- the security stage, which the operator direction of 2026-09-30 defers
+  (see "Deferred security items"),
 - the exercise of `manager/OPERATIONS.md` by another human operator,
 - cross-machine evidence, because no second machine took part,
 - the independent closure review of G5.
@@ -130,11 +144,13 @@ Each subtask ran its listed checks once and kept light evidence in its
 stage directory. PG3 and PG4 ran `capacity-streams` and `capacity-inputs`
 at N8 once each, and every ceiling key passed. Neither run is a run of
 record under the PG1 rule, because the PF17 manager, PID 61004, ran on the
-host during both runs. PH2 later produced the runs of record. PG10 ran `failures-backup` at N8, PG13 ran
+host during both runs. PH2 later produced the runs of record. PG10 ran
+`failures-backup` at N8, PG13 ran
 `operations` with case 7, PG15 and PG16 ran `package`, and PG17 ran
 `rollback`. PG19 and PG20 ran `make -C doc check`. PG20 also validated the
 offline reference configuration with offline `reload-profiles`. The
-closeout ran `make -C doc check` after this change.
+closeout ran `make -C doc check` after its change. The PH rows of the gate
+table above give the checks of PH1 to PH3.
 
 ### Checks not run
 
@@ -186,7 +202,10 @@ closeout ran `make -C doc check` after this change.
 - A redirect that arrives after the attempt returned its answer and before
   `closeAttemptRoute`. `runtime/BROKER.md` states the order, and no check
   produces it.
-- `npm ci` in `ext-pi`, which the stale lock entries do not support.
+- `npm ci` in `ext-pi`. The lock file is not an install source: its link
+  paths are relative to the main checkout, and it keeps registry entries
+  that no linked package uses. No npm command has parsed the rewritten
+  lock file as an install plan.
 - The Emacs 29.1 minimum-version check, because no Emacs 29.1 is available
   locally. Every Emacs check ran GNU Emacs 30.2.
 - The comparison of `/v1` with its earlier contract is a script of the
@@ -260,31 +279,29 @@ report:
 - **PG3, PG4, PG26 and PG27 (done).** The orchestrator stopped the stale
   PF17 manager, PID 61004, and the stopped frontends, PIDs 111 and 9444,
   on 2026-10-03. PH2 produced the runs of record (`$R/PH/PH2/impl-r1`).
-- **PG18 (pending).** A JSON edit of `ext-pi/package-lock.json` with no
-  install: replace the registry entries of
-  `node_modules/@earendil-works/{pi-ai, pi-client, pi-coding-agent,
-  pi-protocol, pi-server, pi-telemetry, pi-tui}` with link entries to the
-  matching packages of `~/src/fork/pi/packages`, add a link entry for
-  `@earendil-works/chord`, delete the nested registry subtree under
-  `node_modules/@earendil-works/pi-coding-agent/node_modules/`, and add the
-  fork target entries at 0.99.1. Until the operator authorizes it, the
-  lock file keeps the stale entries, and `ext-pi/README.md` records them.
+- **PG18 (done).** The operator approved the JSON edit of
+  `ext-pi/package-lock.json` on 2026-10-03, and PH1 applied it as
+  `e454fbd7` with no install.
+- No authorization is pending. A removal of the registry entries that no
+  linked package uses needs a new operator authorization
+  (`acat-ph1-fess-followup-at5i`).
 
 ### Package status
 
 | Package or item | Status | Tracker |
 | --- | --- | --- |
-| WM-041 | Partial. All 129 ceiling keys passed in the runs of record of PH2 (`$R/PH/PH2/impl-r1`). Root replacement and the security part are deferred. | `acat-wm-041-17ax`, `acat-wm-041-core-3vvz`, `acat-n50o`, `acat-jkas` |
+| WM-041 | Met for function on local macOS. All 129 ceiling keys passed in the runs of record of PH2 (`$R/PH/PH2/impl-r1`). Root replacement and the security part are deferred to the security stage, and Linux containment did not run. | `acat-wm-041-17ax`, `acat-wm-041-core-3vvz`, `acat-n50o`, `acat-jkas` |
 | WM-042 | Met for function apart from the exercise by another human operator, which is pending. | `acat-wm-042-sdg9` |
 | WM-043 | Met for function on `aarch64-darwin`: the package, its acceptance, the schema upgrades, the newer-schema refusal and the rollback. | `acat-wm-043-zm3d` |
 | WM-044 | Met for function. PG19 and PG20 reconcile the documentation, PG21 adds the release evidence matrix, PG22 is the integrated review with no critical or high finding, and the gate and the closeout record its result. The independent human review is pending, and the security review is deferred. | `acat-wm-044-6utw`, `acat-gbh8` |
-| G5 | Partial. Every functional step passed, including the WM-041 runs of record. The security stage, the human operator exercise, cross-machine evidence and the independent closure review are pending. Production activation is not authorized. | `acat-g5-u0w2` |
+| G5 | Met for function on local macOS. Every functional step of the gate passed, with the WM-041 runs of record of PH2 and the lock file of PH1. The gate stays open: the security stage is deferred, and the human operator exercise, cross-machine evidence and the independent closure review are pending. Production activation is not authorized. | `acat-g5-u0w2` |
 
 The fess follow-up issues of Phase G are `acat-pg1-fess-followup-s4dp`,
 `acat-sicz` (PG2), `acat-0rda` (PG3), `acat-uvwy` (PG4), `acat-g971`
 (PG5), `acat-69jk` (PG6), `acat-5j0l` (PG7), `acat-pg8-fess-followup-8x8u`
 to `acat-pg17-fess-followup-ngjm`, `acat-gbh8` (PG19) and
-`acat-pg30-fess-followup-zmqy` (PG30).
+`acat-pg30-fess-followup-zmqy` (PG30). The PH run added
+`acat-ph1-fess-followup-at5i` and `acat-ph2-fess-followup-llpn`.
 
 ### Open findings
 
@@ -330,6 +347,10 @@ to `acat-pg17-fess-followup-ngjm`, `acat-gbh8` (PG19) and
   during a drain leaves the command unresolved, and every other mutation
   key, an answer included, refuses until the command settles or the
   session ends. `tui/README.md` states this behavior.
+- **Lock file of `ext-pi` (low, PH1).** The link paths of
+  `ext-pi/package-lock.json` reach the Pi fork only from the main checkout
+  `~/src/agent-cat/ext-pi`. The lock file keeps 90 registry entries that no
+  linked package reaches (`acat-ph1-fess-followup-at5i`).
 - The open findings of the sections "Phase F part 3 of 2026-10-03" and
   earlier stay open where this section does not close them. This section
   closes the disk write failure, the SSE 429 rule, the pin statements, the
@@ -359,14 +380,13 @@ evidence and the independent closure review remain.
 
 ### Next action
 
-1. The operator decides PG18.
-2. Another human operator exercises `manager/OPERATIONS.md` against a
+1. Another human operator exercises `manager/OPERATIONS.md` against a
    disposable local fixture.
-3. The deferred security stage runs over the items of "Deferred security
+2. The deferred security stage runs over the items of "Deferred security
    items", followed by an independent closure review of G5. Cross-machine
    evidence waits for the operator to schedule it.
-4. The Integrator pushes the Phase G commits `86c1e9e9` to `c2355ca8` and
-   the closeout commit when the operator permits it. The `emacs-native`
+3. The Integrator pushes the Phase G commits `86c1e9e9` to `c2355ca8`, the
+   closeout `99cef5cf` and the PH commits when the operator permits it. The `emacs-native`
    commit `db7d212` stays local under the operator decision of 2026-10-01.
 
 ## Phase F part 3 of 2026-10-03

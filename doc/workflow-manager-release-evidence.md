@@ -13,7 +13,9 @@ host.
 The matrix was written on 2026-10-03 at commit
 `5951ad37bde6c5a77fba1f1959788ab3abf6031a`. It uses only the facts that the
 tracker, `doc/workflow-manager-handoff.md`, the commits and the private
-evidence directories state. Accepted state in the tracker is WM-001 to WM-022
+evidence directories state. PH1 `e454fbd7`, PH2 `4d078647` and PH3 updated
+the rows that the `ext-pi` lock file, the WM-041 runs of record and the
+final functional result of G5 change. Accepted state in the tracker is WM-001 to WM-022
 with G0 and G1, and the Integrator closed WM-023, WM-025, WM-026, WM-027 and
 WM-029 after that. Every other package and gate is open in the tracker.
 
@@ -142,9 +144,9 @@ revalidated only where their owners changed, as the governing goal directs.
 | G0 Implementation baseline | WM-001 to WM-007. `acat-g0-r3r7`. | The baseline acceptance under the storage amendment. | Deterministic native fixture | Met (2026-09-12) |
 | G1 Isolated manager core | WM-008 to WM-022. `acat-g1-h1wc`. | The real-worker lifecycle of WM-022 at N1 and N8 (`$I/vertical.d42c7UhQ`). | Deterministic native fixture | Met (2026-09-22) under the local-only amendment |
 | G2 Authenticated observation | WM-023 to WM-026. `acat-g2-la77`. | The rows WM-023 to WM-026. | Deterministic native fixture | Partial. Observation works with authentication and revocable credentials. The observation-only witness with mutations unavailable and the negative matrices are deferred to the security stage. |
-| G3 Remote mutation candidate | G2, WM-027, WM-028, WM-040 and WM-041. `acat-g3-v1iz`. | The rows of those packages. | Theorem | Partial. The hostile-input, replay and containment gates are deferred to the security stage. WM-028 and WM-041 are partial. Test exposure is not deployment. |
+| G3 Remote mutation candidate | G2, WM-027, WM-028, WM-040 and WM-041. `acat-g3-v1iz`. | The rows of those packages. | Theorem | Partial. The hostile-input, replay and containment gates are deferred to the security stage. WM-028 is partial. Test exposure is not deployment. |
 | G4 Three-client acceptance | WM-029 to WM-039. `acat-g4-pech`. | The client rows and the three `cross-client` modes (`$R/PF/PF23/impl-r1`). Local modes: `ci/emacs-ui.py` local cases (`$R/PF/PF23/impl-r1/emacs-ui.log`) and `agentic-run --tui --local` in `rollback` (`$R/PG/PG28/impl-r1/07-rollback.log`). | Actual UI interaction | Partial. Met for function on one machine. Cross-machine acceptance did not run, because the governing goal limits validation to local macOS. |
-| G5 Release candidate | G3, G4 and WM-041 to WM-044. `acat-g5-u0w2`. | The rows of WM-041 to WM-044, the identities below and the gate of Phase G, PG24 to PG30, in which every step and every control gave its expected result (`$R/PG/PG30/impl-r1/g5-summary.md`). | Package build | Partial. Met for function on local macOS, with the WM-041 capacity runs of record of `$R/PH/PH2/impl-r1`. The security stage, the exercise by another person, cross-machine evidence and the independent closure review are pending. Production activation is not authorized. |
+| G5 Release candidate | G3, G4 and WM-041 to WM-044. `acat-g5-u0w2`. PH1 `e454fbd7` rewrites the `@earendil-works` entries of `ext-pi/package-lock.json` as links to the Pi fork (PG18). | The rows of WM-041 to WM-044 and the identities below. The gate of Phase G, PG24 to PG30, in which every step and every control gave its expected result (`$R/PG/PG30/impl-r1/g5-summary.md`). The WM-041 runs of record at N8 on `e454fbd7`, with 129 ceiling keys passed, none failed and none missing (`$R/PH/PH2/impl-r1/13-summary.log`). `npm run check` and `npm test`, with 220 tests passed, on the rewritten lock (`$R/PH/PH1/impl-r1/npm-test.log`). The journey at N8 on `4d078647` (`$R/PH/PH3/impl-r1/journey-N8.log`). | Package build | Met for function on local macOS. Every functional item of the gate has passing evidence. G5 stays open for these items: the security stage, which the operator direction of 2026-09-30 defers, the exercise of `manager/OPERATIONS.md` by another person (WM-042), cross-machine evidence, which did not run, and the independent closure review. Production activation is not authorized. |
 
 ## Acceptance scenario matrix
 

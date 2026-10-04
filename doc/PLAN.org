@@ -7616,7 +7616,7 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 17:50]
+:MODIFIED: [2026-10-03 Sat 17:57]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G5
 :SOURCE_REPO: agent-cat
@@ -7862,6 +7862,13 @@ Full failure/capacity evidence, operational procedures, reproducible packages, r
     "author": "johnw",
     "text": "PH2 run of record (evidence $R/PH/PH2/impl-r1, commit e454fbd7, clean tree): ps found no foreign manager before or after. All 11 modes (capacity-admission, capacity-inputs with ARTIFACT_CHECK, capacity-streams, faults-io, storage, routes, failures-worker, failures-manager, failures-launched, tui-failures, failures-backup) exited 0 once at N8. All 22 workloads recorded other-managers-start=0, highest start load 15.92. capacity_summary.py: 129 PASS, 0 FAIL, 0 MISSING (13-summary.log). events.catch-up-p50-ms 2.3, p95 106.1, pages.first-page-p50-ms 129.1, failures.backup.passed true. No ceiling moved. manager/CAPACITY.md Measured values updated. make -C doc check passed. This closes the WM-041 runs-of-record item; the package and gate stay open for closeout review.",
     "created_at": "2026-10-04T00:50:52Z"
+  },
+  {
+    "id": 785,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "PH3 (2026-10-03, doc only): doc/workflow-manager-release-evidence.md (G5 and G3 rows) and the handoff section \"Phase G of 2026-10\" now record G5 as met for function on local macOS, citing PH1 e454fbd7 (PG18 lock links, $R/PH/PH1/impl-r1/npm-test.log, 220 passed), the PH2 runs of record ($R/PH/PH2/impl-r1/13-summary.log, 129 PASS, 0 FAIL, 0 MISSING) and the PH3 journey. Checks in $R/PH/PH3/impl-r1: make -C doc check exit 0, BUILD of agentic-run and routing-fixed-point-probe with -ftui-tests exit 0, JOURNEY-ONCE at N8 on 4d078647 with the doc change exit 0 (23 PASS lines), no agentic-run or probe process before or after. Not closed by a subtask. Remaining: the deferred security stage, the exercise of manager/OPERATIONS.md by another human operator, cross-machine evidence and the independent closure review. Production activation is not authorized. Fess ph-PH3-r1 non-blocking, findings in acat-t9ir.",
+    "created_at": "2026-10-04T00:57:11Z"
   }
 ]
 #+end_src
@@ -14441,7 +14448,7 @@ Open:
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-03 Sat 17:28]
-:MODIFIED: [2026-10-03 Sat 17:28]
+:MODIFIED: [2026-10-03 Sat 17:57]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -14454,6 +14461,20 @@ Non-blocking fess findings of subtask PH1 (PG18, the ext-pi lock link entries). 
 2. Low. ext-pi/package-lock.json keeps 90 entries (86 top level, 4 nested, for example node_modules/@anthropic-ai/sdk and node_modules/@aws-sdk/*) that the root devDependencies cannot reach. They belonged to the old registry releases, and npm would treat them as extraneous. ext-pi/README.md documents them. Pruning them is a further dependency change and needs operator authorization.
 3. Low. No npm tool has parsed the new lock. npm run check and npm test do not read package-lock.json. Fix, if more assurance is wanted: from the main checkout, run a read-only command such as npm ls --package-lock-only and confirm that it reports the eight links without errors.
 4. Low (no change needed). The acceptance expected git diff --stat to show only ext-pi/package-lock.json. ext-pi/README.md and doc/workflow-manager-release-evidence.md also changed, as the documentation rule requires.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 787,
+    "issue_id": "acat-ph1-fess-followup-at5i",
+    "author": "johnw",
+    "text": "PH3 records the PH1 lock-file limits as a low open finding in doc/workflow-manager-handoff.md (section \"Phase G of 2026-10\", Open findings) and states that PG18 is done. The PG20 row of the handoff still describes the stale entries; acat-t9ir tracks that drift. Evidence: $R/PH/PH3/impl-r1.",
+    "created_at": "2026-10-04T00:57:12Z"
+  }
+]
+#+end_src
 
 * TODO [#D] Record the PG26 first-page attribution as an inference or profile a loaded run
 :PROPERTIES:
@@ -16342,6 +16363,25 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
   }
 ]
 #+end_src
+
+* TODO [#D] Resolve the non-blocking fess findings of subtask PH3
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-t9ir
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 17:57]
+:MODIFIED: [2026-10-03 Sat 17:57]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess ph-PH3-r1 (report fess/ph-PH3-r1.md in the private evidence directory resume-20260923). All are low documentation drift in doc/workflow-manager-handoff.md and doc/workflow-manager-release-evidence.md.
+
+1. (low) doc/workflow-manager-handoff.md, Closeout review paragraph (near lines 129-132): it says in the present tense that the G5 row of the release evidence and the package table "now read partial". PH3 sets both to "Met for function on local macOS". Fix: change it to past tense, for example "the closeout set the G5 row and the table below to partial, and PH3 later recorded met for function".
+2. (low) doc/workflow-manager-handoff.md, PG20 row of the delivered-behavior table (near line 51): it still says that ext-pi/README.md states the stale lock entries. After PH1 the README describes link entries and residual registry entries. Fix: add "(superseded by PG18, PH1 e454fbd7)" to the row.
+3. (low) Ragged wrap: doc/workflow-manager-handoff.md line 22 ends at "The" before "PG20 change to the", Next action item 3 and doc/workflow-manager-release-evidence.md line 18 run over 80 columns. Fix: rewrap the edited paragraphs.
 
 * DONE [#B] Bound secure subprocess startup under very large RLIMIT_NOFILE
 :PROPERTIES:
@@ -25411,7 +25451,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 17:50]
+:MODIFIED: [2026-10-03 Sat 17:57]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -25700,6 +25740,13 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "PH2 run of record (evidence $R/PH/PH2/impl-r1, commit e454fbd7, clean tree): ps found no foreign manager before or after. All 11 modes (capacity-admission, capacity-inputs with ARTIFACT_CHECK, capacity-streams, faults-io, storage, routes, failures-worker, failures-manager, failures-launched, tui-failures, failures-backup) exited 0 once at N8. All 22 workloads recorded other-managers-start=0, highest start load 15.92. capacity_summary.py: 129 PASS, 0 FAIL, 0 MISSING (13-summary.log). events.catch-up-p50-ms 2.3, p95 106.1, pages.first-page-p50-ms 129.1, failures.backup.passed true. No ceiling moved. manager/CAPACITY.md Measured values updated. make -C doc check passed. This closes the WM-041 runs-of-record item; the package and gate stay open for closeout review.",
     "created_at": "2026-10-04T00:50:52Z"
+  },
+  {
+    "id": 786,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PH3 (2026-10-03, doc only): doc/workflow-manager-release-evidence.md (G5 and G3 rows) and the handoff section \"Phase G of 2026-10\" now record G5 as met for function on local macOS, citing PH1 e454fbd7 (PG18 lock links, $R/PH/PH1/impl-r1/npm-test.log, 220 passed), the PH2 runs of record ($R/PH/PH2/impl-r1/13-summary.log, 129 PASS, 0 FAIL, 0 MISSING) and the PH3 journey. Checks in $R/PH/PH3/impl-r1: make -C doc check exit 0, BUILD of agentic-run and routing-fixed-point-probe with -ftui-tests exit 0, JOURNEY-ONCE at N8 on 4d078647 with the doc change exit 0 (23 PASS lines), no agentic-run or probe process before or after. Not closed by a subtask. Remaining: the deferred security stage, the exercise of manager/OPERATIONS.md by another human operator, cross-machine evidence and the independent closure review. Production activation is not authorized. Fess ph-PH3-r1 non-blocking, findings in acat-t9ir.",
+    "created_at": "2026-10-04T00:57:12Z"
   }
 ]
 #+end_src
