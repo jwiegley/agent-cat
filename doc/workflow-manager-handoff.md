@@ -2,6 +2,156 @@
 
 <!-- handoff-id: wm023-20260923; status: paused-unaccepted-wip; accepted: WM-001..WM-022,G0,G1; resume-branch: workflow-manager-checkpoint-20260923; fess: every-subtask -->
 
+## Readiness for daily use (2026-10-04)
+
+On 2026-10-03 the operator wrote: "I don't need heavy security for this
+version of the project, and I don't want excessive testing or frameworks
+either. I just want functional readiness to start using it. Make sure we
+have that." The readiness run of 2026-10-04 followed that direction. It
+audited six surfaces as a new user would meet them (install, manager, TUI,
+Pi, Emacs and engines) and found 67 issues. Subtasks R1 to R7 and RW fixed
+the issues that stood between the operator and daily use, and a final
+walkthrough followed the getting-started guide exactly as written. The run
+added no test framework, no harness layer and no security work.
+
+This section describes the current state for daily use. Where any section
+below differs, this section supersedes it. The evidence of each subtask is
+under `RD/<subtask>/impl-r1` in the resume directory, the audits are
+under `RD/audit-<surface>`, the walkthroughs are under `RD/walkthrough-1`
+and `RD/walkthrough-2`, and the fess audits are `fess/rd-<subtask>-r1.md`. The closeout ran
+`make -C doc check`, which exited 0 (`RD/closeout/doc-check.log`).
+
+### What the operator can do now
+
+- Install the runner with `nix profile add .#agentic-run` from the root of
+  the checkout, and upgrade it with `nix profile upgrade agentic-run`.
+- Run any registered workflow in local mode: `list`, `help`, `plan`, a
+  rehearsal with `--scripted`, a live run through the deterministic `stub`
+  adapter with `--engine acp --adapter stub`, and the local TUI with
+  `agentic-run --tui`.
+- Run a workflow on a real adapter and a chosen model with
+  `--engine acp --adapter NAME --model ID [--effort LEVEL]`, after
+  `agentic-run adapter-options --adapter NAME` lists the values that the
+  adapter offers. An unoffered value is refused before any prompt, and the refusal
+  names the adapter and the offered values.
+- Create a working manager root with one command,
+  `agentic-run --manager init --root DIR [--port N]`. It writes `serve.json`,
+  `offline.json`, a self-signed certificate, a credential for each profile
+  and the client profile `client/profile.json`, and it prints the serve,
+  status and connect commands. `--manager add-client` issues a further
+  client profile. The root holds the profiles `scripted` and `person`.
+- Connect the TUI with `agentic-run --tui --service PROFILE`, request and
+  approve the exact review, answer a person question, watch the run, and
+  save the verified result. A finished run reads as finished, not as lost,
+  and a failed review preparation names its code.
+- Connect Pi through the "Install and start" section of `ext-pi/README.md`
+  (`/wf-launch` in local mode, `/wfm` in service mode).
+- Connect Emacs through the section "Using service mode" of the README of
+  the `emacs-native` branch of agent-workflows. A review that is closed with
+  `q` is discarded on confirmation, `M-x wf-requests` lists open requests,
+  and the run view opens after approval.
+- Operate the manager: `status`, `check-store`, `reload-profiles`, `drain`,
+  `shutdown`, offline `backup`, the `flow` reader of the manager log and the
+  run logs, and the relink of `bin/agentic-run` after an upgrade.
+- Read a usage line for every incomplete command form, `agentic-run --help`
+  for every form, and `agentic-run --version`. A TLS or certificate failure
+  is reported apart from an unreachable manager.
+
+### Getting-started guide
+
+The guide is [`doc/getting-started.md`](getting-started.md), and the
+section "Getting started" of `README.md` links it. It has six sections in
+order: install the runner, a first local run with the local TUI, start the
+workflow manager, connect the TUI, Pi and Emacs clients, real engines, and
+the daily operator commands. Each step states its exit status. A step marked
+**Operator login** contacts a paid provider and needs the login of the
+operator. `manager/OPERATIONS.md` remains the full runbook, and the guide
+links it.
+
+### Delivered changes
+
+| Subtask | agent-cat commit | `emacs-native` commit | Delivered behavior |
+| --- | --- | --- | --- |
+| R1 | `3f771499` | None | `--model` and `--effort` for the default answerer through the `session/set_config_option` preflight, also in manager `targetArguments`. The `adapter-options` command. Routing first use: an unset secret reads `credentialReady` false with exit 0, the `secrets` key is optional, a missing routing file names the user file and the example file, and the example routing file is a minimal working form. |
+| R2 | `d0689e76` | None | `--manager init` and `--manager add-client`. The stub adapter and the reference configuration pair are Cabal data files, so the stub works from any directory. `serve` prints one line with its URL. Refusals name the file and the rule. |
+| R3 | `b25f72a6` | None | Finished runs read `owned` with no lost-supervision limitation once terminal runtime evidence exists. `q` after a completed approval prints no uncertain notice. A failed review preparation shows its code. The review title, details view and History name the workflow. |
+| R4 | `6e83b615` (tracker record) | `edb79f1` | Emacs: no stranded reviews, `M-x wf-requests`, the run view after approval, opened runs kept in `wf-runs`, and corrected history names, setup header and approval prompt. |
+| R5 | `23cab88f` | None | Pi: the "Install and start" section of `ext-pi/README.md`, a bare `/wf-help`, the `/wf` refusal that names `/wf-launch`, workflow names in the status widget, `/wfm-status` and `/wfm-history`, and a plan summary at the top of the `/wfm` review. |
+| R6 | `ede90197` | None | Complete usage text, a usage line for each incomplete form, `--version`, TLS failures reported apart from an unreachable manager, and a default `CABAL_BUILDDIR` of `dist-newstyle` in `test/cabal.sh`. |
+| R7 | `004221ea` | None | `doc/getting-started.md`, the "Getting started" section of `README.md`, and one user build command (the Nix package) with one labelled maintainer route in `README.md`, `cli/README.md` and the manual. |
+| RW | `053225ab` | `143833a` | The seven findings of the first walkthrough: the Emacs branch and its `load-path` in the guide and the client README, a Nix route and the Pi prerequisites in `ext-pi/README.md`, `mkdir -p` and the use of an issued credential in section 6, `q` closes the discard, withdraw and cancel confirmations of the TUI, `O` in the guide, the adapter name in the ACP session-option refusal, and the refresh of the Emacs review after approval. |
+
+### Final walkthrough
+
+The final walkthrough passed on `053225ab` with `emacs-native` at
+`143833a`. It followed `doc/getting-started.md` from section 1 to section 6
+exactly as written, with a clean temporary HOME, isolated XDG, Pi and Emacs
+state, and only the system `PATH` entries and `~/.nix-profile/bin`. Its
+fixture root is `/Users/johnw/Products/k.M0a5ItPm/tmp/w2.llqcq4`, and its
+record is `RD/walkthrough-2/commands.log`. Every numbered step gave the exit
+status and the output that the guide states, and no step needed knowledge
+from outside the guide. The walkthrough added `--option substitute false`
+to the Nix commands of section 1, so that the build ran locally. It made no
+paid or remote call. The Operator login steps of section 5 therefore ran
+only up to their local part: `adapter-options` and the model choice on the
+stub adapter, the routing inspection, the profile reload and
+`add-client`. A run on the `claude` profile stopped with the expected
+message that `claude-agent-acp` is not on `PATH`.
+
+The first walkthrough (`RD/walkthrough-1`, on `004221ea`) found the seven
+problems that RW fixed.
+
+### Remaining readiness issues
+
+None of these issues blocks the steps of the guide.
+
+1. **Pi host version.** The built Pi fork moved to 1.0.1 (commit
+   `1ad18c15d`), and the supported host stays 0.99.1. The extension loads
+   and works on 1.0.1, and `npm run check` passes. The test
+   `ext-pi/test/host-versions.test.ts` fails on the version strings only.
+   The move is a dependency upgrade and needs operator authorization. The
+   exact change is in `acat-rd-rw-pi-host-1-0-1-bzd2`.
+2. **Real engines.** No paid adapter ran in this run. The `claude`,
+   `codex` and `droid` model values of the example routing file are
+   placeholders that no run has confirmed. The first real run is the
+   operator's, after the install and login of section 5 of the guide.
+3. **Runner upgrade.** `bin/agentic-run` in the manager root links one
+   exact Nix store path. After each `nix profile upgrade` the operator stops
+   the manager and relinks by hand, as the guide states, and a garbage
+   collection can remove the old build (`acat-rd-r7-fess-followup-2tw0`).
+4. **TUI key timing.** An `Enter` pressed on the service request screen
+   while the screen draws can be lost. A second `Enter` requests the review
+   (`acat-rd-r7-fess-followup-2tw0`). The resend confirmation of an
+   uncertain command still detaches on `q`
+   (`acat-rd-rw-fess-followup-brdl`).
+5. **Emacs client location.** The service client is only on the local
+   branch `emacs-native` of `~/src/agent-workflows-emacs-native`, 34
+   commits ahead of `origin/emacs-native` and never pushed. The branch
+   `main` of agent-workflows has the old client. After approval the Emacs
+   review buffer still prints its stored admission lines
+   (`acat-rd-rw-fess-followup-brdl`).
+6. **Follow-up findings.** The fess audits of R1 to RW filed one follow-up
+   each, all P3: `acat-rd-r1-fess-followup-y8oy`,
+   `acat-rd-r2-fess-followup-8hyu`, `acat-rd-r3-fess-followup-iyb4`,
+   `acat-rd-r4-fess-followup-hp9n`, `acat-rd-r5-fess-followup-woyy`,
+   `acat-rd-r6-fess-followup-mbtm`, `acat-rd-r7-fess-followup-2tw0` and
+   `acat-rd-rw-fess-followup-brdl`.
+7. **Publication.** `origin/workflow-manager-checkpoint-20260923` and the
+   local branch `tui` read `bacc4dc6`, the PH closeout. The readiness
+   commits `3f771499` to `053225ab` are not pushed.
+
+The security items of "Deferred security items" below stay deferred under
+the operator direction of 2026-09-30.
+
+### Next action
+
+1. The operator follows `doc/getting-started.md` and starts daily use.
+2. The operator decides on the Pi host move to 1.0.1
+   (`acat-rd-rw-pi-host-1-0-1-bzd2`) and on a push of the readiness commits
+   and of the `emacs-native` branch.
+3. The medium findings of items 3, 4 and 5 above go to their owners when
+   the operator schedules them.
+
 ## Phase G of 2026-10
 
 The resume workflow took Phase G after the Phase F closeout `1bb9dba4`:
