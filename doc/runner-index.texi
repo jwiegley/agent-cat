@@ -5,6 +5,7 @@
 @clindex --capabilities
 @clindex --descriptor-version
 @clindex --drop-answer
+@clindex --effort
 @clindex --engine
 @clindex --expect-routing-fingerprint
 @clindex --follow
@@ -16,6 +17,7 @@
 @clindex --json
 @clindex --local
 @clindex --migrate-routing
+@clindex --model
 @clindex --offline
 @clindex --output
 @clindex --person-answer
@@ -38,6 +40,7 @@
 @clindex --timeout
 @clindex --tui
 @clindex --verbose
+@clindex verb:adapter-options
 @clindex verb:cost
 @clindex verb:flow
 @clindex verb:frontend

@@ -223,7 +223,7 @@ instance FromJSON UserDoc where
     unless (version == 2) (fail "user routing version is not 2")
     UserDoc
       <$> o .: "default-persona"
-      <*> o .: "secrets"
+      <*> (fromMaybe Map.empty <$> o .:? "secrets")
       <*> o .: "engines"
       <*> o .: "models"
       <*> o .: "personas"
@@ -661,14 +661,14 @@ main = do
           checkCatalogue codexCatalogue {catalogueHeaders = Map.singleton "authorization" "Bearer literal-secret"},
           validateProfile
             "agent-cat"
-            ["glm-next-personal"]
+            ["anthropic-sonnet-personal"]
             "bad-sensitive-option"
-            (Profile [Rung "glm-next-personal" "high" (Number 1) (Map.singleton "api-key" (String "literal-secret"))]),
+            (Profile [Rung "anthropic-sonnet-personal" "high" (Number 1) (Map.singleton "api-key" (String "literal-secret"))]),
           validateProfile
             "agent-cat"
-            ["glm-next-personal"]
+            ["anthropic-sonnet-personal"]
             "bad-nonscalar-option"
-            (Profile [Rung "glm-next-personal" "high" (Number 1) (Map.singleton "nested" (Object KeyMap.empty))])
+            (Profile [Rung "anthropic-sonnet-personal" "high" (Number 1) (Map.singleton "nested" (Object KeyMap.empty))])
         ]
     )
   expect
@@ -714,34 +714,33 @@ main = do
 
   let freshInventories =
         Map.fromList
-          [ ("claude-personal", (Fresh, [ModelEntry "claude-opus-5" (Just 5)])),
-            ("codex-work", (Fresh, [ModelEntry "gpt-5.6-sol" (Just 6)])),
-            ("omlx-hera", (Fresh, [ModelEntry "GLM-5.3-Next" (Just 3)]))
+          [ ("claude-personal", (Fresh, [ModelEntry "claude-opus-5" (Just 5), ModelEntry "claude-sonnet-5" (Just 4)])),
+            ("codex-work", (Fresh, [ModelEntry "gpt-5.6-sol" (Just 6)]))
           ]
       expectedWork = [("openai-sol-work", "gpt-5.6-sol", "fresh")]
       expectedPersonal =
         [ ("anthropic-opus-personal", "claude-opus-5", "fresh"),
-          ("glm-next-personal", "GLM-5.3-Next", "fresh")
+          ("anthropic-sonnet-personal", "claude-sonnet-5", "fresh")
         ]
       expectedProject =
-        [ ("glm-next-personal", "GLM-5.3-Next", "fresh"),
+        [ ("anthropic-sonnet-personal", "claude-sonnet-5", "fresh"),
           ("anthropic-opus-personal", "claude-opus-5", "fresh")
         ]
       work = resolveProfile user "work" Map.empty "deep-thinker" freshInventories
       personal = resolveProfile user "personal" Map.empty "deep-thinker" freshInventories
       projectResult = resolveProfile user (projectPersona override) (projectProfiles override) "deep-thinker" freshInventories
   expect "work deep-thinker resolves to Codex/gpt-5.6-sol" (work == Right expectedWork)
-  expect "personal deep-thinker resolves to Claude then personal-only OMLX" (personal == Right expectedPersonal)
-  expect "project low-cost override deterministically puts OMLX first" (projectResult == Right expectedProject)
-  expect "work persona excludes the personal GLM model alias" $ case Map.lookup "work" (userPersonas user) of
-    Just persona -> "glm-next-personal" `notElem` personaModels persona
+  expect "personal deep-thinker resolves to Claude Opus then personal-only Claude Sonnet" (personal == Right expectedPersonal)
+  expect "project low-cost override deterministically puts Sonnet first" (projectResult == Right expectedProject)
+  expect "work persona excludes the personal Sonnet model alias" $ case Map.lookup "work" (userPersonas user) of
+    Just persona -> "anthropic-sonnet-personal" `notElem` personaModels persona
     Nothing -> False
   case Map.lookup "work" (userPersonas user) of
     Nothing -> die "work persona is missing"
     Just persona ->
       expectLeft
         "project profile cannot widen the work model allowlist"
-        (validateProfile "work" (personaModels persona) "deep-thinker" (Profile [Rung "glm-next-personal" "high" (Number 65536) Map.empty]))
+        (validateProfile "work" (personaModels persona) "deep-thinker" (Profile [Rung "anthropic-sonnet-personal" "high" (Number 65536) Map.empty]))
 
   let noInventory = resolveProfile user "personal" Map.empty "deep-thinker" Map.empty
   expect "unavailable catalogues leave exact selectors static-unverified" $ case noInventory of
@@ -760,8 +759,7 @@ main = do
   let completeEnvironment =
         Map.fromList
           [ ("ANTHROPIC_PERSONAL_API_KEY", "selected-anthropic"),
-            ("OPENAI_WORK_API_KEY", "selected-openai"),
-            ("OMLX_HERA_API_KEY", "selected-omlx")
+            ("OPENAI_WORK_API_KEY", "selected-openai")
           ]
   either die pure (checkSecrets user "work" Map.empty "deep-thinker" completeEnvironment)
   expectLeft "missing work credential is refused before discovery" (checkSecrets user "work" Map.empty "deep-thinker" (Map.delete "OPENAI_WORK_API_KEY" completeEnvironment))
@@ -769,15 +767,14 @@ main = do
         Map.insert "PATH" "/usr/bin"
           . Map.insert "OPENAI_API_KEY" "ambient-wrong"
           . Map.insert "ANTHROPIC_API_KEY" "ambient-anthropic"
-          . Map.insert "OPENAI_BASE_URL" "ambient-omlx"
           $ completeEnvironment
   selectedChild <- either die pure (childEnvironment user "codex-work" ambient)
   expect
     "selected child environment scrubs source and unselected engine secrets"
     ( Map.lookup "PATH" selectedChild == Just "/usr/bin"
         && Map.lookup "OPENAI_API_KEY" selectedChild == Just "selected-openai"
-        && all (`Map.notMember` selectedChild) ["ANTHROPIC_PERSONAL_API_KEY", "OPENAI_WORK_API_KEY", "OMLX_HERA_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_BASE_URL"]
-        && all (`notElem` Map.elems selectedChild) ["selected-anthropic", "selected-omlx", "ambient-anthropic", "ambient-omlx"]
+        && all (`Map.notMember` selectedChild) ["ANTHROPIC_PERSONAL_API_KEY", "OPENAI_WORK_API_KEY", "ANTHROPIC_API_KEY"]
+        && all (`notElem` Map.elems selectedChild) ["selected-anthropic", "ambient-anthropic"]
     )
 
   badProjectValue <- decodeValue "version: 2\npersona: agent-cat\nengines: {}\n"

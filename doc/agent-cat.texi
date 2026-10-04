@@ -2004,14 +2004,24 @@ is the execution trace, which is printed as questions and answers occur.
 An ACP run starts an adapter process and owns its line-delimited JSON-RPC pipe:
 
 @example
-agentic-run run NAME --engine acp [--adapter ADAPTER] [--scratch DIR]
+agentic-run run NAME --engine acp [--adapter ADAPTER] [--model ID]
+    [--effort LEVEL] [--scratch DIR]
 @end example
 
 @code{--adapter} accepts @code{stub}, @code{claude}, @code{codex},
 @code{droid}, or an executable path.  The default is @code{stub}, the
 deterministic local adapter, so an omitted option never starts a paid live
-model.  Claude and Codex are looked up on @code{PATH} and then at configured
-machine-local fallback paths.  Droid expands to
+model.  The stub is the command @command{python3
+engine/acp/test/stub_adapter.py}, and its path resolves against the working
+directory.  A stub run therefore starts from the root of the agent-cat source
+tree.
+
+@command{claude-agent-acp} and @command{codex-acp} must be on @code{PATH}.  The
+runner looks for each of them on @code{PATH} first.  Its fallback for each is
+one fixed Nix store path of one adapter build, and that path exists only on a
+machine whose store holds that exact build.  When the program is not on
+@code{PATH} and the fallback path is absent, the run stops with a transport
+failure that names the program.  Droid expands to
 @command{droid exec --output-format acp} on @code{PATH}.  It uses the native
 ACP mode of Droid, and it does not require the Python SDK.
 
@@ -2021,14 +2031,34 @@ agentic-run run structured --engine acp --adapter droid
 
 Authenticate Droid locally, or provide @code{FACTORY_API_KEY} in the
 environment that starts the runner.  Never put credentials in
-@code{--adapter-arg} or in the routing configuration.  A plain Droid backend
-uses its configured session default.  To select a model and a reasoning level,
-define a routing profile whose backend is @code{acp:droid}, omit both
-@code{--engine} and @code{--session}, and set
-@code{max-output: unconstrained}.  The runner validates and applies both
-settings through @code{session/set_config_option} before it sends a prompt.
-Any declared setting that the adapter does not support still refuses
-preflight.
+@code{--adapter-arg} or in the routing configuration.
+
+Without @code{--model} and @code{--effort}, an adapter uses its own session
+defaults.  @code{--model ID} and @code{--effort LEVEL} select a model value and
+an effort value that the default answerer offers.  To see the offered values,
+run the inspection command:
+
+@example
+agentic-run adapter-options --adapter claude
+@end example
+
+It starts the adapter, completes @code{initialize} and @code{session/new}, prints
+the values of the model option and the effort option, and exits.  It sends no
+prompt.  @code{--json} prints one object with the fields @code{adapter},
+@code{command}, @code{model}, and @code{effort}.  Each of the last two is
+@code{null} or an object with @code{option} and @code{values}.
+
+The run then applies each chosen value through @code{session/set_config_option}
+on every session that the default answerer opens, and it does this before the
+prompt.  Before the first question, a capability preflight opens one session and
+applies the values.  A value that the adapter does not offer stops the run there,
+before any prompt, and the message lists the offered values.  The exit status of
+that refusal is 2, the transport-failure status, because the refusal comes from
+the adapter connection.  An adapter that does not advertise a model or effort
+option is refused in the same way.  @code{--verbose} narrates each option that
+the runner sets.  A routing profile whose backend is an @code{acp:} adapter
+applies the model, thinking, and output settings of its rung through the same
+call and the same preflight.
 
 One adapter process can retain subscriptions for sessions that were opened
 earlier in the run.  The runner accepts answer chunks only for the current
@@ -3354,6 +3384,7 @@ agentic-run frontend-export --state STATE < request.json
 agentic-run list [--json [--descriptor-version 3]]
 agentic-run --routing [--json] [--persona NAME] [--offline | --refresh-models]
 agentic-run --migrate-routing SOURCE --output DESTINATION
+agentic-run adapter-options --adapter ADAPTER [--adapter-arg ARG ...] [--json]
 agentic-run help NAME
 agentic-run NAME --help
 agentic-run plan NAME [--raw] [--require-pinned] [--json] [INPUT ...]
@@ -4316,6 +4347,24 @@ and values, environment and header data, raw endpoint URLs, and unselected
 inventories.  Inside live run options, the same spelling explicitly names the
 routing target, but omission means the same thing when no engine or session was
 given.  An explicit engine or session takes precedence over this flag.
+
+Each catalogue warning appears once for each engine, with the engine name.  The
+warning @code{tls-not-supported} adds its remedy: remove the https catalogue or
+use a loopback http catalogue.  An engine whose secret environment variable is
+unset is reported with @code{credentialReady} false, and the human output names
+the unset secret.  The inspection still exits 0, and a launch that needs that
+engine is refused.  When no routing file exists, the command exits 0 and names
+the expected user file and the example file
+@file{cli/model-definitions.example.yaml}.  The same holds with
+@code{--offline}.  With @code{--json}, it prints the empty schema-version-1
+inspection with the additional fields @code{userFile} and @code{exampleFile}.
+
+@c COVER CLI verb:adapter-options author
+@item adapter-options --adapter ADAPTER [--adapter-arg ARG ...] [--json]
+Start one ACP adapter, open one session, print the model and effort values that
+it offers, and exit 0.  No prompt is sent.  A failure to start the adapter or to
+complete the handshake exits 2.  The values are those that @code{--model} and
+@code{--effort} accept.
 
 @c COVER CLI --migrate-routing author
 @c COVER CLI --output author
@@ -5485,6 +5534,18 @@ route table, even when @code{--routing} is also present.
 @item --adapter stub|claude|codex|droid|PATH
 Select the ACP adapter.  It defaults to @code{stub} and is meaningful only when
 at least one ACP backend exists.
+
+@c COVER CLI --model author
+@item --model ID
+Set the model option of the default ACP answerer to @code{ID} before every
+question.  The value must be one that the adapter offers.  An unoffered value is
+refused before any prompt with the offered values and exit status 2.  It is
+accepted only with @code{--engine acp}, and it does not apply to an adapter that
+only a @code{--route} entry names.
+
+@c COVER CLI --effort author
+@item --effort LEVEL
+Set the effort option of the default ACP answerer in the same way.
 
 @c COVER CLI --adapter-arg author
 @item --adapter-arg ARG

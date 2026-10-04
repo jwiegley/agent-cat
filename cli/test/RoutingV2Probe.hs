@@ -367,8 +367,10 @@ main = do
               missing = resolveEngineContexts selected ["personal-claude"] (Map.delete "PERSONAL_API_KEY" ambient)
           check failures "only engines required by the expanded policy resolve secrets" $
             either (const False) Map.null (resolveEngineContexts selected [] Map.empty)
-          check failures "missing selected secrets fail by alias and source name without their value" $
-            case missing of
+          check failures "a missing selected secret resolves the engine as not credential-ready" $
+            either (const False) (maybe False (not . resolvedEngineCredentialReady) . Map.lookup "personal-claude") missing
+          check failures "missing selected secrets refuse launch by alias and source name without their value" $
+            case missing >>= \resolved -> requireEngineCredentials resolved ["personal-claude"] of
               Left problem -> "personal-key" `T.isInfixOf` problem && "PERSONAL_API_KEY" `T.isInfixOf` problem && not (T.pack sentinel `T.isInfixOf` problem)
               Right _ -> False
           case Map.lookup "personal-claude" =<< either (const Nothing) Just contexts of
@@ -426,6 +428,7 @@ main = do
       mixedUnknown = BS.unlines ["version: 2", "default-persona: personal", "surprise: true", "secrets: {}", "engines: {}", "models: {}", "personas: {}"]
       sensitiveLiteral = BS.unlines ["version: 2", "default-persona: p", "secrets: {}", "engines:", "  e:", "    backend: acp:stub", "    provider: p", "    environment:", "      OPENAI_API_KEY:", "        value: literal", "models:", "  m:", "    engine: e", "    select:", "      - exact: m", "personas:", "  p:", "    engines: [e]", "    models: [m]", "    profiles:", "      deep:", "        chain:", "          - model: m", "            thinking: low", "            max-output: 1"]
       unauthorizedModel = BS.unlines ["version: 2", "default-persona: p", "secrets: {}", "engines:", "  e:", "    backend: acp:stub", "    provider: p", "models:", "  allowed:", "    engine: e", "    select:", "      - exact: allowed", "  denied:", "    engine: e", "    select:", "      - exact: denied", "personas:", "  p:", "    engines: [e]", "    models: [allowed]", "    profiles:", "      deep:", "        chain:", "          - model: denied", "            thinking: low", "            max-output: 1"]
+      withoutSecrets = BS.unlines ["version: 2", "default-persona: p", "engines:", "  e:", "    backend: acp:stub", "    provider: p", "models:", "  m:", "    engine: e", "    select:", "      - exact: m", "personas:", "  p:", "    engines: [e]", "    models: [m]", "    profiles:", "      deep:", "        chain:", "          - model: m", "            thinking: low", "            max-output: 1"]
       authenticatedHttp = BS.pack . T.unpack $ T.replace "https://api.anthropic.com/v1/models" "http://127.0.0.1:8080/v1/models" (T.pack (BS.unpack userYaml))
       credentialQuery = BS.pack . T.unpack $ T.replace "https://api.anthropic.com/v1/models" "https://api.anthropic.com/v1/models?api_key=literal" userText
       encodedCredentialQuery = BS.pack . T.unpack $ T.replace "https://api.anthropic.com/v1/models" "https://api.anthropic.com/v1/models?to%6ben=literal" userText
@@ -446,6 +449,8 @@ main = do
   check failures "nested and flow duplicate YAML keys are refused before decode" $
     isLeftContaining "duplicate YAML key" (decodeRoutingProjectV2 duplicateNested)
       && isLeftContaining "duplicate YAML key" (decodeRoutingProjectV2 duplicateFlow)
+  check failures "a user document without a secrets key decodes with no secrets" $
+    either (const False) (Map.null . routingV2Secrets) (decodeRoutingUserV2 withoutSecrets)
   check failures "unknown v2 fields are refused" $
     isLeftContaining "unknown field" (decodeRoutingUserV2 mixedUnknown)
   check failures "sensitive environment variables require secret references" $

@@ -1,133 +1,215 @@
-# Model identifiers are illustrative; verify them through inspection and engine preflight.
-version: 2
-default-persona: personal
+# A minimal version-2 user routing file.
+#
+# Copy this file to $XDG_CONFIG_HOME/agent-cat/routing.yaml (by default
+# ~/.config/agent-cat/routing.yaml) and check it with:
+#
+#   agentic-run --routing --offline
+#
+# It defines one engine for each built-in ACP adapter. It needs no environment
+# variable, no model catalogue and no secret. The default persona is "stub",
+# which uses the deterministic test adapter. That adapter is found relative to
+# the working directory, so a stub run starts from the root of the agent-cat
+# source tree. Select another persona with --persona NAME or AGENT_CAT_PERSONA.
+#
+# The model identifiers of the claude, codex and droid models are examples.
+# Replace each one with a model value that the adapter offers:
+#
+#   agentic-run adapter-options --adapter claude
+#
+# A value that the adapter does not offer is refused at launch, before any
+# prompt, and the refusal lists the offered values.
 
-secrets:
-  anthropic-personal:
-    env: ANTHROPIC_PERSONAL_API_KEY
-  openai-work:
-    env: OPENAI_WORK_API_KEY
+version: 2
+default-persona: stub
 
 engines:
-  claude-personal:
+  stub:
+    backend: acp:stub
+    provider: agent-cat
+  claude:
     backend: acp:claude
     provider: anthropic
-    environment:
-      ANTHROPIC_API_KEY:
-        secret: anthropic-personal
-    catalogue:
-      dialect: anthropic
-      url: https://api.anthropic.com/v1/models
-      auth:
-        header: x-api-key
-        secret: anthropic-personal
-      headers:
-        anthropic-version: "2023-06-01"
-      timeout-ms: 5000
-      max-bytes: 4194304
-      cache:
-        fresh-for: 24h
-        stale-if-error: 7d
-
-  codex-work:
+  codex:
     backend: acp:codex
     provider: openai
-    environment:
-      OPENAI_API_KEY:
-        secret: openai-work
-    catalogue:
-      dialect: openai
-      url: https://api.openai.com/v1/models
-      auth:
-        header: authorization
-        scheme: bearer
-        secret: openai-work
-      timeout-ms: 5000
-      max-bytes: 4194304
-      cache:
-        fresh-for: 24h
-        stale-if-error: 7d
+  droid:
+    backend: acp:droid
+    provider: factory
 
 models:
-  opus-personal:
-    engine: claude-personal
+  stub-default:
+    engine: stub
     select:
-      - exact: claude-opus-example
-
-  fable-personal:
-    engine: claude-personal
+      - exact: stub-default
+  claude-default:
+    engine: claude
     select:
-      - exact: claude-fable-example
-
-  sol-work:
-    engine: codex-work
+      - exact: default
+  codex-default:
+    engine: codex
     select:
-      - exact: gpt-sol-example
-      - prefix: gpt-sol-example-
-        order: newest
+      - exact: gpt-5-codex
+  droid-default:
+    engine: droid
+    select:
+      - exact: claude-sonnet-4-5
 
 personas:
-  personal:
-    engines:
-      - claude-personal
-    models:
-      - opus-personal
-      - fable-personal
+  stub:
+    engines: [stub]
+    models: [stub-default]
     profiles:
       deep:
         chain:
-          - model: opus-personal
-            thinking: max
+          - model: stub-default
+            thinking: high
             max-output: unconstrained
       balanced:
         chain:
-          - model: fable-personal
-            thinking: high
+          - model: stub-default
+            thinking: medium
             max-output: unconstrained
       review:
         chain:
-          - model: opus-personal
+          - model: stub-default
             thinking: high
             max-output: unconstrained
       reasoning:
         chain:
-          - model: opus-personal
-            thinking: max
+          - model: stub-default
+            thinking: high
             max-output: unconstrained
       coding:
         chain:
-          - model: fable-personal
-            thinking: high
+          - model: stub-default
+            thinking: medium
             max-output: unconstrained
 
-  work:
-    engines:
-      - codex-work
-    models:
-      - sol-work
+  claude:
+    engines: [claude]
+    models: [claude-default]
     profiles:
       deep:
         chain:
-          - model: sol-work
-            thinking: xhigh
-            max-output: 65536
+          - model: claude-default
+            thinking: high
+            max-output: unconstrained
       balanced:
         chain:
-          - model: sol-work
-            thinking: high
-            max-output: 65536
+          - model: claude-default
+            thinking: medium
+            max-output: unconstrained
       review:
         chain:
-          - model: sol-work
+          - model: claude-default
             thinking: high
-            max-output: 65536
+            max-output: unconstrained
       reasoning:
         chain:
-          - model: sol-work
-            thinking: xhigh
-            max-output: 65536
+          - model: claude-default
+            thinking: high
+            max-output: unconstrained
       coding:
         chain:
-          - model: sol-work
+          - model: claude-default
+            thinking: medium
+            max-output: unconstrained
+
+  codex:
+    engines: [codex]
+    models: [codex-default]
+    profiles:
+      deep:
+        chain:
+          - model: codex-default
             thinking: high
-            max-output: 65536
+            max-output: unconstrained
+      balanced:
+        chain:
+          - model: codex-default
+            thinking: medium
+            max-output: unconstrained
+      review:
+        chain:
+          - model: codex-default
+            thinking: high
+            max-output: unconstrained
+      reasoning:
+        chain:
+          - model: codex-default
+            thinking: high
+            max-output: unconstrained
+      coding:
+        chain:
+          - model: codex-default
+            thinking: medium
+            max-output: unconstrained
+
+  droid:
+    engines: [droid]
+    models: [droid-default]
+    profiles:
+      deep:
+        chain:
+          - model: droid-default
+            thinking: high
+            max-output: unconstrained
+      balanced:
+        chain:
+          - model: droid-default
+            thinking: medium
+            max-output: unconstrained
+      review:
+        chain:
+          - model: droid-default
+            thinking: high
+            max-output: unconstrained
+      reasoning:
+        chain:
+          - model: droid-default
+            thinking: high
+            max-output: unconstrained
+      coding:
+        chain:
+          - model: droid-default
+            thinking: medium
+            max-output: unconstrained
+
+# The variant with secrets and model catalogues.
+#
+# An engine can receive an API key from an environment variable, and it can
+# discover its model identifiers from a catalogue. Discovery supports only
+# plain HTTP, so a catalogue works only at a loopback http address, and a
+# catalogue with authentication requires https and therefore cannot be
+# discovered. An engine whose secret variable is unset is shown with
+# credentialReady false by --routing, and a launch that needs it is refused.
+#
+# secrets:
+#   anthropic-personal:
+#     env: ANTHROPIC_PERSONAL_API_KEY
+#
+# engines:
+#   claude-personal:
+#     backend: acp:claude
+#     provider: anthropic
+#     environment:
+#       ANTHROPIC_API_KEY:
+#         secret: anthropic-personal
+#   local-server:
+#     backend: acp:PATH-TO-AN-ACP-ADAPTER
+#     provider: local
+#     catalogue:
+#       dialect: openai
+#       url: http://127.0.0.1:8080/v1/models
+#       timeout-ms: 5000
+#       max-bytes: 4194304
+#       cache:
+#         fresh-for: 24h
+#         stale-if-error: 7d
+#
+# models:
+#   local-newest:
+#     engine: local-server
+#     select:
+#       - prefix: local-model-
+#         order: newest

@@ -2,7 +2,7 @@
 
 Status: implemented routing contract for the CLI, Pi, and terminal frontends.
 
-Last checked: 2026-09-06.
+Last checked: 2026-10-03.
 
 ## 1. Decision
 
@@ -10,7 +10,7 @@ Retain the established file name, `routing.yaml`, and introduce a strict version
 
 The design adds no persona, provider, endpoint, key, or discovered model to DSL or workflow source. Persona is operational context, not denotation.
 
-The ordered profile chain remains the policy. The resolver does not infer “best” or “cheap” from vendor names, catalogue order, or mutable prices. To prefer a low-cost model, place its named model definition at the desired point in the selected persona's chain. This is explicit, deterministic, and sufficient for the requested personal-only OMLX case.
+The ordered profile chain remains the policy. The resolver does not infer “best” or “cheap” from vendor names, catalogue order, or mutable prices. To prefer a low-cost model, place its named model definition at the desired point in the selected persona's chain. This is explicit and deterministic, and it is sufficient to put a lower-cost model first.
 
 Version 1 remains supported with its decoder, layering, realization, and preflight unchanged. Live target precedence is shared across both versions. Mixed version-1 and version-2 user/project layers are refused with an actionable migration message rather than merged by guesswork.
 
@@ -19,7 +19,7 @@ Version 1 remains supported with its decoder, layering, realization, and preflig
 The implementation distinguishes four names which version 1 partially conflates:
 
 - A **persona** is a named operational context such as `personal`, `work`, or `agent-cat`. It explicitly allowlists physical engine instances and concrete model aliases, then defines how symbolic profiles resolve. It is not an authentication identity or security sandbox.
-- An **engine instance** is one concrete route and its process environment: for example, `codex-work`, `claude-personal`, or `omlx-hera`. Two instances may use the same ACP adapter with different endpoints, credential references, or non-secret configuration.
+- An **engine instance** is one concrete route and its process environment: for example, `codex-work` or `claude-personal`. Two instances may use the same ACP adapter with different endpoints, credential references, or non-secret configuration.
 - A **concrete model definition** is a stable local alias such as `openai-sol-work`. It belongs to one engine instance and resolves either to an exact model id or to one deterministic match from a discovered inventory.
 - A **symbolic profile** is the name authored in Haskell, such as `deep-thinker`. Within a persona it is an ordered, non-empty chain of concrete model definitions plus generation settings.
 
@@ -98,8 +98,6 @@ secrets:
     env: ANTHROPIC_PERSONAL_API_KEY
   openai-work:
     env: OPENAI_WORK_API_KEY
-  omlx-personal:
-    env: OMLX_HERA_API_KEY
 
 engines:
   claude-personal:
@@ -141,27 +139,6 @@ engines:
         fresh-for: 24h
         stale-if-error: 7d
 
-  omlx-hera:
-    backend: acp:omlx-hera
-    provider: openai-compatible
-    environment:
-      OPENAI_BASE_URL:
-        value: https://omlx-hera.example/v1
-      OPENAI_API_KEY:
-        secret: omlx-personal
-    catalogue:
-      dialect: openai
-      url: https://omlx-hera.example/v1/models
-      auth:
-        header: authorization
-        scheme: bearer
-        secret: omlx-personal
-      timeout-ms: 2000
-      max-bytes: 4194304
-      cache:
-        fresh-for: 1h
-        stale-if-error: 24h
-
 models:
   anthropic-opus-personal:
     engine: claude-personal
@@ -175,30 +152,27 @@ models:
       - prefix: gpt-5.6-sol-
         order: newest
 
-  glm-next-personal:
-    engine: omlx-hera
+  anthropic-sonnet-personal:
+    engine: claude-personal
     select:
-      - exact: GLM-5.3-Next
+      - exact: claude-sonnet-5
 
 personas:
   personal:
     engines:
       - claude-personal
-      - omlx-hera
     models:
       - anthropic-opus-personal
-      - glm-next-personal
+      - anthropic-sonnet-personal
     profiles:
       deep-thinker:
         chain:
           - model: anthropic-opus-personal
             thinking: max
             max-output: unconstrained
-          - model: glm-next-personal
+          - model: anthropic-sonnet-personal
             thinking: high
-            max-output: 65536
-            options:
-              temperature: 0
+            max-output: unconstrained
 
   work:
     engines:
@@ -215,10 +189,9 @@ personas:
   agent-cat:
     engines:
       - claude-personal
-      - omlx-hera
     models:
       - anthropic-opus-personal
-      - glm-next-personal
+      - anthropic-sonnet-personal
     profiles:
       deep-thinker:
         chain:
@@ -226,6 +199,10 @@ personas:
             thinking: max
             max-output: unconstrained
 ```
+
+The `secrets` key is optional. A user file without it declares no secrets, and its engines then use no secret reference.
+
+No ACP adapter for an OpenAI-compatible model server is verified with agent-cat. The built-in adapters are `stub`, `claude`, `codex`, and `droid`, and an engine can also name the path of another ACP adapter. What does work for such a server is catalogue discovery: an engine can declare an unauthenticated plain-HTTP catalogue at a loopback address, for example `url: http://127.0.0.1:8080/v1/models` with `dialect: openai`, and discovery reads its model identifiers. The engine's `backend` must still name an ACP adapter that serves those models.
 
 ### 5.2 Project file
 
@@ -242,21 +219,21 @@ persona: agent-cat
 profiles:
   deep-thinker:
     chain:
-      - model: glm-next-personal
+      - model: anthropic-sonnet-personal
         thinking: high
-        max-output: 65536
+        max-output: unconstrained
       - model: anthropic-opus-personal
         thinking: max
         max-output: unconstrained
 ```
 
-This override expresses a low-cost preference directly: OMLX is first. It remains valid only because the user-owned `agent-cat` persona authorizes both engine instances and both model aliases.
+This override expresses a low-cost preference directly: Sonnet is first. It remains valid only because the user-owned `agent-cat` persona authorizes the engine instance and both model aliases.
 
 ### 5.3 Field semantics
 
 #### `secrets`
 
-Each secret is a name mapped to one environment-variable source. The source name is non-secret and may appear in a diagnostic; its value may not. Environment lookup is delayed until a live command needs the referenced engine.
+The key is optional, and its absence is an empty map. Each secret is a name mapped to one environment-variable source. The source name is non-secret and may appear in a diagnostic. Its value may not. Environment lookup is delayed until a live command needs the referenced engine.
 
 Version 2 intentionally supports no literal, shell command, keychain program, or inline encrypted payload. Environment indirection is enough to satisfy the initial requirement without creating another execution surface. File and operating-system keyring providers may be added under a later schema version if a concrete deployment requires them.
 
@@ -421,7 +398,7 @@ Resolution proceeds in the following order:
 5. Overlay project profile replacements onto that persona; validate all names, references, engine and model allowlists, options, URLs, headers, and secret sources without reading secret values.
 6. Build the workflow under the existing run-fact/routing fixed point to discover the symbolic model names it actually serves.
 7. Reject the existing ambiguity between an authored fallback chain and a multi-rung configured profile.
-8. Determine only the engine instances needed by those profiles and resolve every secret they require. A missing secret is a named setup failure before discovery, adapter startup, or store creation; no secret value enters the message.
+8. Determine only the engine instances needed by those profiles and resolve every secret they require. For a launch, a missing secret is a named setup failure before discovery, adapter startup, or store creation, and no secret value enters the message. Inspection instead reports the engine as not credential-ready.
 9. Obtain one frozen inventory per needed engine which declares a catalogue, using the cache/network rules in Section 8. Exact selectors use this evidence opportunistically; inventory-dependent selectors require it.
 10. Resolve each concrete model alias by its ordered selectors. Record selector index, exact model id, source, timestamp, and cache age.
 11. Expand each symbolic chain to runtime axes `profile`, `profile#2`, and onward, as version 1 does.
@@ -457,13 +434,15 @@ Its JSON contains:
 - contributing config paths;
 - engine aliases, backend/provider, credential readiness as a boolean, catalogue status, and an opaque launch object;
 - concrete aliases and selected exact ids with selector/provenance;
-- symbolic profiles and ordered resolved rungs; and
-- warnings for stale inventory or static-unverified exact ids; and
+- symbolic profiles and ordered resolved rungs;
+- warnings: each catalogue failure once per engine, named by engine, with the remedy for `tls-not-supported` (remove the https catalogue or use a loopback http catalogue), and each static-unverified model alias once;
 - a sanitized execution fingerprint for each selected engine definition;
 - one CLI-owned routing-only launch object and lowercase SHA-256 fingerprint over the selected persona, full-coverage policy, and all resolved realizations; and
 - per-engine CLI-owned target kind, arguments, and launch fingerprint for callers that deliberately choose an explicit engine.
 
-It omits secret values and references, authorization/header values, adapter environment names and values, raw endpoint URLs, and inventories not selected by a profile. Human output likewise uses endpoint fingerprints rather than URLs.
+With no routing file, `--routing` exits 0 and names the expected user file, `$XDG_CONFIG_HOME/agent-cat/routing.yaml`, and the example file `cli/model-definitions.example.yaml`. `--routing --offline` prints the same message. `--routing --json` prints the empty version-1 inspection with the additional fields `userFile` and `exampleFile`.
+
+The inspection omits secret values and references, authorization/header values, adapter environment names and values, raw endpoint URLs, and inventories not selected by a profile. Human output likewise uses endpoint fingerprints rather than URLs.
 
 ext-pi and the terminal frontend consume the routing-only launch object. Neither frontend parses YAML, applies precedence, resolves a model, or reconstructs backend syntax. They pass its opaque arguments with `--offline` and `--expect-routing-fingerprint`, and the runner refuses launch if resolution no longer matches the preview. Explicit frontend targets omit routing choices. A leading option avoids reserving a downstream workflow name.
 
@@ -517,13 +496,13 @@ If the exact id appears in a fresh OpenAI inventory, provenance is `fresh`. If i
 
 Context: no explicit or project selector; user default is `personal`.
 
-Resolution begins with `anthropic-opus-personal` on `claude-personal`, producing exact `claude-opus-5` through `acp:claude`. The second rung is the personal-only `glm-next-personal` on `omlx-hera`. It is a runtime failover, not an engine the `work` persona can reach.
+Resolution begins with `anthropic-opus-personal` on `claude-personal`, producing exact `claude-opus-5` through `acp:claude`. The second rung is the personal-only `anthropic-sonnet-personal` on the same engine. It is a runtime failover, not a model the `work` persona can reach.
 
 ### 11.3 Project-specific low-cost ordering
 
-Context: `.agent-cat/routing.yaml` selects `agent-cat` and replaces `deep-thinker` with the OMLX alias first.
+Context: `.agent-cat/routing.yaml` selects `agent-cat` and replaces `deep-thinker` with the Sonnet alias first.
 
-Resolution uses `GLM-5.3-Next` on `omlx-hera`, then Claude as the spare. This is the requested low-cost mixture. No price database or name heuristic participates; the project profile's declared order is the policy.
+Resolution uses `claude-sonnet-5` on `claude-personal`, then Opus as the spare. This is the low-cost ordering. No price database or name heuristic participates. The declared order of the project profile is the policy.
 
 ### 11.4 Unavailable discovery endpoint
 
@@ -537,7 +516,7 @@ A cache older than `fresh-for` but younger than `stale-if-error` is used only af
 
 ### 11.6 Missing credential
 
-If `OPENAI_WORK_API_KEY` is absent, resolution fails before the catalogue request, adapter spawn, run-store creation, or paid turn:
+If `OPENAI_WORK_API_KEY` is absent, inspection still succeeds. `--routing --json` reports `codex-work` with `credentialReady` false, the human output names the unset secret, and the exit status is 0. An authenticated catalogue of that engine is not refreshed. A launch that uses the engine fails before the catalogue request, adapter spawn, run-store creation, or paid turn:
 
 ```text
 routing configuration: persona 'work', engine 'codex-work' requires secret
@@ -632,10 +611,10 @@ The checked trace is:
 | Bounds | header, timeout, body, and duration limits enforced |
 | Discovery/cache mode | normal, offline, explicit refresh, and age windows produce distinct decisions |
 | Work `deep-thinker` | `openai-sol-work` → `gpt-5.6-sol` |
-| Personal `deep-thinker` | Claude Opus, then personal-only OMLX |
-| `agent-cat` project override | OMLX first, then Claude |
-| Work model eligibility | personal GLM alias excluded |
-| Project profile under `work` | personal GLM alias refused despite project override authority |
+| Personal `deep-thinker` | Claude Opus, then personal-only Claude Sonnet |
+| `agent-cat` project override | Sonnet first, then Opus |
+| Work model eligibility | personal Sonnet alias excluded |
+| Project profile under `work` | personal Sonnet alias refused despite project override authority |
 | Unavailable inventories | exact ids become `static-unverified` |
 | Permitted stale inventory | newest matching prefix selected as `stale-cache` |
 | Reversed inventory order | identical selection |

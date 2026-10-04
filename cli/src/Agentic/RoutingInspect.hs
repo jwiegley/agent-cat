@@ -38,7 +38,7 @@ import Data.List (nub, sortOn)
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Yaml as Yaml
@@ -99,14 +99,7 @@ routingInspectionV2 loaded selected readiness inventories resolved =
             Just selection <- [resolvedModelSelection target]
         ]
     profileNames = nub (map resolvedProfile targets)
-    warnings =
-      nub
-        ( catMaybes (map selectedModelWarning (Map.elems selections))
-            <> [ "model alias '" <> selectedModelAlias selection <> "' is static-unverified"
-                 | selection <- Map.elems selections,
-                   selectedModelSource selection == ModelStaticUnverified
-               ]
-        )
+    warnings = inspectionWarnings (Map.elems selections)
 
     availableModelJson alias = case Map.lookup alias (routingV2Models config) of
       Nothing -> object ["alias" .= alias]
@@ -184,7 +177,7 @@ renderRoutingInspectionV2 loaded selected resolved =
       ]
         <> sourceLines
         <> map targetLine (Map.elems (resolvedRealizations resolved))
-        <> warningLines
+        <> map ("warning: " <>) (inspectionWarnings (Map.elems (resolvedRealizations resolved) >>= maybeToList . resolvedModelSelection))
     )
   where
     sourceLines = ["source: " <> T.pack path | path <- loadedRoutingSources loaded]
@@ -201,13 +194,24 @@ renderRoutingInspectionV2 loaded selected resolved =
           <> " ("
           <> modelSelectionSourceName (selectedModelSource selection)
           <> ")"
-    warningLines =
-      [ "warning: " <> warning
-        | target <- Map.elems (resolvedRealizations resolved),
-          Just selection <- [resolvedModelSelection target],
-          warning <- maybeToList (selectedModelWarning selection)
-            <> ["static-unverified exact model" | selectedModelSource selection == ModelStaticUnverified]
+
+-- | The warnings of one inspection: each catalogue warning once per engine,
+-- with its remedy where one is known, then each static-unverified model alias
+-- once.
+inspectionWarnings :: [ResolvedModelSelection] -> [Text]
+inspectionWarnings selections =
+  nub [engineWarning (selectedModelEngine selection) warning | selection <- selections, Just warning <- [selectedModelWarning selection]]
+    <> nub
+      [ "model alias '" <> selectedModelAlias selection <> "' is static-unverified"
+        | selection <- selections,
+          selectedModelSource selection == ModelStaticUnverified
       ]
+  where
+    engineWarning engine warning =
+      "engine '" <> engine <> "': model catalogue " <> warning <> remedy warning
+    remedy "tls-not-supported" =
+      "; discovery supports no TLS, so remove the https catalogue or use a loopback http catalogue"
+    remedy _ = ""
 
 routingLaunchFingerprint :: Text -> Backend -> ResolvedRouting -> Text
 routingLaunchFingerprint persona backend =

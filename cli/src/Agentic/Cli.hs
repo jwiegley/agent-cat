@@ -18,6 +18,7 @@
 -- >                                    [--route NAME=BACKEND]...
 -- >                                    [--routing] [--timeout MS] [--verbose]
 -- > <binary> run   NAME --engine acp [--adapter stub|claude|codex|droid|PATH]
+-- >                                  [--model ID] [--effort LEVEL]
 -- >                                  [--adapter-arg ARG]... [--scratch DIR]
 -- >                                  [--route NAME=BACKEND]...
 -- >                                  [--routing] [--timeout MS] [--verbose]
@@ -271,6 +272,7 @@ where
 import qualified Agentic.Cli.Frontend as Frontend
 import qualified Agentic.Manager as Manager
 import qualified Agentic.Manager.Flow as Flow
+import Control.Applicative ((<|>))
 import Control.Concurrent (myThreadId, threadDelay, throwTo)
 import Control.Concurrent.MVar (MVar, newMVar, putMVar, takeMVar, withMVar)
 import Control.Exception
@@ -364,6 +366,9 @@ import Agentic.Acp
     engineOfAcpConfigured,
     preflightAcpModel,
     withAcps,
+    withAcp,
+    AcpOfferedOptions (..),
+    offeredSessionOptions,
   )
 import Agentic.Acp.Claude (claudeAdapter)
 import Agentic.Acp.Codex (codexAdapter)
@@ -505,13 +510,16 @@ import Agentic.RoutingConfig
     emptyRoutingConfig,
     discoverRoutingInventories,
     loadRoutingConfig,
+    routingUserFile,
     expandRoutingConfigV2,
     freezeRoutingConfigV2,
+    requireEngineCredentials,
     resolveEngineContexts,
     resolvedEngineAlias,
     resolvedEngineBackend,
     resolvedEngineChildEnvironment,
     resolvedEngineCredentialReady,
+    resolvedEngineCredentialProblem,
     resolvedEngineExecutionFingerprint,
     selectRoutingPersona,
     sha256Fingerprint,
@@ -758,6 +766,9 @@ data Command
     Help !Text
   | -- | Sanitized local routing policy; may explicitly refresh catalogues.
     RoutingInspection !Render !(Maybe Text) !DiscoveryMode
+  | -- | The model and effort values that one ACP adapter offers on a new
+    -- session: the adapter, its @--adapter-arg@ values, and the rendering.
+    AdapterOptions !Text ![Text] !Render
   | -- | Mechanical, non-overwriting version-1 to version-2 conversion.
     MigrateRouting !FilePath !FilePath
   | -- | The registry itself: every name, with its one line.
@@ -891,6 +902,10 @@ data RunRoutes = RunRoutes
     rrScratch :: !(Maybe FilePath),
     -- | @--adapter-arg@, in the order given, for every @acp:@ backend.
     rrAdapterArgs :: ![String],
+    -- | @--model@ and @--effort@: the default ACP answerer's session option
+    -- values, applied before every question that it answers.
+    rrModel :: !(Maybe Text),
+    rrEffort :: !(Maybe Text),
     -- | @--binary PATH@, for every @deck:@ backend.
     rrBinary :: !(Maybe FilePath),
     rrPollMs :: !(Maybe Int),
@@ -1127,6 +1142,7 @@ execute broker reg = \case
   Usage -> say (usage reg) >> exitSuccess
   Help name -> helpCmd reg name >> exitSuccess
   RoutingInspection rendering persona mode -> routingInspectionCmd reg rendering persona mode >> exitSuccess
+  AdapterOptions adapter arguments rendering -> adapterOptionsCmd adapter arguments rendering >> exitSuccess
   MigrateRouting source outputPath -> migrateRoutingCmd reg source outputPath >> exitSuccess
   List r -> listCmd reg r >> exitSuccess
   Plan name r raw pinned ins -> withExample reg pinned False noRefusal name [] ins (planCmd r raw)
@@ -1355,6 +1371,22 @@ routingInspectionCmd :: Registry -> Render -> Maybe Text -> DiscoveryMode -> IO 
 routingInspectionCmd reg rendering persona mode = do
   loadedResult <- loadRoutingConfig
   loaded <- either (die reg 1 . ("routing configuration: " <>)) pure loadedResult
+  when (null (loadedRoutingSources loaded)) $ do
+    userFile <- T.pack <$> routingUserFile
+    case rendering of
+      Human ->
+        say . T.unlines $
+          [ "routing schema: none",
+            "sources: none",
+            "no routing file: the user file " <> userFile <> " does not exist",
+            "to create it, copy " <> routingExampleFile <> " from the agent-cat source tree to that path",
+            "a run with --engine acp or --session needs no routing file"
+          ]
+      _ -> case routingInspectionV1 loaded of
+        Object fields ->
+          sayJson (Object (fields <> KM.fromList [("userFile", String userFile), ("exampleFile", String routingExampleFile)]))
+        other -> sayJson other
+    exitSuccess
   case loadedRoutingV2User loaded of
     Nothing -> do
       when (isJust persona || mode /= DiscoveryNormal) $
@@ -1389,9 +1421,53 @@ routingInspectionCmd reg rendering persona mode = do
       let resolvedWithEnvironment = withExecutionFingerprints contexts resolved
           readiness = Map.map resolvedEngineCredentialReady contexts
       case rendering of
-        Human -> say (renderRoutingInspectionV2 loaded selected resolvedWithEnvironment)
+        Human ->
+          say $
+            renderRoutingInspectionV2 loaded selected resolvedWithEnvironment
+              <> T.unlines
+                [ "credential not ready: " <> problem <> "; a launch that uses engine " <> alias <> " is refused"
+                  | (alias, context) <- Map.toList contexts,
+                    Just problem <- [resolvedEngineCredentialProblem context]
+                ]
         Json -> sayJson (routingInspectionV2 loaded selected readiness inventories resolvedWithEnvironment)
         JsonV3 -> sayJson (routingInspectionV2 loaded selected readiness inventories resolvedWithEnvironment)
+
+-- | Start one adapter, read the model and effort options of the session that
+-- the handshake opened, print them, and close the adapter. No prompt is sent.
+-- A failure to start or to shake hands is a transport failure (exit 2).
+adapterOptionsCmd :: Text -> [Text] -> Render -> IO ()
+adapterOptionsCmd adapter arguments rendering = do
+  let cfg = adapterConfig (adapterSpecFor adapter) (map T.unpack arguments)
+  offered <- withAcp cfg offeredSessionOptions
+  let values = map compactValue
+      optionJson = maybe Null (\(optionId, choices) -> object ["option" .= optionId, "values" .= choices])
+      optionLine label = \case
+        Nothing -> label <> ": not advertised by this adapter"
+        Just (optionId, []) -> label <> " (option " <> optionId <> "): any value; the adapter lists none"
+        Just (optionId, choices) -> label <> " (option " <> optionId <> "): " <> T.intercalate ", " (values choices)
+  case rendering of
+    Human ->
+      say . T.unlines $
+        [ "adapter " <> adapter <> ": " <> T.unwords (map T.pack (acpCommand cfg)),
+          optionLine "model" (offeredModelOption offered),
+          optionLine "effort" (offeredEffortOption offered)
+        ]
+    _ ->
+      sayJson $
+        object
+          [ "adapter" .= adapter,
+            "command" .= acpCommand cfg,
+            "model" .= optionJson (offeredModelOption offered),
+            "effort" .= optionJson (offeredEffortOption offered)
+          ]
+  where
+    compactValue = \case
+      String text -> text
+      other -> decodeUtf8Lenient (BL.toStrict (encode other))
+
+-- | The example routing file, relative to the agent-cat source tree.
+routingExampleFile :: Text
+routingExampleFile = "cli/model-definitions.example.yaml"
 
 migrateRoutingCmd :: Registry -> FilePath -> FilePath -> IO ()
 migrateRoutingCmd reg source outputPath = do
@@ -2646,10 +2722,11 @@ runCmdControlled broker scoped personAnswering runtimeControls persistence obser
 
     preflightAcp rr =
       mapM_
-        ( \(route, acp) ->
+        ( \(route, acp) -> do
             mapM_
               (preflightAcpModel acp . acpModelConfigOf)
               (routeRealizations rr route)
+            mapM_ (preflightAcpModel acp) (commandModelChoice rr route)
         )
 
     verifyDeckRoute rr route = case engineRouteBackend route of
@@ -2682,7 +2759,10 @@ runCmdControlled broker scoped personAnswering runtimeControls persistence obser
           pure
             ( worldOfEngineBrokered broker defaultExecSettings
                 ( engineOfAcpConfigured
-                    (fmap acpModelConfigOf . (`Map.lookup` rrRealizations rr))
+                    ( \axis ->
+                        (acpModelConfigOf <$> (axis >>= (`Map.lookup` rrRealizations rr)))
+                          <|> commandModelChoice rr route
+                    )
                     (acpConfigForRoute rr dir route)
                     acp
                 )
@@ -2757,6 +2837,10 @@ runCmdControlled broker scoped personAnswering runtimeControls persistence obser
             <> T.unwords (map T.pack (acpCommand cfg))
         unless (rrAdapterGiven rr || isJust (engineRouteAlias route)) $
           output "  no --adapter given, so the stub answers — the same default agent-cat's own CLI takes"
+        when (isJust (commandModelChoice rr route)) $
+          output $
+            "  session options set before every question: "
+              <> T.intercalate ", " (mapMaybe id [("model " <>) <$> rrModel rr, ("effort " <>) <$> rrEffort rr])
         output $
           "  cwd "
             <> T.pack dir
@@ -3284,6 +3368,8 @@ resolveRoutingOnly tools (RoutingLoaded options loaded selected) prog = do
         rrRealizations = resolvedRealizations resolved,
         rrScratch = T.unpack <$> roScratch options,
         rrAdapterArgs = map T.unpack (roAdapterArgs options),
+        rrModel = Nothing,
+        rrEffort = Nothing,
         rrBinary = T.unpack <$> roBinary options,
         rrPollMs = roPollMs options,
         rrTimeoutMs = roTimeoutMs options,
@@ -3356,6 +3442,7 @@ finalizeTargetForProgram tools (Routed rr) prog = case rrSelectedRoutingV2 rr of
               fingerprintRequired = nub (map (routerName . resolvedRouter) (Map.elems (resolvedRealizations fingerprintExpanded)))
               required = nub (executionRequired <> fingerprintRequired)
           contexts <- resolveEngineContexts selected required ambient
+          requireEngineCredentials contexts required
           pure (expanded, fingerprintExpanded, executionRequired, required, contexts) of
           Left problem -> pure (Left problem)
           Right (expanded, fingerprintExpanded, executionRequired, required, contexts) -> do
@@ -3472,6 +3559,8 @@ targetPolicy (Routed rr) = case rrSelectedRoutingV2 rr of
              "verbose" .= rrVerbose rr
            ]
         <> personAnswerFields (rrPersonAnswers rr)
+        <> maybe [] (\model -> ["model" .= model]) (rrModel rr)
+        <> maybe [] (\effort -> ["effort" .= effort]) (rrEffort rr)
     defaultFields = case routeDefault (rrRoutes rr) of
       Nothing -> ["coverage" .= ("full" :: Text)]
       Just defaultBackend -> ["default" .= backendSpelling defaultBackend]
@@ -3579,6 +3668,14 @@ acpConfigForRoute rr dir route = case engineRouteBackend route of
             acpVerbose = rrVerbose rr
           }
   BackendDeck _ -> error "Agentic.Cli.acpConfigForRoute: deck route"
+
+-- | The @--model@ and @--effort@ choice, for the default answerer only. A
+-- named route to another adapter keeps that adapter's own defaults.
+commandModelChoice :: RunRoutes -> EngineRoute -> Maybe AcpModelConfig
+commandModelChoice rr route
+  | isNothing (rrModel rr) && isNothing (rrEffort rr) = Nothing
+  | routeDefault (executionRoutes rr) == Just route = Just (AcpModelChoice (rrModel rr) (rrEffort rr))
+  | otherwise = Nothing
 
 adapterSpecFor :: Text -> AdapterSpec
 adapterSpecFor "stub" = stubAdapter
@@ -3850,6 +3947,8 @@ parseCommand reg = \case
   ["frontend-export", "--help"] -> Right Usage
   ("frontend-export" : _) -> Left "frontend-export requires exactly --state TRUSTED_STATE"
   ("--routing" : rest) -> routingOptions Human Nothing DiscoveryNormal rest
+  ["adapter-options", "--help"] -> Right Usage
+  ("adapter-options" : rest) -> adapterOptionsArgs Nothing [] Human rest
   ["--migrate-routing"] -> Left "--migrate-routing takes SOURCE --output DESTINATION"
   ("--migrate-routing" : source : rest) -> case rest of
     ["--output", destination] -> Right (MigrateRouting (T.unpack source) (T.unpack destination))
@@ -3923,6 +4022,19 @@ parseCommand reg = \case
             Right (position, "") -> flowOptions path follow route (Just position) rest
             _ -> Left ("flow --from takes a record position, not '" <> cursor <> "'")
       option : _ -> Left ("flow takes PATH... [--follow] [--route PREDICATE] [--from CURSOR], and does not take '" <> option <> "'")
+
+    adapterOptionsArgs adapter arguments rendering = \case
+      [] -> case adapter of
+        Just name -> Right (AdapterOptions name arguments rendering)
+        Nothing -> Left "adapter-options needs --adapter stub|claude|codex|droid|PATH"
+      "--adapter" : value : rest
+        | isJust adapter -> Left "adapter-options received --adapter twice"
+        | otherwise -> adapterOptionsArgs (Just value) arguments rendering rest
+      "--adapter-arg" : value : rest -> adapterOptionsArgs adapter (arguments <> [value]) rendering rest
+      "--json" : rest
+        | rendering == Json -> Left "adapter-options received --json twice"
+        | otherwise -> adapterOptionsArgs adapter arguments Json rest
+      flag : _ -> Left ("adapter-options takes --adapter NAME, --adapter-arg ARG and --json, and does not take '" <> flag <> "'")
 
     routingOptions rendering persona mode = \case
       [] -> Right (RoutingInspection rendering persona mode)
@@ -4073,6 +4185,9 @@ data RunOpts = RunOpts
     roAdapter :: !(Maybe Text),
     -- | In the order given, which is the order they reach the child's @argv@.
     roAdapterArgs :: ![Text],
+    -- | @--model ID@ and @--effort LEVEL@ for the default ACP answerer.
+    roModel :: !(Maybe Text),
+    roEffort :: !(Maybe Text),
     -- | @--route NAME=BACKEND@, in the order given — which is the order the run
     -- starts them and the order the header prints them, so that an operator can
     -- read the header against their own command line.
@@ -4107,6 +4222,8 @@ noRunOpts =
       roVerbose = False,
       roAdapter = Nothing,
       roAdapterArgs = [],
+      roModel = Nothing,
+      roEffort = Nothing,
       roRoutes = [],
       roRouting = False,
       roPersona = Nothing,
@@ -4164,7 +4281,7 @@ validateManagerPreparedTarget reg arguments prepared = do
         Routed original -> do
           let expected=targetPolicy(Routed original)
               same key=case expected of Object fields->KM.lookup key fields==field key;_->False
-          unless(all same ["default","coverage","routes","pollMs","timeoutMs","verbose","personAnswers"])(Left Manager.InvalidReply)
+          unless(all same ["default","coverage","routes","pollMs","timeoutMs","verbose","personAnswers","model","effort"])(Left Manager.InvalidReply)
         _ -> unless(field "personAnswers"==KM.lookup "personAnswers" (KM.fromList (personAnswerFields (targetPersonAnswers target))))(Left Manager.InvalidReply)
       case configuredScratch of
         Just explicit -> unless(preparedTargetArguments prepared==arguments && field "scratch"==Just(String(T.pack explicit)))(Left Manager.InvalidReply)
@@ -4219,6 +4336,14 @@ parseTarget reg args = do
       ("--binary" : v : rest) -> go o {roBinary = Just v} rest
       ("--adapter" : v : rest) -> go o {roAdapter = Just v} rest
       ("--adapter-arg" : v : rest) -> go o {roAdapterArgs = roAdapterArgs o <> [v]} rest
+      ("--model" : v : rest)
+        | isJust (roModel o) -> Left "--model may appear only once"
+        | T.null (T.strip v) -> Left "--model takes a non-empty value"
+        | otherwise -> go o {roModel = Just v} rest
+      ("--effort" : v : rest)
+        | isJust (roEffort o) -> Left "--effort may appear only once"
+        | T.null (T.strip v) -> Left "--effort takes a non-empty value"
+        | otherwise -> go o {roEffort = Just v} rest
       ("--routing" : rest) -> go o {roRouting = True} rest
       ("--expect-routing-fingerprint" : v : rest)
         | isJust (roExpectedRoutingFingerprint o) -> Left "--expect-routing-fingerprint may appear only once"
@@ -4239,7 +4364,7 @@ parseTarget reg args = do
       ("--refresh-models" : rest) -> setDiscovery o DiscoveryRefresh rest
       ["--expect-routing-fingerprint"] -> Left "--expect-routing-fingerprint takes a digest"
       [flag]
-        | flag `elem` ["--persona", "--realize"] -> Left (flag <> " takes a value")
+        | flag `elem` ["--persona", "--realize", "--model", "--effort"] -> Left (flag <> " takes a value")
         | flag == "--person-answer" -> Left "--person-answer takes model:NAME or tool:NAME"
       ("--scratch" : v : rest) -> go o {roScratch = Just v} rest
       -- Refused by name rather than by the fallthrough below, because the
@@ -4284,6 +4409,8 @@ chooseTarget o = case (roScripted o, roEngine o, roSession o) of
         Left
           [wft|--route refines a command-line default answerer, and there is none: give --engine acp or --session <id> as well|]
     | isJust (roAdapter o) -> Left "--adapter selects an explicit ACP answerer; give --engine acp as well"
+    | isJust (roModel o) || isJust (roEffort o) ->
+        Left "--model and --effort set the session options of an explicit ACP answerer; give --engine acp as well"
     | otherwise -> routingOnly
   where
     -- A flag this run's answerer has no use for, refused by name.
@@ -4293,7 +4420,7 @@ chooseTarget o = case (roScripted o, roEngine o, roSession o) of
       (_ : rest) -> forbid engine rest
       [] -> Right ()
 
-    acpFlags = [("--adapter", isJust (roAdapter o)), ("--adapter-arg", not (null (roAdapterArgs o))), ("--scratch", isJust (roScratch o))]
+    acpFlags = [("--adapter", isJust (roAdapter o)), ("--adapter-arg", not (null (roAdapterArgs o))), ("--model", isJust (roModel o)), ("--effort", isJust (roEffort o)), ("--scratch", isJust (roScratch o))]
     deckFlags = [("--binary", isJust (roBinary o)), ("--poll", isJust (roPollMs o))]
     routingOptions =
       [ ("--persona", isJust (roPersona o)),
@@ -4329,6 +4456,8 @@ chooseTarget o = case (roScripted o, roEngine o, roSession o) of
         Nothing -> Right ()
       let table = routes def named
       forbidForeign (Set.fromList (map schemeOf (routeBackends table)))
+      when ((isJust (roModel o) || isJust (roEffort o)) && schemeOf def /= SchemeAcp) $
+        Left "--model and --effort set the session options of the default ACP answerer, and the default answerer here is a deck session"
       pure . Routed $
         RunRoutes
           { rrRoutes = table,
@@ -4344,6 +4473,8 @@ chooseTarget o = case (roScripted o, roEngine o, roSession o) of
             rrRealizations = Map.empty,
             rrScratch = T.unpack <$> roScratch o,
             rrAdapterArgs = map T.unpack (roAdapterArgs o),
+            rrModel = roModel o,
+            rrEffort = roEffort o,
             rrBinary = T.unpack <$> roBinary o,
             rrPollMs = roPollMs o,
             rrTimeoutMs = roTimeoutMs o,
@@ -4408,6 +4539,7 @@ usage reg =
       "  " <> bin <> " frontend-export --state TRUSTED_STATE < request.json",
       "  " <> bin <> " list [--json [--descriptor-version 3]]",
       "  " <> bin <> " --routing [--json] [--persona NAME] [--offline | --refresh-models]",
+      "  " <> bin <> " adapter-options --adapter stub|claude|codex|droid|PATH [--adapter-arg ARG]... [--json]",
       "  " <> bin <> " --migrate-routing SOURCE --output DESTINATION",
       "  " <> bin <> " help <" <> noun <> ">",
       "  " <> bin <> " <" <> noun <> "> --help",
@@ -4428,6 +4560,7 @@ usage reg =
       under (runLead <> "--session <id> ") <> "[--timeout MS] [--verbose]",
       runLead <> "--engine acp",
       under runLead <> "[--adapter stub|claude|codex|droid|PATH]",
+      under (runLead <> "--engine acp ") <> "[--model ID] [--effort LEVEL]",
       under (runLead <> "--engine acp ") <> "[--adapter-arg ARG]... [--scratch DIR]",
       under (runLead <> "--engine acp ") <> "[--route NAME=BACKEND]...",
       under (runLead <> "--engine acp ") <> "[--timeout MS] [--verbose]",
@@ -4498,10 +4631,20 @@ usage reg =
       "  --binary       the agent-deck executable (default: agent-deck, found on PATH)",
       "  --poll         milliseconds between two checks of the session's status",
       "  --adapter      the answering program (default: stub, the deterministic double",
-      "                 at ../test/stub_adapter.py); claude and codex are looked for on",
+      "                 at engine/acp/test/stub_adapter.py, which resolves against the",
+      "                 working directory); claude and codex are looked for on",
       "                 PATH and then at machine-local pins; droid runs `droid exec",
       "                 --output-format acp` from PATH; anything else is a path.",
       "                 only when this run reaches ACP",
+      "  --model        a model value that the default ACP answerer offers, set on",
+      "                 its session before every question. adapter-options prints",
+      "                 the offered values; a value not offered is refused before",
+      "                 any prompt, with the offered values listed",
+      "  --effort       an effort value that the default ACP answerer offers, set",
+      "                 the same way",
+      "  adapter-options",
+      "                 start the adapter, open one session, print the model and",
+      "                 effort values that it offers, and exit. No prompt is sent",
       "  --adapter-arg  one argument for the adapter's argv; repeatable.",
       "                 `--adapter-arg --refuse` is how the stub is told to answer *no*",
       "                 to a person's yes/no question. Only when this run reaches ACP",

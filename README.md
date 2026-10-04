@@ -257,15 +257,21 @@ conventions.
 registered programs. Run it from the repository root:
 
 ```sh
+nix develop path:. -c cabal run agentic-run -- --routing
 nix develop path:. -c cabal run agentic-run -- list
 nix develop path:. -c cabal run agentic-run -- help harden
 nix develop path:. -c cabal run agentic-run -- plan harden --raw
 nix develop path:. -c cabal run agentic-run -- cost harden
 nix develop path:. -c cabal run agentic-run -- run harden --scripted
 nix develop path:. -c cabal run agentic-run -- run harden --engine acp --adapter stub
+nix develop path:. -c cabal run agentic-run -- adapter-options --adapter claude
+nix develop path:. -c cabal run agentic-run -- run hello --engine acp --adapter claude --model ID --effort LEVEL
 nix develop path:. -c cabal run agentic-run -- run harden --session <deck-id>
-nix develop path:. -c cabal run agentic-run -- --routing --json --offline
 ```
+
+`--routing` reports the routing policy that a run without `--engine` or
+`--session` would use. When no routing file exists, it names the expected user
+file and the example file, and it exits 0.
 
 The verbs `list`, `help`, `plan`, and `cost` spend nothing and start no
 adapter. `plan` and `cost` report the static folds, which are decided before
@@ -278,7 +284,16 @@ its pipe. The adapters are `stub`, `claude`, `codex`, `droid`, or the path of
 an executable, and `droid` launches `droid exec --output-format acp`, which
 must be authenticated locally or through an inherited `FACTORY_API_KEY`.
 `--session` sends every question into a live agent-deck session that another
-process started and watches. An explicit engine or session is the complete
+process started and watches. `claude-agent-acp` and `codex-acp` must be on
+`PATH`, because their fallback locations are fixed Nix store paths of one build.
+
+To run a bundled workflow on a chosen model, name the adapter and the model
+explicitly. `adapter-options --adapter ADAPTER` starts the adapter, opens one
+session, prints the model and effort values that the adapter offers, and exits
+without a prompt. `--model ID` and `--effort LEVEL` then set those values on
+every session of the default answerer before its prompt. A value that the
+adapter does not offer is refused before any prompt, and the refusal lists the
+offered values. An explicit engine or session is the complete
 command-line route table, even when `--routing` is also present. All three
 services end at the same typed decode loop, so a run means the same thing on
 every service and fails in the same words. Exit status 0 is a completed run, 1
@@ -304,10 +319,15 @@ engine starts. `--realize AXIS=MODEL-ALIAS` safely replaces a managed version-2
 axis. Raw `--route` entries refine only an explicit command-line target.
 `--routing --json` emits the sanitized frontend contract, and
 `--migrate-routing SOURCE --output DESTINATION` creates an equivalent offline
-version-2 file without overwriting the source. The example in
-`cli/model-definitions.example.yaml` covers every profile that the bundled
-workflows name. Routing remains operational policy after the program and its
-analyses exist, so persona changes neither the plan nor its price.
+version-2 file without overwriting the source. A routing-only run needs a fully
+pinned workflow: every model question carries a `servedBy` pin, and the
+workflow asks an engine no tool or person question. None of the ten bundled workflows
+meets this rule at present, so a bundled workflow runs with `--engine acp` or
+`--session`. `cli/model-definitions.example.yaml` is a minimal working user
+file. It defines one engine for each built-in adapter and needs no environment
+variable, catalogue, or secret. Its default persona uses the stub. Routing
+remains operational policy after the program and its analyses exist, so persona
+changes neither the plan nor its price.
 
 The `machine` verbs execute the same program while emitting versioned NDJSON
 events on standard output and accepting correlated controls on an inherited file

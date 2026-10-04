@@ -47,8 +47,10 @@ module Agentic.RoutingConfig
     resolvedEngineBackend,
     resolvedEngineChildEnvironment,
     resolvedEngineCredentialReady,
+    resolvedEngineCredentialProblem,
     resolvedEngineExecutionFingerprint,
     resolveEngineContexts,
+    requireEngineCredentials,
     emptyRoutingConfig,
     decodeRoutingConfig,
     mergeRoutingConfig,
@@ -62,6 +64,7 @@ module Agentic.RoutingConfig
     loadRoutingFiles,
     loadRoutingLayers,
     loadRoutingConfig,
+    routingUserFile,
   )
 where
 
@@ -70,11 +73,13 @@ import Agentic.RoutingDiscovery
 import Agentic.RoutingConfig.V2
 import Agentic.RoutingSecrets
   ( ResolvedEngineContext,
+    requireEngineCredentials,
     resolveEngineContexts,
     resolvedEngineAlias,
     resolvedEngineBackend,
     resolvedEngineChildEnvironment,
     resolvedEngineCredentialReady,
+    resolvedEngineCredentialProblem,
     resolvedEngineExecutionFingerprint,
   )
 import Agentic.Route
@@ -723,10 +728,19 @@ loadV2Layers layers = do
 -- | Load the conventional user and project files for this process.
 loadRoutingConfig :: IO (Either Text LoadedRouting)
 loadRoutingConfig = do
-  home <- getHomeDirectory
-  configuredHome <- lookupEnv "XDG_CONFIG_HOME"
-  let configHome = case configuredHome of
-        Just path | not (null path) -> path
-        _ -> home </> ".config"
+  configHome <- routingConfigHome
   cwd <- getCurrentDirectory
   discoverRoutingLayers configHome cwd >>= loadRoutingLayers
+
+-- | The user routing file of this process:
+-- @$XDG_CONFIG_HOME/agent-cat/routing.yaml@, or @~/.config/agent-cat/routing.yaml@.
+routingUserFile :: IO FilePath
+routingUserFile = (\home -> home </> "agent-cat" </> "routing.yaml") <$> routingConfigHome
+
+routingConfigHome :: IO FilePath
+routingConfigHome = do
+  home <- getHomeDirectory
+  configuredHome <- lookupEnv "XDG_CONFIG_HOME"
+  pure $ case configuredHome of
+    Just path | not (null path) -> path
+    _ -> home </> ".config"

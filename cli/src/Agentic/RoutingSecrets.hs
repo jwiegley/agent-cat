@@ -3,6 +3,10 @@
 
 -- | Delayed environment-secret resolution for the selected version-2 engines.
 -- Secret-bearing values deliberately have neither 'Eq' nor 'Show'.
+--
+-- An engine whose secret environment variable is unset still resolves, with
+-- 'resolvedEngineCredentialReady' false, so that inspection can report it.
+-- 'requireEngineCredentials' is the launch-time refusal.
 module Agentic.RoutingSecrets
   ( SecretValue,
     withSecretValue,
@@ -11,9 +15,11 @@ module Agentic.RoutingSecrets
     resolvedEngineBackend,
     resolvedEngineChildEnvironment,
     resolvedEngineCredentialReady,
+    resolvedEngineCredentialProblem,
     resolvedEngineExecutionFingerprint,
     resolvedEngineCatalogueCredential,
     resolveEngineContexts,
+    requireEngineCredentials,
   )
 where
 
@@ -25,6 +31,7 @@ import Crypto.Hash (Digest, SHA256, hash)
 import Data.Aeson (Value, encode, object, (.=))
 import qualified Data.ByteString.Lazy as BL
 import Data.List (nub)
+import Data.Either (lefts)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Text (Text)
@@ -40,6 +47,8 @@ data ResolvedEngineContext = ResolvedEngineContext
     resolvedEngineBackend :: !Backend,
     resolvedEngineChildEnvironment :: !ChildEnvironment,
     resolvedEngineCredentialReady :: !Bool,
+    -- | Why the engine is not credential-ready: the first unset secret.
+    resolvedEngineCredentialProblem :: !(Maybe Text),
     resolvedEngineExecutionFingerprint :: !Text,
     resolvedEngineCatalogueCredential :: !(Maybe SecretValue)
   }
@@ -58,9 +67,11 @@ resolveEngineContexts selected required ambient = do
       scrubbed = foldr (Map.delete . T.unpack) ambient (destinations <> sources)
   contexts <- forM aliases $ \alias -> do
     engine <- maybe (Left ("unknown engine '" <> alias <> "'")) Right (Map.lookup alias (routingV2Engines config))
-    bindings <- traverse (resolveBinding config personaName alias ambient) (engineEnvironment engine)
-    credential <- traverse (resolveCatalogueCredential config personaName alias ambient) (engineCatalogue engine >>= catalogueAuth)
-    let selectedBindings = Map.fromList [(T.unpack name, value) | (name, value) <- Map.toList bindings]
+    bindingResults <- traverse (resolveBinding config personaName alias ambient) (engineEnvironment engine)
+    credentialResult <- traverse (resolveCatalogueCredential config personaName alias ambient) (engineCatalogue engine >>= catalogueAuth)
+    let unset = lefts (Map.elems bindingResults) <> maybe [] (either pure (const [])) credentialResult
+        credential = credentialResult >>= either (const Nothing) Just
+        selectedBindings = Map.fromList [(T.unpack name, value) | (name, Right value) <- Map.toList bindingResults]
         redactions =
           [ T.pack value
             | (destination, EnvironmentSecret _) <- Map.toList (engineEnvironment engine),
@@ -73,7 +84,10 @@ resolveEngineContexts selected required ambient = do
           { resolvedEngineAlias = alias,
             resolvedEngineBackend = engineBackend engine,
             resolvedEngineChildEnvironment = child,
-            resolvedEngineCredentialReady = True,
+            resolvedEngineCredentialReady = null unset,
+            resolvedEngineCredentialProblem = case unset of
+              problem : _ -> Just problem
+              [] -> Nothing,
             resolvedEngineExecutionFingerprint = engineExecutionFingerprint config alias engine,
             resolvedEngineCatalogueCredential = credential
           }
@@ -104,16 +118,26 @@ engineExecutionFingerprint config alias engine =
           "source" .= fmap secretEnvironmentName (Map.lookup name (routingV2Secrets config))
         ]
 
-resolveBinding :: RoutingConfigV2 -> Text -> Text -> Map String String -> EnvironmentBinding -> Either Text String
-resolveBinding _ _ _ _ (EnvironmentValue value) = Right (T.unpack value)
+-- | Refuse a launch when one of the named engines has an unset secret. The
+-- message names the persona, engine, secret and environment variable.
+requireEngineCredentials :: Map Text ResolvedEngineContext -> [Text] -> Either Text ()
+requireEngineCredentials contexts aliases =
+  case [problem | alias <- nub aliases, Just context <- [Map.lookup alias contexts], Just problem <- [resolvedEngineCredentialProblem context]] of
+    problem : _ -> Left problem
+    [] -> Right ()
+
+-- The outer 'Either' is a configuration error. The inner 'Left' is an unset
+-- secret, which leaves the engine resolved but not credential-ready.
+resolveBinding :: RoutingConfigV2 -> Text -> Text -> Map String String -> EnvironmentBinding -> Either Text (Either Text String)
+resolveBinding _ _ _ _ (EnvironmentValue value) = Right (Right (T.unpack value))
 resolveBinding config personaName engineName ambient (EnvironmentSecret secretName) =
-  T.unpack <$> resolveSecret config personaName engineName secretName ambient
+  fmap T.unpack <$> resolveSecret config personaName engineName secretName ambient
 
-resolveCatalogueCredential :: RoutingConfigV2 -> Text -> Text -> Map String String -> CatalogueAuth -> Either Text SecretValue
+resolveCatalogueCredential :: RoutingConfigV2 -> Text -> Text -> Map String String -> CatalogueAuth -> Either Text (Either Text SecretValue)
 resolveCatalogueCredential config personaName engineName ambient auth =
-  SecretValue <$> resolveSecret config personaName engineName (catalogueAuthSecret auth) ambient
+  fmap SecretValue <$> resolveSecret config personaName engineName (catalogueAuthSecret auth) ambient
 
-resolveSecret :: RoutingConfigV2 -> Text -> Text -> Text -> Map String String -> Either Text Text
+resolveSecret :: RoutingConfigV2 -> Text -> Text -> Text -> Map String String -> Either Text (Either Text Text)
 resolveSecret config personaName engineName secretName ambient = do
   reference <-
     maybe
@@ -121,7 +145,7 @@ resolveSecret config personaName engineName secretName ambient = do
       Right
       (Map.lookup secretName (routingV2Secrets config))
   let source = secretEnvironmentName reference
-  case Map.lookup (T.unpack source) ambient of
+  pure $ case Map.lookup (T.unpack source) ambient of
     Just value | not (null value) -> Right (T.pack value)
     _ ->
       Left

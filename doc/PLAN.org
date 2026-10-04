@@ -7616,7 +7616,7 @@ Emacs, TUI, and Pi service modes pass their native UI gates and cross-client/cro
 :LABELS:   ["wm-release-gate","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 17:57]
+:MODIFIED: [2026-10-03 Sat 18:07]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/G5
 :SOURCE_REPO: agent-cat
@@ -7869,6 +7869,13 @@ Full failure/capacity evidence, operational procedures, reproducible packages, r
     "author": "johnw",
     "text": "PH3 (2026-10-03, doc only): doc/workflow-manager-release-evidence.md (G5 and G3 rows) and the handoff section \"Phase G of 2026-10\" now record G5 as met for function on local macOS, citing PH1 e454fbd7 (PG18 lock links, $R/PH/PH1/impl-r1/npm-test.log, 220 passed), the PH2 runs of record ($R/PH/PH2/impl-r1/13-summary.log, 129 PASS, 0 FAIL, 0 MISSING) and the PH3 journey. Checks in $R/PH/PH3/impl-r1: make -C doc check exit 0, BUILD of agentic-run and routing-fixed-point-probe with -ftui-tests exit 0, JOURNEY-ONCE at N8 on 4d078647 with the doc change exit 0 (23 PASS lines), no agentic-run or probe process before or after. Not closed by a subtask. Remaining: the deferred security stage, the exercise of manager/OPERATIONS.md by another human operator, cross-machine evidence and the independent closure review. Production activation is not authorized. Fess ph-PH3-r1 non-blocking, findings in acat-t9ir.",
     "created_at": "2026-10-04T00:57:11Z"
+  },
+  {
+    "id": 790,
+    "issue_id": "acat-g5-u0w2",
+    "author": "johnw",
+    "text": "PH closeout (bacc4dc6). Verdicts for the functional G5 gate: met, met. G5 is met for function on local macOS. A gate is not closed from a subtask, and items remain that are not deferred security: the exercise of manager/OPERATIONS.md by another human operator (WM-042), cross-machine evidence, and the independent closure review. The security stage is deferred (acat-phase-g-deferred-security-1y4o). G3 stays partial through deferred security gates and the WM-028 database-full case. Production activation is not authorized. The PH commits e454fbd7, 4d078647, 821d25a7 and bacc4dc6 are not pushed. Evidence: resume-20260923/Z/CLOSEOUT-ph (doc-check.log, exit 0) and resume-20260923/PH.",
+    "created_at": "2026-10-04T01:07:47Z"
   }
 ]
 #+end_src
@@ -14448,7 +14455,7 @@ Open:
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-03 Sat 17:28]
-:MODIFIED: [2026-10-03 Sat 17:57]
+:MODIFIED: [2026-10-03 Sat 18:07]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -14472,6 +14479,13 @@ Non-blocking fess findings of subtask PH1 (PG18, the ext-pi lock link entries). 
     "author": "johnw",
     "text": "PH3 records the PH1 lock-file limits as a low open finding in doc/workflow-manager-handoff.md (section \"Phase G of 2026-10\", Open findings) and states that PG18 is done. The PG20 row of the handoff still describes the stale entries; acat-t9ir tracks that drift. Evidence: $R/PH/PH3/impl-r1.",
     "created_at": "2026-10-04T00:57:12Z"
+  },
+  {
+    "id": 794,
+    "issue_id": "acat-ph1-fess-followup-at5i",
+    "author": "johnw",
+    "text": "PH closeout review (bacc4dc6): finding raised to medium. A read-only npm ls --package-lock-only --offline --all over a scratch copy of ext-pi/package-lock.json exits 1 with 95 unmet dependency lines and 4 extraneous link entries. npm run check and npm test pass but do not read the lock file. A regeneration or pruning of the lock is a dependency change and needs operator authorization. Stays open.",
+    "created_at": "2026-10-04T01:07:52Z"
   }
 ]
 #+end_src
@@ -15173,7 +15187,7 @@ The PG22 findings R1 and R4 stay in acat-pg22-review-lows-ncss, and the missing 
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-03 Sat 15:48]
-:MODIFIED: [2026-10-03 Sat 15:48]
+:MODIFIED: [2026-10-03 Sat 18:07]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -15189,6 +15203,20 @@ The operator direction of 2026-09-30 (functionality first) deferred every securi
 - The WM-041 security part, WM-039 and WM-040 items carried from Phase F, and the items of the earlier phases (acat-phase-b2-deferred-security-k1hl, acat-phase-c-deferred-security-5eso, acat-phase-e-deferred-security-5jl4).
 
 An independent closure review of G5 follows the security stage.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 795,
+    "issue_id": "acat-phase-g-deferred-security-1y4o",
+    "author": "johnw",
+    "text": "PH closeout (bacc4dc6): the PH run did no security work and added no deferred item. The list is unchanged.",
+    "created_at": "2026-10-04T01:07:53Z"
+  }
+]
+#+end_src
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PD25
 :PROPERTIES:
@@ -15767,6 +15795,64 @@ Low:
 5. doc/workflow-manager-handoff.md:231-232: finding 4 of the end-of-increment review still describes the old flowBroker bypass. Mark it resolved when the review record is next revised.
 6. test/flow_probe.py:25: a re-wrapped docstring line is longer than the lines around it. Re-wrap the paragraph.
 
+* DONE [#C] Make bundled workflows run on a chosen model and fix routing first use
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-r1-engines-routing-l11r
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 23:39]
+:MODIFIED: [2026-10-03 Sat 23:39]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-03 Sat 23:39]
+:CLOSE_REASON: Acceptance met by recorded evidence (RD/R1)
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Readiness subtask R1 of 2026-10-03 (operator direction: functional readiness). Explicit live targets accept --model ID and --effort LEVEL, applied to the default answerer through the session/set_config_option preflight, and manager profile targetArguments accept the same flags. A new command, agentic-run adapter-options, prints the offered model and effort values of an adapter. Routing inspection reports an unset secret as credentialReady false and exits 0, the secrets key is optional, a missing routing file names the user file and the example file, and each warning appears once per engine with its remedy. cli/model-definitions.example.yaml is a minimal working form.
+
+Evidence: resume-20260923/RD/R1/impl-r1 (acceptance), fess/rd-R1-r1.md (audit, non-blocking), RD/R1/integrator (JOURNEY-ONCE(r1, 8) and check-prose on the final source).
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 797,
+    "issue_id": "acat-rd-r1-engines-routing-l11r",
+    "author": "johnw",
+    "text": "All acceptance items passed: RD/R1/impl-r1 and the audit reruns in fess/rd-R1-r1.md (no-routing-file forms rerun with an empty isolated XDG_CONFIG_HOME). JOURNEY-ONCE(r1, 8) and check-prose passed on the final source (RD/R1/integrator). Follow-ups: acat-rd-r1-fess-followup-y8oy.",
+    "created_at": "2026-10-04T06:39:48Z"
+  }
+]
+#+end_src
+
+* TODO [#D] Resolve the R1 engines and routing fess findings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-r1-fess-followup-y8oy
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-03 Sat 23:39]
+:MODIFIED: [2026-10-03 Sat 23:39]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of the R1 audit (resume-20260923/fess/rd-R1-r1.md).
+
+1. Medium. The stub default adapter resolves against the working directory. Outside the source root, 'run hello --engine acp' and 'adapter-options --adapter stub' exit 2 with "'python3' closed its output while the initialize handshake was outstanding", and the message does not name the missing stub file. Resolve the stub path against the installed or source location, or refuse with a message that names the missing stub file. This affects day-to-day use from other directories.
+2. Low. With no routing file, '--routing --persona X' and '--routing --refresh-models' exit 0 and ignore the option (Cli.hs about lines 1374-1389). Keep the refusal or print that the option has no effect.
+3. Low. RoutingDiscovery.hs:543: an unset catalogue-auth secret yields credential Nothing, and discovery would send the request without its auth header. Unreachable while https is refused. Skip discovery for an engine that is not credential-ready and record a warning.
+4. Low. The claude, codex and droid model values in cli/model-definitions.example.yaml ('default', 'gpt-5-codex', 'claude-sonnet-4-5') are unverified placeholders. Check them with adapter-options in an operator session.
+5. Low. The TUI routing pane shows 'routing inspection version is not 2' when no routing file exists (tui/src/Agentic/Tui/Types.hs:130). Accept the version-1 empty inspection and show its userFile and exampleFile.
+6. Evidence only. The implementer's a4 no-routing-file logs show a run with a routing file present, and the acceptance and journey logs predate the last Cli.hs edit. The audit reran the acceptance commands with an empty isolated XDG_CONFIG_HOME (all pass), and the Integrator reran JOURNEY-ONCE(r1, 8) on the final source (RD/R1/integrator, pass).
+The list-item semicolon finding in doc/model-routing-v2.md was fixed in the R1 commit.
+
 * DONE [#D] Give the remaining tool "cat" questions honest addressees
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -15898,7 +15984,7 @@ Service-liveness and halt fess reviews identify a source-proved ceiling: protect
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-29 Tue 06:02]
-:MODIFIED: [2026-09-29 Tue 06:02]
+:MODIFIED: [2026-10-03 Sat 23:39]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -15925,6 +16011,20 @@ Acceptance: an https catalogue endpoint refreshes through a verifying TLS manage
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 796,
+    "issue_id": "acat-routing-discovery-tls-3m8u",
+    "author": "johnw",
+    "text": "Readiness subtask R1 (2026-10-03) changed only the reporting of tls-not-supported: the warning now appears once per engine, names the engine, and gives the remedy (remove the https catalogue or use a loopback http catalogue). TLS stays refused, so this issue stays open. Evidence: resume-20260923/RD/R1/impl-r1 (a7-tls-warning-once*).",
+    "created_at": "2026-10-04T06:39:47Z"
   }
 ]
 #+end_src
@@ -25451,7 +25551,7 @@ legacy workflow build cannot conceal an unchecked manager development.
 :LABELS:   ["p9","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 17:57]
+:MODIFIED: [2026-10-03 Sat 18:07]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041
 :SOURCE_REPO: agent-cat
@@ -25747,6 +25847,13 @@ workloads rather than extrapolating unmeasured capacity.
     "author": "johnw",
     "text": "PH3 (2026-10-03, doc only): doc/workflow-manager-release-evidence.md (G5 and G3 rows) and the handoff section \"Phase G of 2026-10\" now record G5 as met for function on local macOS, citing PH1 e454fbd7 (PG18 lock links, $R/PH/PH1/impl-r1/npm-test.log, 220 passed), the PH2 runs of record ($R/PH/PH2/impl-r1/13-summary.log, 129 PASS, 0 FAIL, 0 MISSING) and the PH3 journey. Checks in $R/PH/PH3/impl-r1: make -C doc check exit 0, BUILD of agentic-run and routing-fixed-point-probe with -ftui-tests exit 0, JOURNEY-ONCE at N8 on 4d078647 with the doc change exit 0 (23 PASS lines), no agentic-run or probe process before or after. Not closed by a subtask. Remaining: the deferred security stage, the exercise of manager/OPERATIONS.md by another human operator, cross-machine evidence and the independent closure review. Production activation is not authorized. Fess ph-PH3-r1 non-blocking, findings in acat-t9ir.",
     "created_at": "2026-10-04T00:57:12Z"
+  },
+  {
+    "id": 788,
+    "issue_id": "acat-wm-041-17ax",
+    "author": "johnw",
+    "text": "PH closeout (bacc4dc6, handoff section \"Phase G of 2026-10\"). Verdicts for the WM-041 runs of record: met, met. Status: met for function on local macOS (PH2 runs of record, 129 PASS, 0 FAIL, 0 MISSING). Not closed under the package-closure rule: besides the deferred security part and root replacement (acat-phase-g-deferred-security-1y4o), non-security items remain that the plan dropped as functionality: partial frames beyond worker-pipe loss, randomized schedules, SQLite busy injection, credential changes under load, a true ENOSPC disk-full (file-size limit stands), Linux containment and repeated measurements. Stays open for the independent closure review. Evidence: resume-20260923/Z/CLOSEOUT-ph (doc-check.log, exit 0) and resume-20260923/PH.",
+    "created_at": "2026-10-04T01:07:44Z"
   }
 ]
 #+end_src
@@ -25758,7 +25865,7 @@ workloads rather than extrapolating unmeasured capacity.
 :LABELS:   ["p9","wm-checkpoint","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 15:48]
+:MODIFIED: [2026-10-03 Sat 18:07]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-041-core
 :SOURCE_REPO: agent-cat
@@ -25915,6 +26022,13 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
     "author": "johnw",
     "text": "Phase G closeout (99cef5cf, handoff section \"Phase G of 2026-10\"; evidence under resume-20260923/PG). Status: partial. The capacity runs of record wait for a host with no other manager (PIDs 61004, 111, 9444). See acat-wm-041-17ax. Stays open.",
     "created_at": "2026-10-03T22:48:36Z"
+  },
+  {
+    "id": 789,
+    "issue_id": "acat-wm-041-core-3vvz",
+    "author": "johnw",
+    "text": "PH closeout (bacc4dc6): the pre-G3 core capacity and safety evidence is covered by the PH2 runs of record (129 PASS, 0 FAIL, 0 MISSING). Stays open with WM-041 for the independent closure review. Evidence: resume-20260923/Z/CLOSEOUT-ph (doc-check.log, exit 0) and resume-20260923/PH.",
+    "created_at": "2026-10-04T01:07:46Z"
   }
 ]
 #+end_src
@@ -25926,7 +26040,7 @@ Publish precommitted workload and resource ceilings. All core advertised bounds 
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 15:48]
+:MODIFIED: [2026-10-03 Sat 18:07]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-042
 :SOURCE_REPO: agent-cat
@@ -26172,6 +26286,13 @@ recipe that ignores WAL or unresolved effects.
     "author": "johnw",
     "text": "Phase G closeout (99cef5cf, handoff section \"Phase G of 2026-10\"; evidence under resume-20260923/PG). Status: met for function (verdicts met, met): reload-profiles, drain, shutdown, backup, restore with fencing evidence, completion of an interrupted restoration, bounded status facts, manager/OPERATIONS.md and its automated exercise (PG5 to PG13, PG28). Not closed, because the completion criterion that another operator executes the procedures is not a security item and is pending. The security items are in acat-phase-g-deferred-security-1y4o.",
     "created_at": "2026-10-03T22:48:37Z"
+  },
+  {
+    "id": 791,
+    "issue_id": "acat-wm-042-sdg9",
+    "author": "johnw",
+    "text": "PH closeout (bacc4dc6): status unchanged, met for function apart from the exercise of manager/OPERATIONS.md by another human operator, which is pending. Stays open.",
+    "created_at": "2026-10-04T01:07:48Z"
   }
 ]
 #+end_src
@@ -26183,7 +26304,7 @@ recipe that ignores WAL or unresolved effects.
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 17:28]
+:MODIFIED: [2026-10-03 Sat 18:07]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-043
 :SOURCE_REPO: agent-cat
@@ -26342,6 +26463,13 @@ explicitly authorized operation.
     "author": "johnw",
     "text": "PH1 (PG18, operator approval of 2026-10-03) rewrites ext-pi/package-lock.json as a JSON-only edit, with no npm install, ci or update. The seven node_modules/@earendil-works registry entries (pi-ai, pi-client, pi-coding-agent, pi-protocol, pi-server, pi-telemetry, pi-tui) are now npm link entries to ../../fork/pi/packages/<dir>, relative to ~/src/agent-cat/ext-pi. A link entry for @earendil-works/chord is added. The nested registry subtree under pi-coding-agent/node_modules is deleted. Eight fork target entries at 0.99.1 are added from the fork package.json files. ext-pi/README.md and doc/workflow-manager-release-evidence.md state the current lock. Checks: npm run check exit 0, npm test exit 0 (220 passed, 29 skipped), make -C doc check exit 0. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/PH/PH1/impl-r1. Fess non-blocking: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/fess/ph-PH1-r1.md, filed as acat-ph1-fess-followup-at5i.",
     "created_at": "2026-10-04T00:28:32Z"
+  },
+  {
+    "id": 792,
+    "issue_id": "acat-wm-043-zm3d",
+    "author": "johnw",
+    "text": "PH closeout (bacc4dc6): status unchanged, met for function on aarch64-darwin. No review verdict for this package in the PH run, so it is not closed here. Its security items are deferred (acat-phase-g-deferred-security-1y4o), and Linux packaging did not run. Stays open for the independent closure review.",
+    "created_at": "2026-10-04T01:07:49Z"
   }
 ]
 #+end_src
@@ -26353,7 +26481,7 @@ explicitly authorized operation.
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 15:48]
+:MODIFIED: [2026-10-03 Sat 18:07]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-044
 :SOURCE_REPO: agent-cat
@@ -26886,6 +27014,13 @@ is ready, not that an operator has deployed it.
     "author": "johnw",
     "text": "Phase G closeout (99cef5cf, handoff section \"Phase G of 2026-10\"; evidence under resume-20260923/PG). Status: met for function (verdicts met, met): manual, inventories, API and version matrix (PG19), client documents and examples (PG20), release evidence matrix (PG21), integrated review with no critical or high finding (PG22), closeout review approve with notes. Not closed, because the completion criterion requires fresh evidence for every Section 12 requirement (G5 is partial on the WM-041 runs of record) and the independent human review is pending. Open findings: acat-phase-g-closeout-findings-qi6z, acat-pg22-review-lows-ncss, acat-gbh8. Security half deferred to acat-phase-g-deferred-security-1y4o.",
     "created_at": "2026-10-03T22:48:38Z"
+  },
+  {
+    "id": 793,
+    "issue_id": "acat-wm-044-6utw",
+    "author": "johnw",
+    "text": "PH closeout (bacc4dc6): the handoff and release evidence record the PH run and the G5 functional result; make -C doc check passed. The independent human review is pending and the security review is deferred. Stays open.",
+    "created_at": "2026-10-04T01:07:51Z"
   }
 ]
 #+end_src

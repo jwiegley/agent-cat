@@ -26,8 +26,8 @@ the `tier1` and live `bisim` executables.
 
 ## External behavior
 
-The command is `agentic-run` with top-level `--tui`, the verbs `list`, `help`,
-`plan`, `cost`, `run`, and the machine family `machine`, `machine-restart`,
+The command is `agentic-run` with top-level `--tui` and `--routing`, the verbs
+`list`, `help`, `plan`, `cost`, `run`, and `adapter-options`, and the machine family `machine`, `machine-restart`,
 `machine-resume`, `machine-fork`, and `lineage-check`. Exit status 0 is a
 completed command, 1 a usage or preflight refusal, 2 a transport failure, and 3
 a run abandoned over what arrived. `list --json` preserves descriptor version 2,
@@ -71,9 +71,32 @@ these definitions. Secret values come only from named environment variables,
 never YAML or argv, and selected ACP children receive a redacted environment
 overlay after declared source/destination variables are scrubbed. This is routing
 context, not an operating-system credential sandbox. Agent Deck receives no
-synthetic environment behavior. `model-definitions.example.yaml` is documentation
-rather than an automatic default and covers every `servedBy` profile in the
-bundled workflows.
+synthetic environment behavior. `model-definitions.example.yaml` is a minimal
+user file that works when it is copied to the user path. It defines one engine
+for each built-in adapter (`stub`, `claude`, `codex`, and `droid`) with no
+environment, catalogue, or secret, and it maps the five symbolic profiles of
+the bundled workflows in each persona. A commented section shows secrets and a
+loopback catalogue. No routing file is read automatically from the source tree.
+
+The `secrets` key of a version-2 user file is optional. An engine whose secret
+environment variable is unset resolves for inspection with `credentialReady`
+false, and `--routing` exits 0. A launch that needs that engine is refused with
+a message that names the persona, engine, secret, and environment variable.
+Inspection reports each catalogue warning once for each engine. With no routing
+file, `--routing` names the expected user file and the example file and exits
+0.
+
+## Adapter options
+
+An explicit ACP target accepts `--model ID` and `--effort LEVEL`. The CLI passes
+them to `Agentic.Acp` as an `AcpModelChoice` for the default answerer only. The
+engine validates each value against the option that the adapter advertises on
+`session/new` and applies it through `session/set_config_option` before each
+prompt, after one preflight session. `adapter-options --adapter ADAPTER
+[--json]` starts the adapter, reads the model and effort options of its first
+session, prints them, and exits without a prompt. Manager profiles accept the
+same flags in `targetArguments`, because profile validation uses the same
+target parser.
 
 ## Dependencies
 

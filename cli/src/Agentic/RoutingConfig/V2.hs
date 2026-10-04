@@ -328,7 +328,7 @@ instance FromJSON RoutingConfigV2 where
     unless (version == (2 :: Int)) (fail "user routing version is not 2")
     RoutingConfigV2
       <$> o .: "default-persona"
-      <*> o .: "secrets"
+      <*> (fromMaybe Map.empty <$> o .:? "secrets")
       <*> o .: "engines"
       <*> o .: "models"
       <*> o .: "personas"

@@ -211,10 +211,11 @@
 --   ends that turn and is dropped.
 -- * __No @session\/load@, no @session\/fork@ and no mode call.__ v1 opens
 --   sessions of its own. Symbolic model and mode axes remain request metadata.
---   When routing policy names a concrete model or generation setting,
---   'engineOfAcpConfigured' applies the adapter's advertised
---   @session\/set_config_option@ before the prompt. An unconfigured question
---   makes no such call. Capabilities are still read at the handshake.
+--   When routing policy or a command-line @--model@ names a concrete model or
+--   generation setting, 'engineOfAcpConfigured' applies the adapter's
+--   advertised @session\/set_config_option@ before the prompt. An
+--   unconfigured question makes no such call. Capabilities are still read at
+--   the handshake.
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
@@ -254,6 +255,8 @@ module Agentic.Acp
     engineOfAcp,
     engineOfAcpConfigured,
     preflightAcpModel,
+    AcpOfferedOptions (..),
+    offeredSessionOptions,
     sayAcp,
 
     -- * The calls
@@ -313,7 +316,7 @@ import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Char8 as BS
 import Data.List (find)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (catMaybes, mapMaybe)
 import qualified Data.ByteString.Lazy as BL
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.Map.Strict (Map)
@@ -611,7 +614,7 @@ renderAcpError = \case
   AcpRefused _ method err ->
     "ACP " <> method <> " failed: " <> renderRpcError err
   AcpConfiguration prog why ->
-    "'" <> prog <> "' cannot realize the requested routing profile: " <> why
+    "'" <> prog <> "' cannot apply the requested session options (model, effort or routing profile): " <> why
   AcpTimedOut prog ms what ->
     "'"
       <> prog
@@ -1476,12 +1479,44 @@ configOptionOf value = do
         _ -> []
   pure (ConfigOption optionId category optionType values)
 
--- | ACP realization: common engine constraints plus ACP config options.
-data AcpModelConfig = AcpModelConfig
-  { acpCommonModel :: !ModelConfig,
-    acpModelOptions :: !(Map Text Value)
+-- | The session settings applied before a question.
+data AcpModelConfig
+  = -- | ACP realization of routing policy: common engine constraints plus
+    -- ACP config options.
+    AcpModelConfig
+      { acpCommonModel :: !ModelConfig,
+        acpModelOptions :: !(Map Text Value)
+      }
+  | -- | A command-line choice: a value of the adapter's model option and a
+    -- value of its effort option, each passed verbatim. At least one is given.
+    AcpModelChoice !(Maybe Text) !(Maybe Text)
+  deriving (Eq, Show)
+
+-- | The model and effort options that an adapter advertises on a new session,
+-- each as its option id and offered values. 'Nothing' is an option the
+-- adapter does not advertise.
+data AcpOfferedOptions = AcpOfferedOptions
+  { offeredModelOption :: !(Maybe (Text, [Value])),
+    offeredEffortOption :: !(Maybe (Text, [Value]))
   }
   deriving (Eq, Show)
+
+-- | The model and effort options of the current session, as 'withAcp' opened
+-- it. No prompt is sent and no option is changed.
+offeredSessionOptions :: Acp -> IO AcpOfferedOptions
+offeredSessionOptions acp = do
+  options <- readIORef (acpConfigOptions acp)
+  let offered (categories, ids) = (\option -> (configOptionId option, configOptionValues option)) <$> findConfigOption categories ids options
+  pure (AcpOfferedOptions (offered modelOptionKeys) (offered effortOptionKeys))
+
+-- | How the model and effort options are found: by category, or by id.
+modelOptionKeys, effortOptionKeys :: ([Text], [Text])
+modelOptionKeys = (["model"], ["model"])
+effortOptionKeys = (["thought_level", "thinking"], ["effort", "thinking", "thought_level"])
+
+findConfigOption :: [Text] -> [Text] -> [ConfigOption] -> Maybe ConfigOption
+findConfigOption categories ids =
+  find (\option -> maybe False (`elem` categories) (configOptionCategory option) || configOptionId option `elem` ids)
 
 -- | Prove one realization on a throwaway session before the scheduler starts.
 -- This checks both the advertised catalogue and every setter response; no prompt
@@ -1498,10 +1533,20 @@ configureSession acp realization = do
   mapM_ (uncurry (setConfigOption acp sid)) desired
 
 desiredConfiguration :: Acp -> AcpModelConfig -> IO [(ConfigOption, Value)]
+desiredConfiguration acp (AcpModelChoice model effort) = do
+  options <- readIORef (acpConfigOptions acp)
+  modelSetting <- traverse (\value -> (\option -> (option, String value)) <$> required "model" modelOptionKeys options) model
+  effortSetting <- traverse (\value -> (\option -> (option, String value)) <$> required "effort" effortOptionKeys options) effort
+  let desired = catMaybes [modelSetting, effortSetting]
+  mapM_ (uncurry (validateConfigOption acp)) desired
+  pure desired
+  where
+    required label (categories, ids) options =
+      maybe (configurationError acp (label <> " is not advertised by this adapter")) pure (findConfigOption categories ids options)
 desiredConfiguration acp (AcpModelConfig realization customOptions) = do
   options <- readIORef (acpConfigOptions acp)
-  model <- required "model" ["model"] ["model"] options
-  thinkingOption <- required "thinking" ["thought_level", "thinking"] ["effort", "thinking", "thought_level"] options
+  model <- required "model" (fst modelOptionKeys) (snd modelOptionKeys) options
+  thinkingOption <- required "thinking" (fst effortOptionKeys) (snd effortOptionKeys) options
   maxOutputSetting <- case modelMaxOutput realization of
     Nothing -> pure []
     Just wanted -> do
@@ -1526,7 +1571,7 @@ desiredConfiguration acp (AcpModelConfig realization customOptions) = do
   pure desired
   where
     required label categories ids options =
-      case find (\option -> maybe False (`elem` categories) (configOptionCategory option) || configOptionId option `elem` ids) options of
+      case findConfigOption categories ids options of
         Just option -> pure option
         Nothing -> configurationError acp (label <> " is not advertised by this adapter")
 
@@ -1544,7 +1589,8 @@ validateConfigOption acp option value = do
       )
 
 setConfigOption :: Acp -> Text -> ConfigOption -> Value -> IO ()
-setConfigOption acp sid option value =
+setConfigOption acp sid option value = do
+  chat (acpConfig acp) ("session " <> sid <> ": set " <> configOptionId option <> " = " <> compact value)
   void $
     request
       acp
@@ -1662,13 +1708,14 @@ steerTurn acp timing text =
 -- The engine
 -- ---------------------------------------------------------------------------
 
-data AcpEngine = AcpEngine (Text -> Maybe AcpModelConfig) AcpConfig Acp
+data AcpEngine = AcpEngine (Maybe Text -> Maybe AcpModelConfig) AcpConfig Acp
 
 engineOfAcp :: AcpConfig -> Acp -> AcpEngine
 engineOfAcp = engineOfAcpConfigured (const Nothing)
 
 -- | Apply a CLI-resolved model configuration selected by symbolic model axis.
-engineOfAcpConfigured :: (Text -> Maybe AcpModelConfig) -> AcpConfig -> Acp -> AcpEngine
+-- A question with no model axis is offered to the selector as 'Nothing'.
+engineOfAcpConfigured :: (Maybe Text -> Maybe AcpModelConfig) -> AcpConfig -> Acp -> AcpEngine
 engineOfAcpConfigured = AcpEngine
 
 instance Engine AcpEngine where
@@ -1687,9 +1734,9 @@ instance Engine AcpEngine where
   enginePublicRedactionValues (AcpEngine _ cfg _) = case acpChildEnvironment cfg of
     InheritChildEnvironment -> []
     ExplicitChildEnvironment _ values -> values
-configureRequest :: (Text -> Maybe AcpModelConfig) -> Acp -> EngineRequest -> IO ()
+configureRequest :: (Maybe Text -> Maybe AcpModelConfig) -> Acp -> EngineRequest -> IO ()
 configureRequest select acp engineReq =
-  case engineModelAxis engineReq >>= select of
+  case select (engineModelAxis engineReq) of
     Nothing -> pure ()
     Just realization -> configureSession acp realization
 
