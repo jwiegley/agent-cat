@@ -2481,7 +2481,7 @@ The TypeScript extension under @file{ext-pi/} has its own checks:
 cd ext-pi
 npm run check
 npm test
-AGENT_CAT_E2E_RUNNER="$(cd .. && nix develop path:. -c cabal list-bin agentic-run)" npm run test:integration
+AGENT_CAT_E2E_RUNNER="$(cd .. && direnv exec . bash test/cabal.sh list-bin agentic-run)" npm run test:integration
 @end example
 
 The packages under @file{ext-pi/node_modules/@@earendil-works} are symbolic links

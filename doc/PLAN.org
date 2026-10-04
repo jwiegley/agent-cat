@@ -16052,6 +16052,65 @@ Non-blocking findings of fess audit fess/rd-R4-r1.md on readiness subtask R4 (Em
 6. Disclosed. The emacs-service modes of manager/test/service_http.py (wf-manager-live.el drivers) were not run after the run view began to open after approval.
 7. Disclosed. A discarded request becomes a draft and wf-requests keeps listing it. The API has no command that deletes a draft.
 
+* TODO [#D] Resolve the R5 Pi extension fess findings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-r5-fess-followup-woyy
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 02:04]
+:MODIFIED: [2026-10-04 Sun 02:04]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/rd-R5-r1.md on readiness subtask R5 (Pi extension), with the implementer's disclosed limitations.
+
+1. Medium. manager/test/service_http.py:15933 and 18651-18652, ext-pi/test/manager-ui-live.test.ts:880: the changed harness expectations (pi-host step 7 uses workflow["name"], cross-client-lineage reads /v1/workflows/ID) were only syntax-checked. manager-ui-live.test.ts:880 treats the first token of every line after the history header as a run ID, so the "Workflow names: ..." failure line would break it. Run the pi-host harness mode once and make the live test ignore or reject that line.
+2. Low. ext-pi/src/index.ts:1396-1400: commandTableText sits between the JSDoc of updateWidget and updateWidget. Move it above that comment.
+3. Low. ext-pi/test/service-mode.test.ts:757: the test "keeps the workflow identifier when the catalogue does not name the workflow" exercises only a failed read (404). Rename it and add a case where the catalogue loads without the ID.
+4. Low. ext-pi/README.md (Install and start, step 2, alias paragraph): the pi -e line that agentic-run --manager init prints contains the placeholder AGENT_CAT_CHECKOUT, so it does not run as printed. Say to replace it with $AGENT_CAT, or make init print the real checkout path.
+5. Low. ext-pi/src/service-mode.ts (void this.loadWorkflowNames()): floating promise. If ManagerSession.pageSet can reject, catch the error in #loadNames and return it as a failure.
+6. Low. r5-pi.log:536-571: the workflow name in /wfm-status is proven only by a unit test. Run /wfm-status once with an active service run.
+
+Limitations disclosed by the implementer: README step 1 ran through the private environment, not plain direnv exec . (the worktree .envrc sets a different CABAL_BUILDDIR). The real-provider steps were not run (no paid provider). manager-ui-live.test.ts and the ext-pi integration suite were not run. One transient GET /v1/snapshot 503 storage-unavailable (StoreBusy) appeared during the person run and recovered; whether the new catalogue reads made it more likely is not determined.
+
+* DONE [#C] Add the Pi extension install-and-start path and command fixes
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-r5-pi-extension-f1o3
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 02:04]
+:MODIFIED: [2026-10-04 Sun 02:04]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-04 Sun 02:04]
+:CLOSE_REASON: Acceptance met by recorded evidence (RD/R5)
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Readiness subtask R5 of 2026-10-03 (operator direction: functional readiness). The Pi extension has an install-and-start path and small command fixes. ext-pi/README.md opens with "Install and start": the AGENT_CAT and PI_FORK variables, building the runner and exporting AGENT_CAT_RUNNER, starting the built Pi fork with node "$PI_FORK/packages/coding-agent/dist/cli.js" -e "$AGENT_CAT/ext-pi/src/index.ts", an optional pi alias, choosing a provider and model, the offline faux trial with AGENT_CAT_FAUX_SCRIPT, an environment-variable table, a first local run (/wf-launch hello) and a first service run (agentic-run --manager init, serve, AGENT_CAT_MANAGER_PROFILE, /wfm hello, approval, history, shutdown). A bare /wf-help prints the agent-cat command table built from the registrations in src/index.ts. The /wf refusal outside Agent Deck names /wf-launch RUNNER:WORKFLOW. The credential example uses profileIds ["scripted"] and states that each ID must name a configured profile. The status widget, /wfm-status and /wfm-history show the workflow name from the profile catalogues, with the identifier as a fallback. The /wfm review opens with a plan summary, and the exact plan JSON is the last section, reached with j. Terminal runs already read "supervision owned" after R3, so no supervision change was needed. The nix develop line in ext-pi/README.md and doc/agent-cat.texi now uses direnv exec . bash test/cabal.sh list-bin agentic-run. The host version pin is unchanged.
+
+Evidence: resume-20260923/RD/R5/impl-r1 (tsc exit 0; ext-pi unit tests 222 passed, the only failure is host-versions.test.ts, excluded on the 1.0.1 fork; isolated Pi session r5-pi.log with the faux provider), fess/rd-R5-r1.md (audit, non-blocking).
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 803,
+    "issue_id": "acat-rd-r5-pi-extension-f1o3",
+    "author": "johnw",
+    "text": "All acceptance items passed: RD/R5/impl-r1 (npx tsc --noEmit exit 0; ext-pi unit tests 222 passed with the one known host-versions.test.ts failure excluded; isolated Pi session r5-pi.log with an isolated HOME and PI_CODING_AGENT_DIR and the faux provider, following the README: bare /wf-help lists the commands, /wf names /wf-launch, /wf-launch hello succeeds, Manager connected, /wfm hello succeeds, /wfm-history shows hello). The audit fess/rd-R5-r1.md reran tsc (exit 0) and the three changed vitest files (72 passed) and found nothing blocking. Follow-ups: acat-rd-r5-fess-followup-woyy.",
+    "created_at": "2026-10-04T09:04:56Z"
+  }
+]
+#+end_src
+
 * DONE [#D] Give the remaining tool "cat" questions honest addressees
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

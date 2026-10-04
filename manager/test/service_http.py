@@ -1864,7 +1864,7 @@ EMACS_SERVICE_FALSE = "JOURNEY-ASSERT Emacs answer is JSON false"
 #    q quits the TUI without y, with exit status 0 and the terminal
 #    restored, and the child waits in review with its preparation live.
 # 4. Pi starts through PiHost with the client profile of the pi credential.
-#    /wfm-history lists the two managed runs, each with its workflow, its
+#    /wfm-history lists the two managed runs, each with its workflow name, its
 #    profile, its status and its supervision, in the order of every page of
 #    GET /v1/runs.
 # 5. /wfm-review REQUEST in the same Pi opens the child request. Pi shows
@@ -15930,10 +15930,10 @@ def pi_host_checks():
                     # 7. The history.
                     session.send(b"/wfm-history\r")
                     shown(["History: 1 managed runs and 0 observer entries",
-                           run + " " + workflow["id"] + " profile profile_1 succeeded, supervision", "result verified"], 30,
+                           run + " " + workflow["name"] + " profile profile_1 succeeded, supervision", "result verified"], 30,
                           "/wfm-history did not list the run as a succeeded managed run")
                     pi.save_screen("history")
-                    print("PASS pi-host 7: /wfm-history listed run", run, "of", workflow["id"], "as the one managed run, succeeded with a verified result",
+                    print("PASS pi-host 7: /wfm-history listed run", run, "of", workflow["name"], "as the one managed run, succeeded with a verified result",
                           flush=True)
 
                     # 8. The restart child, its lineage review and its approval by key.
@@ -15959,7 +15959,7 @@ def pi_host_checks():
                     assert child_preparation["review"]["lineage"] == {"parentRunId": run, "operation": "restart", "edits": []}, (
                         "the lineage of the child review", child_preparation["review"].get("lineage"))
                     shown(["Review of request " + child_id + ", preparation " + child_preparation["id"]], 45, "Pi showed no review of the child")
-                    # The lineage line ends the review, so j scrolls to it.
+                    # The lineage row follows the consent facts, and j scrolls until it shows.
                     lineage_row = "Lineage: restart of run " + run
                     deadline = time.monotonic() + 15
                     while not any(line.strip() == lineage_row for line in session.screen.lines()):
@@ -18648,7 +18648,8 @@ def cross_client_lineage_checks():
                 rows = []
                 for run in history:
                     item, _, _ = observed("/v1/runs/" + run, "Run")
-                    rows.append(f"  {run}  {item['workflowId']}  profile {item['profileId']}  succeeded, supervision {item['supervision']}")
+                    named, _, _ = observed("/v1/workflows/" + item["workflowId"], "Workflow")
+                    rows.append(f"  {run}  {named['name']}  profile {item['profileId']}  succeeded, supervision {item['supervision']}")
                 screen = shown([header] + rows + ["result verified"], 45, "/wfm-history did not list the runs of the fixture")
                 listed = squeeze(screen)
                 after = listed.rindex(squeeze(header))

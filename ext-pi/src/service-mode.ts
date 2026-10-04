@@ -11,6 +11,11 @@
  * monitor, no local process and no local run store, and it grants no
  * supervision or control authority.
  *
+ * Service mode also reads the workflow catalogue of the manager, so that
+ * the widget, `/wfm-status` and `/wfm-history` name the workflow of each run
+ * and request. It reads the catalogue when an observation names a workflow
+ * identifier that it has not yet read, and once for each history.
+ *
  * `ServiceMode` sends no manager command. The commands of
  * `src/manager-ui.ts` send commands through its session, and the live
  * monitor of `/wfm-monitor` follows its changes through `subscribe`.
@@ -26,7 +31,7 @@
  */
 
 import type { ClientFailure } from "./manager/events.ts";
-import { isJsonArray, jsonMember } from "./manager/json.ts";
+import { isJsonArray, isJsonObject, jsonMember } from "./manager/json.ts";
 import { ClientProfile } from "./manager/profile.ts";
 import type { DecisionState, RequestPhase, RunStatus, SupervisionState } from "./manager/resources.ts";
 import { ManagerSession, type DeliveryState, type Reference, type SessionOptions } from "./manager/session.ts";
@@ -77,6 +82,14 @@ export type ServiceDecisionView = {
   readonly state: DecisionState;
   readonly kind: "question" | "recovery";
 };
+
+/**
+ * The workflow names of a catalogue read, by workflow identifier, and the
+ * failure of the first catalogue that could not be read.
+ *
+ * @public
+ */
+export type WorkflowNames = { readonly names: ReadonlyMap<string, string>; readonly failure: ClientFailure | undefined };
 
 /**
  * The connection of service mode. `refused` follows an unsupported profile,
@@ -173,6 +186,14 @@ export class ServiceMode {
   #runs = new Map<string, ServiceRunView>();
   #requests = new Map<string, ServiceRequestView>();
   #decisions = new Map<string, ServiceDecisionView>();
+  /** The endpoint identity of the binding whose catalogue gave `#names`. */
+  #namesOf: string | undefined;
+  /** The workflow names of the catalogue, by workflow identifier. */
+  #names = new Map<string, string>();
+  /** The workflow identifiers that the last catalogue read did not name. They cause no further read. */
+  #unnamed = new Set<string>();
+  /** The catalogue read in flight. */
+  #naming: Promise<WorkflowNames> | undefined;
   readonly #listeners = new Set<() => void>();
   /** The selection lane: one selection at a time, in order. */
   #lane: Promise<unknown> = Promise.resolve();
@@ -218,6 +239,69 @@ export class ServiceMode {
   /** The decision heads of the active binding, in overview order. */
   decisions(): ServiceDecisionView[] {
     return [...this.#decisions.values()];
+  }
+
+  /** The name of a workflow from the catalogue of the active binding, or its identifier when the catalogue does not name it. */
+  workflowLabel(workflowId: string): string {
+    return this.#names.get(workflowId) ?? workflowId;
+  }
+
+  /**
+   * Read the workflow catalogue of the active binding,
+   * `/v1/workflows?profileId=ID` over all its pages for each profile that
+   * the manager grants this client, and give the name of each workflow by
+   * its identifier. The names also serve `workflowLabel`. A catalogue that
+   * cannot be read gives its failure beside the names of the others. A read
+   * that is in flight is shared.
+   */
+  loadWorkflowNames(): Promise<WorkflowNames> {
+    this.#naming ??= this.#loadNames().finally(() => {
+      this.#naming = undefined;
+    });
+    return this.#naming;
+  }
+
+  async #loadNames(): Promise<WorkflowNames> {
+    const session = this.#session;
+    if (session === undefined) return { names: new Map(), failure: { kind: "ClientClosed" } };
+    const asked = this.#observedWorkflows();
+    const granted = jsonMember(session.capabilities, "profileIds");
+    const profiles = granted !== undefined && isJsonArray(granted) ? granted.filter((id) => typeof id === "string") : [];
+    const found = new Map<string, string>();
+    let failure: ClientFailure | undefined;
+    for (const profile of profiles) {
+      const reference = session.reference(`/v1/workflows?profileId=${encodeURIComponent(profile)}`);
+      const read = reference.ok ? await session.pageSet(reference.value) : reference;
+      if (!read.ok) {
+        failure ??= read.failure;
+        continue;
+      }
+      for (const item of read.value.items) {
+        if (!isJsonObject(item)) continue;
+        const id = jsonMember(item, "id");
+        const name = jsonMember(item, "name");
+        if (typeof id === "string" && typeof name === "string") found.set(id, name);
+      }
+    }
+    // A switch of the binding during the read discards it.
+    if (session !== this.#session || session.identity !== this.#namesOf) return { names: new Map(), failure: { kind: "WrongEndpoint" } };
+    for (const id of asked) if (!found.has(id)) this.#unnamed.add(id);
+    let added = false;
+    for (const [id, name] of found) {
+      this.#unnamed.delete(id);
+      if (this.#names.get(id) !== name) added = true;
+      this.#names.set(id, name);
+    }
+    if (added) this.#changed();
+    return { names: new Map(this.#names), failure };
+  }
+
+  /** The workflow identifiers of the observed runs and requests. */
+  #observedWorkflows(): Set<string> {
+    const ids = new Set<string>();
+    for (const run of this.#runs.values()) if (run.workflowId !== null) ids.add(run.workflowId);
+    for (const request of this.#requests.values()) ids.add(request.workflowId);
+    return ids;
   }
 
   /**
@@ -381,6 +465,12 @@ export class ServiceMode {
         }
       }
     }
+    if (this.#namesOf !== session.identity) {
+      this.#namesOf = session.identity;
+      this.#names = new Map();
+      this.#unnamed = new Set();
+    }
+    if ([...this.#observedWorkflows()].some((id) => !this.#names.has(id) && !this.#unnamed.has(id))) void this.loadWorkflowNames();
     this.#changed();
   }
 

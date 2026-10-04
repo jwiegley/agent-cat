@@ -71,6 +71,26 @@ describe("manager review", () => {
     ]) expect(lines).toContain(expected);
   });
 
+  it("opens with a summary of a JSON plan and ends with the exact plan", () => {
+    const plan = JSON.stringify({
+      name: "hello", blurb: "two questions and an act", askNodes: 3, inputs: [{ name: "topic" }], result: "receipt",
+      capabilities: { effects: 1, effectful: true, toolExecution: false }, program: { main: {} },
+    });
+    const base = preparation();
+    const lines = reviewLines({ ...base, review: { ...base.review, plan } }, '"etag-1"');
+    expect(lines.slice(1, 5)).toEqual([
+      "Summary: workflow hello, two questions and an act",
+      "  3 request nodes, 1 effect, tool execution no, inputs topic, result receipt",
+      "  Target: Deterministic scripted",
+      "  The exact review follows. The exact plan JSON is its last section, and j scrolls to it.",
+    ]);
+    expect(lines.slice(-2)).toEqual(["Plan:", `  ${plan}`]);
+    // A plan that is not a JSON descriptor has no summary, and the exact plan still ends the review.
+    const plain = reviewLines(base, '"etag-1"');
+    expect(plain[1]).toBe("Approval selectors:");
+    expect(plain.slice(-3)).toEqual(["Plan:", "  step one asks the model", "  step two stops"]);
+  });
+
   it("wraps and scrolls the complete review and ends with the choice of a key", () => {
     const requestRender = vi.fn();
     const tui = { terminal: { rows: 12 }, requestRender } as never;

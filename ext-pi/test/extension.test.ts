@@ -263,6 +263,8 @@ describe("Pi extension lifecycle", () => {
         ui: { notify: (message: string) => notices.push(message), select: () => { throw new Error("must not prompt"); } },
       });
       expect(notices).toEqual([expect.stringContaining("AGENTDECK_INSTANCE_ID is unavailable")]);
+      // The refusal names the command that launches outside Agent Deck.
+      expect(notices[0]).toContain("/wf-launch RUNNER:WORKFLOW");
     } finally {
       if (previousDeckSession === undefined) delete process.env.AGENTDECK_INSTANCE_ID;
       else process.env.AGENTDECK_INSTANCE_ID = previousDeckSession;
@@ -288,6 +290,12 @@ describe("Pi extension lifecycle", () => {
       ]);
       await commands.get("wf")!.handler("fixture", ctx);
       expect(notices.at(-1)).toContain("requires interactive approval");
+      // A bare /wf-help lists every agent-cat command with its description.
+      await commands.get("wf-help")!.handler("  ", ctx);
+      const table = notices.at(-1)!.split("\n");
+      expect(table[0]).toBe("agent-cat commands. /wf-help RUNNER:WORKFLOW shows the help of one workflow.");
+      expect(table.slice(1).map((line) => line.trim().split(/\s+/)[0]).sort()).toEqual([...commands.keys()].map((name) => `/${name}`).sort());
+      expect(table).toContain("  /wf-launch  Run an agent-cat workflow with an explicit execution target");
       for (const name of ["wfm", "wfm-review", "wfm-withdraw", "wfm-discard", "wfm-monitor", "wfm-answer", "wfm-cancel", "wfm-steer", "wfm-redirect",
         "wfm-result", "wfm-history", "wfm-restart", "wfm-resume", "wfm-fork", "wfm-export"]) {
         await commands.get(name)!.handler("", ctx);

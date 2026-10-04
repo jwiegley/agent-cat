@@ -7,6 +7,123 @@ inputs and launches the runner in machine mode. It reduces the event stream of
 the runner into a live monitor, delivers controls, and keeps durable references
 to runs. It never searches the file system or `PATH` for a runner.
 
+## Install and start
+
+These steps load the extension into the built Pi fork for daily use. The
+fork is the supported host, as the section "Supported host" states. Node 22
+must be on `PATH`, and the agent-cat checkout must have its direnv
+environment, as the `README.md` of the repository states. Two shell
+variables name the checkouts. Set them to absolute paths:
+
+```sh
+AGENT_CAT=/absolute/path/to/agent-cat
+PI_FORK=/absolute/path/to/pi
+```
+
+1. Build the runner once, and export its path. Repeat the build after a
+   change of the source:
+
+   ```sh
+   (cd "$AGENT_CAT" && direnv exec . bash test/cabal.sh build agentic-run)
+   export AGENT_CAT_RUNNER="$(cd "$AGENT_CAT" && direnv exec . bash test/cabal.sh list-bin agentic-run)"
+   ```
+
+2. Start Pi with the extension in the directory of the project:
+
+   ```sh
+   cd /absolute/path/to/project
+   node "$PI_FORK/packages/coding-agent/dist/cli.js" -e "$AGENT_CAT/ext-pi/src/index.ts"
+   ```
+
+   Pi asks whether to trust the project folder. Select `Trust`, because
+   every launch of a workflow requires a trusted project. Pi then lists
+   `src` under `[Extensions]`. An alias makes this the daily command, and
+   the `pi -e` line that `agentic-run --manager init` prints then also
+   starts the fork:
+
+   ```sh
+   alias pi="node $PI_FORK/packages/coding-agent/dist/cli.js"
+   ```
+
+3. Choose the provider and the model of the Pi conversation. `/login` in Pi
+   connects a provider subscription or an API key, and `/model` selects a
+   model. The options `--provider NAME --model ID` select them on the
+   command line. The conversation model reads the replies of the
+   `agent_cat_workflow` tool. A workflow runs on the execution target that
+   `/wf-launch` selects, or on the target of the manager profile.
+
+For an offline trial without a provider, start Pi with the local faux
+provider instead. `AGENT_CAT_FAUX_SCRIPT` names its script file, and an
+empty file gives fixed text replies:
+
+```sh
+export AGENT_CAT_FAUX_SCRIPT="$(mktemp)"
+node "$PI_FORK/packages/coding-agent/dist/cli.js" --offline \
+  -e "$AGENT_CAT/ext-pi/src/index.ts" -e "$AGENT_CAT/ext-pi/test/fixtures/faux-model.ts" \
+  --provider agent-cat-faux --model faux-1
+```
+
+These environment variables configure the extension. The section
+"Configuration" states the others.
+
+| Variable | Purpose |
+|---|---|
+| `AGENT_CAT_RUNNER` | The absolute path of `agentic-run`. Local runs require it. |
+| `AGENT_CAT_MANAGER_PROFILE` | The absolute path of a client profile. It starts service mode. |
+| `AGENT_CAT_STATE_DIR` | The local run store. The default is `~/.pi/agent/agent-cat`. |
+| `AGENT_CAT_FAUX_SCRIPT` | The script of the faux provider of the offline trial. |
+
+`/wf-help` lists every agent-cat command.
+
+### First local run
+
+In Pi, type `/wf-launch hello`. Select `scripted (offline, no commands)` as
+the execution target, and select `Yes` in `Launch agent-cat workflow?`. Pi
+shows `Started hello as RUN_ID`, and then `agent-cat RUN_ID: succeeded
+hello`. `/wf-monitor RUN_ID` shows the occurrences of the run. The local
+`/wf` command runs only inside Agent Deck, and outside it the message names
+`/wf-launch`.
+
+### First service run
+
+Service mode runs workflows through the agent-cat manager. Create a manager
+root once. The command writes the configuration, a certificate for
+`127.0.0.1`, a credential and the client profile `client/profile.json`, and
+prints the commands that start and stop the manager:
+
+```sh
+"$AGENT_CAT_RUNNER" --manager init --root "$HOME/agent-cat-manager"
+```
+
+Start the manager in a second terminal. It stays in the foreground and
+prints `manager listening on https://127.0.0.1:8443/v1`:
+
+```sh
+"$HOME/agent-cat-manager/bin/agentic-run" --manager serve --config "$HOME/agent-cat-manager/serve.json"
+```
+
+Export the client profile, and start Pi as in step 2:
+
+```sh
+export AGENT_CAT_MANAGER_PROFILE="$HOME/agent-cat-manager/client/profile.json"
+```
+
+Pi shows `Manager connected: https://127.0.0.1:8443/v1`. In Pi, type
+`/wfm hello` and select the profile `scripted`. The review opens with a
+summary of the workflow and its target, and the exact review follows. Press
+`a`, and select `Yes` in `Approve this exact review?`. Pi shows
+`Execution: the manager started run RUN_ID`. `/wfm-monitor RUN_ID` shows
+`Terminal: succeeded` and the verified result, and `/wfm-history` lists the
+run with its workflow name.
+
+To stop the manager, send it a `shutdown` request. The run records stay in
+the manager root:
+
+```sh
+printf '%s' '{"version": 1, "operation": "shutdown"}' \
+  | "$HOME/agent-cat-manager/bin/agentic-run" --manager admin --config "$HOME/agent-cat-manager/serve.json"
+```
+
 ## Boundary
 
 Pi loads `src/index.ts`, which registers the `/wf` command, the
@@ -697,12 +814,17 @@ summaries and are ignored. Engines that report no optional progress acquire none
 
 `/wf` requires Pi to run inside Agent Deck. It reads the inherited
 `AGENTDECK_INSTANCE_ID`, and it never scans for another Agent Deck session or
-asks the user to name one.
+asks the user to name one. Outside Agent Deck, `/wf` refuses, and its
+message names `/wf-launch RUNNER:WORKFLOW`, which runs a workflow on another
+execution target.
 
 ## Service configuration
 
 Service mode needs a running agent-cat manager with HTTPS, a client
-credential for each client and a client profile for each credential. The
+credential for each client and a client profile for each credential.
+`agentic-run --manager init` creates all of them, as the section "First
+service run" states and `manager/OPERATIONS.md` describes. For a manager
+that is configured by hand, the
 manager configuration names the HTTPS address, the certificate and key, the
 allowed hosts and peers, and the profiles, as `manager/CONFIGURATION.md`
 states. The operator starts the manager with this command:
@@ -716,9 +838,13 @@ request names the scopes and the profile identifiers of the credential, and
 the manager writes the bearer into the private output file:
 
 ```sh
-echo '{"version":1,"operation":"issue-credential","label":"Pi","scopes":["observe","submit","control"],"profileIds":["profile_1"],"expiresAt":"2999-01-01T00:00:00Z","outputFile":"/absolute/path/to/credential"}' \
+echo '{"version":1,"operation":"issue-credential","label":"Pi","scopes":["observe","submit","control"],"profileIds":["scripted"],"expiresAt":"2999-01-01T00:00:00Z","outputFile":"/absolute/path/to/credential"}' \
   | agentic-run --manager admin --config /absolute/path/to/configuration.json
 ```
+
+Each identifier in `profileIds` must name a profile of the configuration,
+and the manager refuses an unknown identifier with `state-conflict`. The
+configuration that `init` writes has the profiles `scripted` and `person`.
 
 The client profile names the endpoint, that credential file and the CA file
 that signed the certificate of the manager, as the section "Manager client"
@@ -770,14 +896,19 @@ connection or of the observations, and the live monitor uses it.
 | `/wfm-steer [RUN_ID]` | Steer an attempt that the controls of the run offer for steering. |
 | `/wfm-redirect [RUN_ID]` | Redirect an occurrence to a target that the controls of the run offer, in its dispatch window or for its attempt in flight. |
 | `/wfm-result [RUN_ID [PATH]]` | Retrieve the verified result of a succeeded run and save its exact bytes to a new file, as the section "Results, history, lineage and exports in service mode" states. |
-| `/wfm-history` | List every run of `/v1/runs` over all its pages, with legacy entries labelled observer. |
+| `/wfm-history` | List every run of `/v1/runs` over all its pages with the name of its workflow, with legacy entries labelled observer. |
 | `/wfm-restart [RUN_ID]` | Create a restart child request of a run, show its exact review with its lineage, and start the child run after an approval. |
 | `/wfm-resume [RUN_ID]` | Create a resume child request of a run, show its exact review with its lineage, and start the child run after an approval. |
 | `/wfm-fork [RUN_ID]` | Collect fork edits, create a fork child request of a run, show its exact review with its lineage, and start the child run after an approval. |
 | `/wfm-export [RUN_ID [NAME]]` | Export the verified result of a run under a name, verify the exported bytes, and list the exports of the run. |
 
 The status widget lists active local runs and active service runs in
-separate sections, and the status line counts each kind.
+separate sections, and the status line counts each kind. Each service run
+shows its status, its identifier and the name of its workflow. Service mode
+reads the workflow catalogue `/v1/workflows` when an observed run or request
+names a workflow identifier that it has not read, and the widget and
+`/wfm-status` then show the name. A workflow that the catalogue does not
+name shows its identifier.
 
 A switch with `/wfm-endpoints` uses `ManagerSession.switchEndpoint`. The
 switch commits only after the complete overview of the new endpoint loads.
@@ -864,15 +995,19 @@ binding and refuses while the manager is not connected.
 5. It enqueues the request and follows it. Each change of the phase, the
    admission state, the queue position or the blocking reasons gives one
    notification, until the request is in `review` with a live preparation.
-6. It shows the review component. The component lists the complete exact
-   review: the five approval selectors (`reviewDigest`, `requestRevision`,
-   `profileRevision`, `descriptorRevision` and `processGeneration`), the
-   entity tag that the approval binds as `If-Match`, the program SHA-256,
-   the person answering, the workflow, the profile, the workspace, the
-   target, the policy, the result code, each input with its source, size and
-   SHA-256, the plan, the run facts, the pins, the warnings, and the lineage
-   when the review has one. It wraps long lines and scrolls with `j`, `k` and
-   the arrow keys. Outside the Pi TUI, the review is a notification, and a
+6. It shows the review component. When the plan is the JSON workflow
+   descriptor of the runner, the review opens with a summary: the workflow
+   name and blurb, the number of request nodes, the effects, tool
+   execution, the inputs, the result code and the target. The component
+   then lists the complete exact review: the five approval selectors
+   (`reviewDigest`, `requestRevision`, `profileRevision`,
+   `descriptorRevision` and `processGeneration`), the entity tag that the
+   approval binds as `If-Match`, the program SHA-256, the person answering,
+   the workflow, the profile, the workspace, the target, the policy, the
+   result code, each input with its source, size and SHA-256, the run
+   facts, the pins, the warnings, the lineage when the review has one, and
+   last the exact plan JSON under `Plan:`. It wraps long lines and scrolls
+   with `j`, `k` and the arrow keys. Outside the Pi TUI, the review is a notification, and a
    select gives the choice.
 7. `a` asks for an explicit confirmation that names the preparation, the
    review digest and the entity tag. Only that confirmation sends `approve`,
@@ -1168,13 +1303,16 @@ failure before the link removes the private file. A save reports the size,
 the path and the SHA-256, for example `Saved the verified 103 bytes of run
 RUN_ID to PATH, SHA-256 DIGEST.`
 
-`/wfm-history` reads every page of `/v1/runs` as one page set and gives one
-notification. The first line counts the managed runs and the observer
-entries. Each run then has one line in the order of the collection: its
-identifier, workflow, profile and runtime status, its supervision, its
+`/wfm-history` reads every page of `/v1/runs` as one page set and the
+workflow catalogue `/v1/workflows`, and gives one notification. The first
+line counts the managed runs and the observer entries. Each run then has one
+line in the order of the collection: its identifier, the name of its
+workflow, its profile and runtime status, its supervision, its
 lineage (for example `restart of run PARENT`), and the verification state of
 its result. A legacy entry, which has `observer` supervision, reads
-`observer (legacy entry, read only)`.
+`observer (legacy entry, read only)`. A workflow that the catalogue does not
+name shows its identifier. When the catalogue cannot be read, every line
+shows the identifier, and a last line states the failure.
 
 `/wfm-restart`, `/wfm-resume` and `/wfm-fork` read the first page of
 `/v1/runs/RUN_ID/lineage-requests` once. An operation that the page does not
@@ -1297,7 +1435,7 @@ for the control descriptor.
 | Command | Purpose |
 |---|---|
 | `/wf [RUNNER:WORKFLOW]` | Launch in the current Agent Deck session. Omit the name to select from the catalogue. |
-| `/wf-help RUNNER:WORKFLOW` | Show the exact `help` output of the runner. |
+| `/wf-help [RUNNER:WORKFLOW]` | Without a name, list every agent-cat command with its description. With a name, show the exact `help` output of the runner. |
 | `/wf-plan RUNNER:WORKFLOW` | Show `plan --json --raw` with the actual inputs. |
 | `/wf-launch RUNNER:WORKFLOW` | Launch wizard for alternate targets. |
 | `/wf-status` | Summaries of active and recent runs. |
@@ -1323,7 +1461,7 @@ for the control descriptor.
 | `/wfm-steer [RUN_ID]` | Service mode: steer an attempt that the controls of a manager run offer. |
 | `/wfm-redirect [RUN_ID]` | Service mode: redirect an occurrence of a manager run to an offered target. |
 | `/wfm-result [RUN_ID [PATH]]` | Service mode: save the verified result of a manager run to a new file with mode 0600. |
-| `/wfm-history` | Service mode: list every manager run over all pages, with legacy entries labelled observer. |
+| `/wfm-history` | Service mode: list every manager run over all pages with the name of its workflow, with legacy entries labelled observer. |
 | `/wfm-restart [RUN_ID]` | Service mode: restart a manager run through an approved child request. |
 | `/wfm-resume [RUN_ID]` | Service mode: resume a manager run through an approved child request. |
 | `/wfm-fork [RUN_ID]` | Service mode: fork a manager run with dropped or replaced answers through an approved child request. |
@@ -1596,7 +1734,7 @@ keeps registry entries that no linked package uses.
 ```sh
 npm run check
 npm test
-AGENT_CAT_E2E_RUNNER="$(cd .. && nix develop path:. -c cabal list-bin agentic-run)" npm run test:integration
+AGENT_CAT_E2E_RUNNER="$(cd .. && direnv exec . bash test/cabal.sh list-bin agentic-run)" npm run test:integration
 ```
 
 The live check of the manager session runs through the `pi-client` mode of

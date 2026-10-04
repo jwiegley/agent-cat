@@ -53,7 +53,7 @@ import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { matchesKey, truncateToWidth, wrapTextWithAnsi, type Component, type TUI } from "@earendil-works/pi-tui";
 import type { ClientFailure, Outcome } from "./manager/events.ts";
-import { encodeJson, isJsonArray, isJsonObject, jsonMember, JsonNumber, type JsonObject, type JsonValue } from "./manager/json.ts";
+import { encodeJson, isJsonArray, isJsonObject, jsonMember, JsonNumber, tryParseJson, word64, type JsonObject, type JsonValue } from "./manager/json.ts";
 import {
   answerBody,
   answerValue,
@@ -271,10 +271,49 @@ export function admissionLine(request: DraftView): string {
 }
 
 /**
- * The lines of the complete exact review of a preparation: every approval
- * selector, the entity tag that `approve` binds as `If-Match`, and every
- * consent fact of the review. Nothing is shortened. The component wraps
- * long lines.
+ * The summary lines of a review whose plan is the JSON workflow descriptor
+ * of the runner: the workflow name and blurb, the number of request nodes,
+ * the effects, tool execution, the inputs, the result code and the target.
+ * A plan that is not such a descriptor gives no summary.
+ *
+ * @public
+ */
+export function planSummary(review: Preparation["review"]): string[] {
+  const plan = tryParseJson(review.plan);
+  if (plan === undefined || !isJsonObject(plan)) return [];
+  const name = text(jsonMember(plan, "name"));
+  if (name === undefined) return [];
+  const blurb = text(jsonMember(plan, "blurb"));
+  const facts: string[] = [];
+  const asks = word64(jsonMember(plan, "askNodes"));
+  if (asks !== undefined) facts.push(`${asks} request node${asks === 1n ? "" : "s"}`);
+  const capabilities = jsonMember(plan, "capabilities");
+  if (capabilities !== undefined && isJsonObject(capabilities)) {
+    const effects = word64(jsonMember(capabilities, "effects"));
+    if (effects !== undefined) facts.push(`${effects} effect${effects === 1n ? "" : "s"}`);
+    const tools = jsonMember(capabilities, "toolExecution");
+    if (typeof tools === "boolean") facts.push(`tool execution ${tools ? "yes" : "no"}`);
+  }
+  const inputs = jsonMember(plan, "inputs");
+  if (inputs !== undefined && isJsonArray(inputs)) {
+    const named = inputs.flatMap((input) => (isJsonObject(input) ? [text(jsonMember(input, "name"))] : [])).filter((input) => input !== undefined);
+    facts.push(`inputs ${named.join(" ") || "none"}`);
+  }
+  const result = text(jsonMember(plan, "result"));
+  if (result !== undefined) facts.push(`result ${result}`);
+  return [
+    `Summary: workflow ${name}${blurb ? `, ${blurb}` : ""}`,
+    ...(facts.length > 0 ? [`  ${facts.join(", ")}`] : []),
+    `  Target: ${review.targetLabel}`,
+    "  The exact review follows. The exact plan JSON is its last section, and j scrolls to it.",
+  ];
+}
+
+/**
+ * The lines of the complete exact review of a preparation: the summary of
+ * `planSummary`, every approval selector, the entity tag that `approve`
+ * binds as `If-Match`, and every consent fact of the review, with the exact
+ * plan last. Nothing is shortened. The component wraps long lines.
  *
  * @public
  */
@@ -282,6 +321,7 @@ export function reviewLines(preparation: Preparation, etag: string): string[] {
   const { review } = preparation;
   const lines = [
     `Review of request ${preparation.requestId}, preparation ${preparation.id} (${preparation.state}, expires ${preparation.expiresAt})`,
+    ...planSummary(review),
     "Approval selectors:",
     ...SELECTORS.map((name) => `  ${name}: ${preparation[name]}`),
     `  If-Match: ${etag}`,
@@ -295,8 +335,6 @@ export function reviewLines(preparation: Preparation, etag: string): string[] {
     `Result code: ${encodeJson(review.resultCode)}`,
     review.inputs.length > 0 ? "Inputs:" : "Inputs: none",
     ...review.inputs.map((input) => `  ${input.name}: ${input.source}, ${input.bytes} bytes, SHA-256 ${input.sha256}`),
-    "Plan:",
-    ...review.plan.split("\n").map((line) => `  ${line}`),
     review.runFacts.length > 0 ? `Run facts: ${review.runFacts.join(", ")}` : "Run facts: none",
     review.pins.length > 0 ? `Pins: ${review.pins.join(", ")}` : "Pins: none",
     ...(review.warnings.length > 0 ? ["Warnings:", ...review.warnings.map((warning) => `  ${warning}`)] : ["Warnings: none"]),
@@ -309,6 +347,7 @@ export function reviewLines(preparation: Preparation, etag: string): string[] {
         : `  replace occurrence ${edit.occurrenceId} with the answer of SHA-256 ${edit.sha256}`);
     }
   }
+  lines.push("Plan:", ...review.plan.split("\n").map((line) => `  ${line}`));
   return lines;
 }
 
@@ -1036,17 +1075,19 @@ function itemStatus(run: RunItem): string {
 }
 
 /**
- * The line of one run of the history: its identifier, workflow, profile,
- * runtime status and supervision, its lineage, and the verification of its
- * result. A legacy entry has `observer` supervision and is labelled as a
- * read-only observer entry.
+ * The line of one run of the history: its identifier, the name of its
+ * workflow, its profile, runtime status and supervision, its lineage, and
+ * the verification of its result. `names` gives the name of a workflow by
+ * its identifier, and a workflow that it does not name shows its
+ * identifier. A legacy entry has `observer` supervision and is labelled as
+ * a read-only observer entry.
  *
  * @public
  */
-export function historyLine(run: RunItem): string {
+export function historyLine(run: RunItem, names: ReadonlyMap<string, string> = new Map()): string {
   if (run.content.kind === "unreadable") return `  ${run.id}  profile ${run.profileId}  ${itemStatus(run)}`;
   const { content } = run;
-  const parts = [`  ${run.id}  ${content.workflowId}  profile ${run.profileId}  ${itemStatus(run)}`];
+  const parts = [`  ${run.id}  ${names.get(content.workflowId) ?? content.workflowId}  profile ${run.profileId}  ${itemStatus(run)}`];
   parts.push(content.supervision === "observer" ? "observer (legacy entry, read only)" : `supervision ${content.supervision}`);
   if (content.lineage !== null && content.parentRunId !== null) parts.push(`${content.lineage} of run ${content.parentRunId}`);
   parts.push(`result ${content.verification.state}`);
@@ -1060,9 +1101,9 @@ export function historyLine(run: RunItem): string {
  *
  * @public
  */
-export function historyLines(runs: readonly RunItem[]): string[] {
+export function historyLines(runs: readonly RunItem[], names: ReadonlyMap<string, string> = new Map()): string[] {
   const observers = runs.filter((run) => run.content.kind === "known" && run.content.supervision === "observer").length;
-  return [`History: ${runs.length - observers} managed runs and ${observers} observer entries`, ...runs.map(historyLine)];
+  return [`History: ${runs.length - observers} managed runs and ${observers} observer entries`, ...runs.map((run) => historyLine(run, names))];
 }
 
 /**
@@ -1574,11 +1615,14 @@ export class ManagerRequests {
   /**
    * `/wfm-history`: every run of `/v1/runs` over all its pages, managed runs
    * and legacy entries in the identifier order of the collection, each with
-   * `historyLine`.
+   * `historyLine` and the workflow names of the catalogue. When the
+   * catalogue cannot be read, the lines show workflow identifiers, and a
+   * last line states the failure.
    */
   async history(ctx: ExtensionContext): Promise<void> {
     const session = this.#session(ctx);
     if (session === undefined) return;
+    const names = await this.#service()?.loadWorkflowNames();
     const listed = await this.#collection(session, "/v1/runs");
     if (!listed.ok) return ctx.ui.notify(`The run history could not be read: ${failureText(listed.failure)}`, "error");
     const runs: RunItem[] = [];
@@ -1587,7 +1631,9 @@ export class ManagerRequests {
       if (!run.ok) return ctx.ui.notify(`The run history could not be read: ${failureText(run.failure)}`, "error");
       runs.push(run.value);
     }
-    ctx.ui.notify(historyLines(runs).join("\n"), "info");
+    const lines = historyLines(runs, names?.names);
+    if (names?.failure !== undefined) lines.push(`Workflow names: the catalogue could not be read (${failureText(names.failure)})`);
+    ctx.ui.notify(lines.join("\n"), "info");
   }
 
   /**

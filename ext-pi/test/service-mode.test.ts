@@ -112,6 +112,27 @@ async function localState(): Promise<{ local: string; managerRoot: string }> {
 }
 
 describe("service mode of the extension", () => {
+  it("names the workflow of each service run in the widget and the status from the workflow catalogue", async () => {
+    const { local } = await localState();
+    process.env.AGENT_CAT_STATE_DIR = local;
+    process.env.AGENT_CAT_MANAGER_PROFILE = profile("named", "alpha.test");
+    const base = manager([run("run_a1", "running"), request("req_a1")]);
+    const expiresAt = new Date(Date.now() + 60000).toISOString();
+    const catalogue = {
+      version: 1, items: [{ id: "wf_review", name: "review" }],
+      page: { setId: "set_w", revision: "workflows_rev", expiresAt, index: 0, totalItems: 1, next: null },
+    };
+    const fake = transports({ "alpha.test": (resource, count) => (resource === "/v1/workflows?profileId=profile_1" ? ok(catalogue, '"workflows_rev"') : base(resource, count)) });
+    const pi = host({ manager: { transport: fake.transport } });
+    await pi.fire("session_start");
+    await until(() => pi.widget().includes("running run_a1 review"));
+    expect(pi.widget()).toBe("Service runs (https://alpha.test:8443/v1)\nrunning run_a1 review");
+    const text = await pi.status();
+    expect(text).toContain("Service runs:\n  run_a1  running  owned supervision  review");
+    expect(text).toContain("Requests:\n  req_a1  draft  review");
+    await pi.fire("session_shutdown");
+  });
+
   it("opens one manager session, restores only local runs, and closes the transport without a command", async () => {
     const { local, managerRoot } = await localState();
     process.env.AGENT_CAT_STATE_DIR = local;
@@ -159,7 +180,8 @@ describe("service mode of the extension", () => {
     await pi.fire("session_shutdown");
     expect(fake.made.every((made) => made.closed)).toBe(true);
     expect(fake.made.flatMap((made) => made.posts)).toEqual([]);
-    expect(fake.made.flatMap((made) => made.gets).every((uri) => uri === "/v1/capabilities" || uri === "/v1/snapshot")).toBe(true);
+    // The only reads are the capabilities, the overview and the workflow catalogue that names the workflows of the runs.
+    expect(new Set(fake.made.flatMap((made) => made.gets))).toEqual(new Set(["/v1/capabilities", "/v1/snapshot", "/v1/workflows?profileId=profile_1"]));
   });
 
   it("switches endpoints, discards a late overview of the earlier endpoint, and never retargets a stored reference", async () => {
@@ -708,6 +730,9 @@ describe("service mode of the extension", () => {
     it("lists every run over all pages of /v1/runs and labels the legacy entry observer", async () => {
       const expiresAt = new Date(Date.now() + 60000).toISOString();
       const { pi, made } = await served({
+        "/v1/workflows?profileId=profile_1": {
+          version: 1, items: [{ id: "wf_review", name: "review" }], page: { ...PAGE, setId: "set_w", revision: "workflows_rev", expiresAt, totalItems: 1, next: null },
+        },
         "/v1/runs": { version: 1, items: [runItem("run_a1")], page: { ...PAGE, expiresAt, next: "/v1/runs?pageToken=page_2" } },
         "/v1/runs?pageToken=page_2": {
           version: 1, items: [runItem("run_b2", { requestId: "req_c1", parentRunId: "run_a1", lineage: "restart" }), LEGACY],
@@ -720,12 +745,29 @@ describe("service mode of the extension", () => {
         level: "info",
         message: [
           "History: 2 managed runs and 1 observer entries",
-          "  run_a1  wf_review  profile profile_1  succeeded, supervision owned, result absent",
-          "  run_b2  wf_review  profile profile_1  succeeded, supervision owned, restart of run run_a1, result absent",
-          "  run_z9  wf_review  profile profile_1  no runtime evidence, observer (legacy entry, read only), result verified",
+          "  run_a1  review  profile profile_1  succeeded, supervision owned, result absent",
+          "  run_b2  review  profile profile_1  succeeded, supervision owned, restart of run run_a1, result absent",
+          "  run_z9  review  profile profile_1  no runtime evidence, observer (legacy entry, read only), result verified",
         ].join("\n"),
       });
       expect(made().posts).toEqual([]);
+      await pi.fire("session_shutdown");
+    });
+
+    it("keeps the workflow identifier when the catalogue does not name the workflow", async () => {
+      const expiresAt = new Date(Date.now() + 60000).toISOString();
+      const { pi } = await served({
+        "/v1/runs": { version: 1, items: [runItem("run_a1")], page: { ...PAGE, expiresAt, totalItems: 1, next: null } },
+      });
+      await pi.commands.get("wfm-history")!.handler("", pi.ctx);
+      expect(pi.notices.at(-1)).toEqual({
+        level: "info",
+        message: [
+          "History: 1 managed runs and 0 observer entries",
+          "  run_a1  wf_review  profile profile_1  succeeded, supervision owned, result absent",
+          "Workflow names: the catalogue could not be read (404 not-found)",
+        ].join("\n"),
+      });
       await pi.fire("session_shutdown");
     });
 

@@ -33,6 +33,13 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
   const streamLog = testHooksEnabled() ? new StreamLog() : undefined;
   const sessionOptions = streamLog === undefined ? hooks.manager : streamLog.options(hooks.manager);
   const currentBridge = new CurrentSessionBridge(pi, () => lastContext);
+  // Each agent-cat command registers through this function, which records
+  // its name and description, in order, for the table of a bare /wf-help.
+  const commandTable: Array<{ readonly name: string; readonly description: string }> = [];
+  const registerCommand: ExtensionAPI["registerCommand"] = (name, options) => {
+    commandTable.push({ name, description: options.description ?? "" });
+    pi.registerCommand(name, options);
+  };
   const supervise = (prepared: PreparedLaunch, ctx: ExtensionContext, workflow: string) => {
     const run = supervisor.start(prepared);
     let recorded = false;
@@ -198,7 +205,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     await currentBridge.close();
   });
 
-  pi.registerCommand("wf", {
+  registerCommand("wf", {
     description: "Run an agent-cat workflow in the current Agent Deck session",
     getArgumentCompletions: async (prefix) => {
       if (!lastContext) return null;
@@ -212,7 +219,10 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
       if (!ctx.hasUI) return ctx.ui.notify("/wf requires interactive approval and is unavailable in this mode", "error");
       if (!ctx.isProjectTrusted()) return ctx.ui.notify("/wf requires a trusted project", "error");
       const sessionId = process.env.AGENTDECK_INSTANCE_ID?.trim();
-      if (!sessionId) return ctx.ui.notify("/wf requires a current Agent Deck session (AGENTDECK_INSTANCE_ID is unavailable)", "error");
+      if (!sessionId) {
+        return ctx.ui.notify("/wf requires a current Agent Deck session (AGENTDECK_INSTANCE_ID is unavailable). "
+          + "/wf-launch RUNNER:WORKFLOW runs a workflow on another execution target.", "error");
+      }
       let invocation: WorkflowCommand;
       try { invocation = parseWorkflowCommand(args); }
       catch (error) { return ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"); }
@@ -250,16 +260,17 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     },
   });
 
-  pi.registerCommand("wf-help", {
-    description: "Show exact runner help for an agent-cat workflow",
+  registerCommand("wf-help", {
+    description: "List the agent-cat commands, or show the exact runner help of one workflow",
     handler: async (args, ctx) => {
+      if (args.trim() === "") return ctx.ui.notify(commandTableText(commandTable), "info");
       const selected = selectWorkflow(await discover(ctx), args.trim());
       if (!selected) return ctx.ui.notify(`Unknown workflow: ${args.trim()}`, "error");
       ctx.ui.notify(await readHelp(selected.runner, selected.descriptor.name, ctx.cwd), "info");
     },
   });
 
-  pi.registerCommand("wf-plan", {
+  registerCommand("wf-plan", {
     description: "Show the runner's raw plan for an agent-cat workflow",
     handler: async (args, ctx) => {
       const selected = selectWorkflow(await discover(ctx), args.trim());
@@ -272,7 +283,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     },
   });
 
-  pi.registerCommand("wf-launch", {
+  registerCommand("wf-launch", {
     description: "Run an agent-cat workflow with an explicit execution target",
     getArgumentCompletions: async (prefix) => {
       if (!lastContext) return null;
@@ -378,8 +389,8 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
   });
 
   for (const operation of ["restart", "resume", "fork"] as const) {
-    pi.registerCommand(`wf-${operation}`, {
-      description: `${operation} an agent-cat workflow as a new immutable child run`,
+    registerCommand(`wf-${operation}`, {
+      description: `${operation[0].toUpperCase()}${operation.slice(1)} an agent-cat workflow as a new immutable child run`,
       handler: async (args, ctx) => {
         const parentRunId = args.trim();
         if (!parentRunId) return ctx.ui.notify(`Usage: /wf-${operation} PARENT_RUN_ID`, "warning");
@@ -388,7 +399,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     });
   }
 
-  pi.registerCommand("wf-diff", {
+  registerCommand("wf-diff", {
     description: "Show immutable lineage differences for a child run",
     handler: async (args, ctx) => {
       const child = supervisor.get(args.trim());
@@ -428,7 +439,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     },
   });
 
-  pi.registerCommand("wf-status", {
+  registerCommand("wf-status", {
     description: "Show recent agent-cat workflow runs",
     handler: async (_args, ctx) => {
       const mode = configuredManagerProfiles();
@@ -437,7 +448,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     },
   });
 
-  pi.registerCommand("wfm-status", {
+  registerCommand("wfm-status", {
     description: "Show the manager endpoint, its delivery state, and its service runs, requests and decision heads",
     handler: async (_args, ctx) => {
       if (service === undefined) return ctx.ui.notify(SERVICE_UNCONFIGURED, "warning");
@@ -445,75 +456,75 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     },
   });
 
-  pi.registerCommand("wfm", {
+  registerCommand("wfm", {
     description: "Create a manager request: select a workflow, enter its exact inputs, enqueue it, and review and approve it",
     handler: async (args, ctx) => { await requests.start(ctx, args); },
   });
 
-  pi.registerCommand("wfm-review", {
+  registerCommand("wfm-review", {
     description: "Continue a manager request: collect its missing inputs, follow its admission, or show its exact review",
     handler: async (args, ctx) => requests.review(ctx, args),
   });
 
-  pi.registerCommand("wfm-withdraw", {
+  registerCommand("wfm-withdraw", {
     description: "Withdraw a manager request before its start",
     handler: async (args, ctx) => requests.withdraw(ctx, args),
   });
 
-  pi.registerCommand("wfm-discard", {
+  registerCommand("wfm-discard", {
     description: "Discard the live preparation of a manager request in review",
     handler: async (args, ctx) => requests.discard(ctx, args),
   });
 
-  pi.registerCommand("wfm-monitor", {
+  registerCommand("wfm-monitor", {
     description: "Show the live monitor of a manager run: runtime status, observation freshness, decisions, and the terminal result",
     handler: async (args, ctx) => requests.monitor(ctx, args),
   });
 
-  pi.registerCommand("wfm-answer", {
+  registerCommand("wfm-answer", {
     description: "Answer the head decision of a manager run with a typed answer, or send a recovery choice that the manager offers",
     handler: async (args, ctx) => { await requests.answer(ctx, args); },
   });
 
-  pi.registerCommand("wfm-cancel", {
+  registerCommand("wfm-cancel", {
     description: "Cancel a manager run after confirmation when its controls allow the cancel, and report the receipt and the runtime acknowledgement",
     handler: async (args, ctx) => { await requests.cancel(ctx, args); },
   });
 
-  pi.registerCommand("wfm-steer", {
+  registerCommand("wfm-steer", {
     description: "Steer the attempt of a manager run that its controls offer, and report the receipt and the runtime acknowledgement",
     handler: async (args, ctx) => { await requests.steer(ctx, args); },
   });
 
-  pi.registerCommand("wfm-redirect", {
+  registerCommand("wfm-redirect", {
     description: "Redirect an occurrence of a manager run to an offered target, in its dispatch window or for its attempt in flight, and report the receipt and the runtime acknowledgement",
     handler: async (args, ctx) => { await requests.redirect(ctx, args); },
   });
 
-  pi.registerCommand("wfm-result", {
+  registerCommand("wfm-result", {
     description: "Retrieve the verified result of a manager run and save its exact bytes to a new file with mode 0600",
     handler: async (args, ctx) => { await requests.result(ctx, args); },
   });
 
-  pi.registerCommand("wfm-history", {
-    description: "List every run of the manager history over all pages, with legacy entries labelled observer",
+  registerCommand("wfm-history", {
+    description: "List every manager run with its workflow, status and result over all pages, with legacy entries labelled observer",
     handler: async (_args, ctx) => requests.history(ctx),
   });
 
   for (const operation of ["restart", "resume", "fork"] as const) {
-    pi.registerCommand(`wfm-${operation}`, {
+    registerCommand(`wfm-${operation}`, {
       description: `Create a ${operation} child request of a manager run, show its exact review with its lineage, and approve it to start the child run`,
       handler: async (args, ctx) => { await requests.lineage(ctx, operation, args); },
     });
   }
 
-  pi.registerCommand("wfm-export", {
+  registerCommand("wfm-export", {
     description: "Export the verified result of a manager run under a name, verify the exported bytes, and list the exports of the run",
     handler: async (args, ctx) => { await requests.export(ctx, args); },
   });
 
   if (streamLog !== undefined) {
-    pi.registerCommand("wfm-debug-reconnect", {
+    registerCommand("wfm-debug-reconnect", {
       description: "Test hook: close the manager event stream as a lost connection does; the follow loop reconnects from the last delivered event",
       handler: async (_args, ctx) => {
         const session = service?.connection.kind === "connected" ? service.session : undefined;
@@ -523,13 +534,13 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
         ctx.ui.notify(`Test hook: dropped the event stream after event ${at}`, "info");
       },
     });
-    pi.registerCommand("wfm-debug-events", {
+    registerCommand("wfm-debug-events", {
       description: "Test hook: list the event stream connections and the delivered events after the last forced drop",
       handler: async (_args, ctx) => ctx.ui.notify(streamLog.lines().join("\n"), "info"),
     });
   }
 
-  pi.registerCommand("wfm-endpoints", {
+  registerCommand("wfm-endpoints", {
     description: "Choose the active manager client profile",
     handler: async (args, ctx) => {
       if (service === undefined) return ctx.ui.notify(SERVICE_UNCONFIGURED, "warning");
@@ -550,7 +561,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     },
   });
 
-  pi.registerCommand("wf-monitor", {
+  registerCommand("wf-monitor", {
     description: "Inspect one active or recent agent-cat workflow run",
     handler: async (args, ctx) => {
       let runId = args.trim();
@@ -577,7 +588,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     },
   });
 
-  pi.registerCommand("wf-steer", {
+  registerCommand("wf-steer", {
     description: "Steer one active agent-cat attempt",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return ctx.ui.notify("workflow steering requires interactive approval", "error");
@@ -607,7 +618,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     },
   });
 
-  pi.registerCommand("wf-retry", {
+  registerCommand("wf-retry", {
     description: "Retry one recoverable agent-cat occurrence",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return ctx.ui.notify("workflow retry requires interactive approval", "error");
@@ -631,7 +642,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     },
   });
 
-  pi.registerCommand("wf-recover", {
+  registerCommand("wf-recover", {
     description: "Choose retry, failover, or abandon for a recoverable occurrence",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return ctx.ui.notify("workflow recovery requires interactive approval", "error");
@@ -659,7 +670,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     },
   });
 
-  pi.registerCommand("wf-redirect", {
+  registerCommand("wf-redirect", {
     description: "Redirect one occurrence: to a reserved target in its dispatch window, or to a live candidate of its fail-over chain while its attempt runs",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return ctx.ui.notify("workflow redirect requires interactive approval", "error");
@@ -679,7 +690,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     },
   });
 
-  pi.registerCommand("wf-cancel", {
+  registerCommand("wf-cancel", {
     description: "Cancel one owned agent-cat workflow run",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) return ctx.ui.notify("workflow cancellation requires interactive approval", "error");
@@ -1185,9 +1196,13 @@ export function formatServiceStatus(service: ServiceMode, commands: readonly Com
   const requests = service.requests();
   const decisions = service.decisions();
   lines.push(runs.length ? "Service runs:" : "Service runs: none");
-  for (const run of runs) lines.push(`  ${run.runId}  ${run.status}  ${run.supervision ?? "unknown"} supervision  ${run.workflowId ?? "unreadable manifest"}`);
+  for (const run of runs) {
+    lines.push(`  ${run.runId}  ${run.status}  ${run.supervision ?? "unknown"} supervision  ${run.workflowId === null ? "unreadable manifest" : service.workflowLabel(run.workflowId)}`);
+  }
   lines.push(requests.length ? "Requests:" : "Requests: none");
-  for (const request of requests) lines.push(`  ${request.requestId}  ${request.phase}  ${request.workflowId}${request.runId ? `  run ${request.runId}` : ""}`);
+  for (const request of requests) {
+    lines.push(`  ${request.requestId}  ${request.phase}  ${service.workflowLabel(request.workflowId)}${request.runId ? `  run ${request.runId}` : ""}`);
+  }
   lines.push(decisions.length ? "Decision heads:" : "Decision heads: none");
   for (const decision of decisions) lines.push(`  ${decision.decisionId}  ${decision.state} ${decision.kind}  run ${decision.runId}`);
   if (commands.length > 0) {
@@ -1382,6 +1397,12 @@ function knownRemoteTarget(remote: { socket: string; sessionId: string }): { arg
  * The status line and the widget of the extension. Local runs and service
  * runs have separate sections, and only active runs are listed.
  */
+/** The table of a bare /wf-help: a heading, then each command with its description, in registration order. */
+function commandTableText(table: ReadonlyArray<{ readonly name: string; readonly description: string }>): string {
+  return ["agent-cat commands. /wf-help RUNNER:WORKFLOW shows the help of one workflow.",
+    ...table.map(({ name, description }) => `  /${name}  ${description}`)].join("\n");
+}
+
 function updateWidget(ctx: ExtensionContext, supervisor: RunSupervisor, service: ServiceMode | undefined): void {
   const snapshots = supervisor.activeSnapshots();
   const remote = service?.runs().filter((run) => !SERVICE_TERMINAL.includes(run.status)) ?? [];
@@ -1397,6 +1418,6 @@ function updateWidget(ctx: ExtensionContext, supervisor: RunSupervisor, service:
     ...(snapshots.length ? [theme.fg("muted", "Local runs")] : []),
     ...snapshots.map((run) => `${theme.fg(run.status === "failed" ? "error" : "accent", run.status)} ${run.runId} ${run.workflow ?? "starting"}`),
     ...(remote.length ? [theme.fg("muted", `Service runs (${endpoint})`)] : []),
-    ...remote.map((run) => `${theme.fg("accent", run.status)} ${run.runId} ${run.workflowId ?? "unreadable manifest"}`),
+    ...remote.map((run) => `${theme.fg("accent", run.status)} ${run.runId} ${run.workflowId === null ? "unreadable manifest" : service?.workflowLabel(run.workflowId) ?? run.workflowId}`),
   ].join("\n"), 0, 0));
 }
