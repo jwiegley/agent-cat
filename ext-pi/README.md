@@ -10,18 +10,38 @@ to runs. It never searches the file system or `PATH` for a runner.
 ## Install and start
 
 These steps load the extension into the built Pi fork for daily use. The
-fork is the supported host, as the section "Supported host" states. Node 22
-must be on `PATH`, and the agent-cat checkout must have its direnv
-environment, as the `README.md` of the repository states. Two shell
-variables name the checkouts. Set them to absolute paths:
+fork is the supported host, as the section "Supported host" states. They
+need these prerequisites:
+
+- Node 22 on `PATH`.
+- The built Pi fork: a checkout of the fork in which
+  `npm install --ignore-scripts` and `npm run build` ran, as the `README.md`
+  of the fork states. The steps run `packages/coding-agent/dist/cli.js` of
+  that checkout.
+- `ext-pi/node_modules`, in which each host package is a symbolic link into
+  the `packages` directory of the fork, as the section "Supported host"
+  states. Do not make it with `npm install`, as the section "Build and test"
+  states. A second checkout of agent-cat, for example a worktree, copies the
+  directory of a checkout that has it:
+  `/bin/cp -Rc ~/src/agent-cat/ext-pi/node_modules NEW-CHECKOUT/ext-pi/`.
+
+Two shell variables name the checkouts. Set them to absolute paths:
 
 ```sh
 AGENT_CAT=/absolute/path/to/agent-cat
 PI_FORK=/absolute/path/to/pi
 ```
 
-1. Build the runner once, and export its path. Repeat the build after a
-   change of the source:
+1. Export the path of the runner. A runner that `nix profile add` installed,
+   as section 1 of [`doc/getting-started.md`](../doc/getting-started.md)
+   states, is on `PATH`:
+
+   ```sh
+   export AGENT_CAT_RUNNER="$(command -v agentic-run)"
+   ```
+
+   A maintainer checkout with its direnv environment can build the runner
+   with Cabal instead. Repeat the build after a change of the source:
 
    ```sh
    (cd "$AGENT_CAT" && direnv exec . bash test/cabal.sh build agentic-run)

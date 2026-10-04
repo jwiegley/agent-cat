@@ -2112,7 +2112,8 @@ The run then applies each chosen value through @code{session/set_config_option}
 on every session that the default answerer opens, and it does this before the
 prompt.  Before the first question, a capability preflight opens one session and
 applies the values.  A value that the adapter does not offer stops the run there,
-before any prompt, and the message lists the offered values.  The exit status of
+before any prompt, and the message names the adapter, for example
+@samp{adapter 'stub'}, and lists the offered values.  The exit status of
 that refusal is 2, the transport-failure status, because the refusal comes from
 the adapter connection.  An adapter that does not advertise a model or effort
 option is refused in the same way.  @code{--verbose} narrates each option that
@@ -3917,7 +3918,7 @@ confirmation of a discard of the review.  A key that cannot start its command
 shows its key outcome and opens no confirmation.  In a confirmation, @kbd{y}
 sends the @code{withdraw} or @code{discard} command once, for the request or
 preparation that the key named, and only while that resource is still
-displayed.  @kbd{n} or @key{ESC} closes the confirmation with a key outcome
+displayed.  @kbd{n}, @kbd{q} or @key{ESC} closes the confirmation with a key outcome
 that states that nothing was sent.  Each of these commands completes only on
 its own observed effect: @code{input-changed} for a removal,
 @code{withdrawn} for a withdrawal, and @code{discarded} for a discard.  A
@@ -3959,8 +3960,8 @@ abandoned page set holds a manager slot until it expires.  The key is deferred
 instead, and a deferred key is never replayed.  A key that arrives during a
 read of single resources cancels that read, and its mutation starts.
 
-Exiting the frontend with @kbd{C-c}, or with @kbd{q} while no answer editor has
-the keys, closes its transport without cancelling manager-owned work.  The run
+Exiting the frontend with @kbd{C-c}, or with @kbd{q} while no answer editor and
+no confirmation has the keys, closes its transport without cancelling manager-owned work.  The run
 continues in the manager.  Service mode starts no child process, so no process
 of the frontend remains after the exit.
 

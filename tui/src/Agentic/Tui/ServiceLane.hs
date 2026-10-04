@@ -941,7 +941,7 @@ confirmationLines confirmation = case confirmation of
         "The manager asks the runtime to cancel the run. The run ends only when its runtime status is Cancelled.",
         "y CANCEL RUN   n BACK" ] )
 
--- | The fixed status text of a confirmation that n or Esc closed.
+-- | The fixed status text of a confirmation that n, q or Esc closed.
 confirmCancelledText :: Text -> Text
 confirmCancelledText operation = operation <> " was not sent: the confirmation was closed."
 

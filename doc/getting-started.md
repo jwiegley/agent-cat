@@ -19,6 +19,13 @@ cost.
   make the certificate of the manager.
 - A checkout of this repository. The commands of section 1 run in the root of
   that checkout. All other commands run in any directory.
+- For the Pi client of section 4 only: Node 22 on `PATH`, the built Pi fork,
+  and the `ext-pi/node_modules` directory that links the fork. The section
+  [Install and start](../ext-pi/README.md#install-and-start) of
+  `ext-pi/README.md` states these prerequisites.
+- For the Emacs client of section 4 only: GNU Emacs and a checkout of the
+  branch `emacs-native` of the agent-workflows repository, which holds the
+  service client `emacs/wf-service.el`.
 
 ## 1. Install the runner
 
@@ -215,6 +222,13 @@ The TUI opens on the Manager profiles list, with the endpoint
 7. Press `q`. The TUI detaches and exits with status 0. The manager keeps the run, and
    `H` in the workflow browser lists it in History.
 
+`X` on the review opens the dialog `Confirm discard`. `y` discards the
+review, and `n`, `q` or `Esc` closes the dialog and sends nothing. A review
+that is not approved or discarded stays open at the manager and holds an
+execution reservation of its profile. `O` in the workflow browser opens the
+Manager overview, which lists the open requests and reviews. Select the
+request, and press `Enter` to open its review again.
+
 To answer a question as the person, select the profile `person` instead of
 `scripted` in step 1, and follow steps 2 to 4. The live monitor then opens
 the `Your answer` editor with the question `Name one thing worth greeting.`
@@ -238,8 +252,12 @@ section 3 and runs `hello` with `/wfm hello`.
 
 ### Emacs
 
-The Emacs client is part of the separate agent-workflows repository. The
-section "Using service mode" of its `README.md` loads the client, names the
+The Emacs client is part of the separate agent-workflows repository. Its
+service client, `emacs/wf-service.el`, is on the branch `emacs-native` of that
+repository. The branch `main` does not have it. On this machine the worktree
+`~/src/agent-workflows-emacs-native` holds that branch, so the `load-path` of
+the client is `~/src/agent-workflows-emacs-native/emacs`. The section "Using
+service mode" of the `README.md` of that worktree loads the client, names the
 client profile of section 3 in `wf-manager-profiles`, and runs a workflow
 with `M-x wf-service` and `M-x wf-run`.
 
@@ -279,8 +297,9 @@ agentic-run run hello --engine acp --adapter claude --model ID --effort LEVEL
 `adapter-options` starts the adapter, opens one session, prints the offered
 values and exits 0. It sends no prompt. `--model` and `--effort` set the
 model and the effort of every session before its prompt. A value that the
-adapter does not offer stops the run before any prompt with exit status 2,
-and the message lists the offered values. Without the two options, the
+adapter does not offer stops the run before any prompt with exit status 2.
+The message names the adapter, for example `adapter 'stub'`, and lists the
+offered values. Without the two options, the
 adapter uses its own defaults.
 
 The stub adapter offers model and effort values too, so this form of the
@@ -376,10 +395,10 @@ sound store.
 
 `add-client` issues a credential and writes a further client profile, for
 example for a second client. The directory of the profile must exist and be
-private:
+private. `mkdir -p` also exits 0 when the directory exists:
 
 ```sh
-mkdir -m 700 "$HOME/agent-cat-clients"
+mkdir -p -m 700 "$HOME/agent-cat-clients"
 agentic-run --manager add-client --config "$HOME/agent-cat-manager/serve.json" --profile-file "$HOME/agent-cat-clients/laptop.json" --profile person
 ```
 
@@ -397,6 +416,22 @@ printf '{"version": 1, "operation": "issue-credential", "label": "observer", "sc
 
 The command exits 0. The scopes are a subset of `observe`, `submit`,
 `control` and `export`.
+
+A client uses a credential file through a client profile. This command writes
+the profile `observer.json` beside the credential, with mode 0600:
+
+```sh
+(umask 077 && printf '{"version": 1, "endpoint": "https://127.0.0.1:8443/v1", "credentialFile": "%s", "caFile": "%s"}\n' "$HOME/agent-cat-clients/observer.credential" "$HOME/agent-cat-manager/tls/certificate.pem" > "$HOME/agent-cat-clients/observer.json")
+```
+
+The command exits 0. `agentic-run --tui --service
+"$HOME/agent-cat-clients/observer.json"` then connects with the observer
+credential. It shows the workflows and the runs of `scripted`. A key that
+submits or controls work, for example `Enter` on a workflow, shows a
+numbered refusal such as `Key 1: create did not start: this credential lacks
+submit.` and sends nothing. The section
+[Provision a client](../manager/OPERATIONS.md#provision-a-client) of
+`manager/OPERATIONS.md` states the format of the profile.
 
 ### Reload the profiles
 
@@ -459,7 +494,7 @@ destination must not exist, and its directory must be private:
 
 ```sh
 printf '%s' '{"version": 1, "operation": "status"}' | agentic-run --manager admin --config "$HOME/agent-cat-manager/offline.json"
-mkdir -m 700 "$HOME/agent-cat-backups"
+mkdir -p -m 700 "$HOME/agent-cat-backups"
 printf '{"version": 1, "operation": "backup", "outputFile": "%s"}' "$HOME/agent-cat-backups/backup-1" | agentic-run --manager admin --config "$HOME/agent-cat-manager/offline.json"
 ```
 

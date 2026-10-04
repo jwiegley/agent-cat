@@ -316,7 +316,7 @@ import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Char8 as BS
 import Data.List (find)
-import Data.Maybe (catMaybes, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import qualified Data.ByteString.Lazy as BL
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Data.Map.Strict (Map)
@@ -447,7 +447,11 @@ data AcpConfig = AcpConfig
     -- | Exact child environment policy. Defaults to ambient inheritance for v1.
     acpChildEnvironment :: !ChildEnvironment,
     -- | Narrate the transport — every call, every turn — on stderr.
-    acpVerbose :: !Bool
+    acpVerbose :: !Bool,
+    -- | The name that selected the adapter, for example @stub@ or @claude@.
+    -- A refusal of the session options names the adapter by it. 'Nothing'
+    -- names the adapter by its program.
+    acpAdapterName :: !(Maybe Text)
   }
   deriving (Show)
 
@@ -465,7 +469,8 @@ defaultAcpConfig argv =
       acpTurnTimeoutMs = 900000,
       acpFreshPerQuestion = True,
       acpChildEnvironment = inheritChildEnvironment,
-      acpVerbose = False
+      acpVerbose = False,
+      acpAdapterName = Nothing
     }
 
 -- ---------------------------------------------------------------------------
@@ -590,7 +595,9 @@ data AcpError
   | -- | The agent answered a call with a JSON-RPC error: the program, the
     -- method, the error object.
     AcpRefused !Text !Text !Text
-  | -- | A requested model or generation setting is absent or unavailable.
+  | -- | A requested model or generation setting is absent or unavailable:
+    -- the adapter name, or the program when no name selected the adapter,
+    -- and why.
     AcpConfiguration !Text !Text
   | -- | A request outran 'acpTurnTimeoutMs': the program, the budget, and the
     -- question that was being put.
@@ -628,8 +635,8 @@ renderAcpError = \case
     "'" <> prog <> "' is not speaking ACP v1 as this client implements it: " <> why
   AcpRefused _ method err ->
     "ACP " <> method <> " failed: " <> renderRpcError err
-  AcpConfiguration prog why ->
-    "'" <> prog <> "' cannot apply the requested session options (model, effort or routing profile): " <> why
+  AcpConfiguration adapter why ->
+    "adapter '" <> adapter <> "' cannot apply the requested session options (model, effort or routing profile): " <> why
   AcpTimedOut prog ms what ->
     "'"
       <> prog
@@ -1616,7 +1623,8 @@ setConfigOption acp sid option value = do
       False
 
 configurationError :: Acp -> Text -> IO a
-configurationError acp = throwIO . AcpConfiguration (T.pack (acpProgram acp))
+configurationError acp =
+  throwIO . AcpConfiguration (fromMaybe (T.pack (acpProgram acp)) (acpAdapterName (acpConfig acp)))
 
 duplicateText :: [Text] -> Maybe Text
 duplicateText = go Map.empty

@@ -16254,7 +16254,7 @@ def emacs_service_checks():
         assert f"Review of request {created['id']}, preparation {preparation['id']}" in text, ("the review names another preparation", text[:2000])
         assert all(f"  {name}: {preparation[name]}\n" in text for name in selectors) \
             and f"Program SHA-256: {preparation['review']['programHash']}\n" in text \
-            and f"Workflow: {workflow['id']}\n" in text and "Profile: profile_1\n" in text, (
+            and f"Workflow: {workflow['name']} ({workflow['id']})\n" in text and "Profile: profile_1\n" in text, (
             "the review buffer does not show the exact review", text[:2000])
         assert [item["size"] for item in report["reviewTexts"]] == sizes and all(item["text"] == text for item in report["reviewTexts"]), (
             "the review changed at a resize")
@@ -16267,9 +16267,12 @@ def emacs_service_checks():
         assert preparation["state"] == "consumed", ("the approved preparation", preparation["state"])
         associated, _, _ = observed(request_uri, "Request")
         assert associated["runId"] == run, ("the request names another run", associated["runId"], run)
-        assert preparation["reviewDigest"] in report["approvePrompt"], ("the confirmation does not name the review digest", report["approvePrompt"])
+        # The confirmation names the workflow, the profile and the target.
+        # The review buffer of step 2 holds the review digest.
+        assert report["approvePrompt"].startswith(f"Start {workflow['name']} in profile_1 ("), (
+            "the confirmation does not name the workflow and the profile", report["approvePrompt"])
         print("PASS emacs-service 3: a and yes sent the one approve command of preparation", preparation["id"], "after the confirmation",
-              "with its review digest, and request", created["id"], "names run", run, flush=True)
+              "that names the workflow and the profile, and request", created["id"], "names run", run, flush=True)
 
         # 4. The answer of the question.
         question, recovery = report["question"], report["recovery"]
@@ -21643,6 +21646,17 @@ for iteration in range(2):
 
                                         key_until(b"c", "Confirm cancel", "cancel")
                                         key_until(b"n", "cancel was not sent: the confirmation was closed.", "cancel")
+                                        # q inside an open confirmation closes the confirmation as n
+                                        # does, and the TUI stays attached.
+                                        key_until(b"c", "Confirm cancel", "cancel")
+                                        start = len(session.output)
+                                        session.send(b"q")
+                                        deadline = time.monotonic() + 20
+                                        while ("Confirm cancel" in session.screen.text()
+                                               or b"cancel was not sent: the confirmation was closed." not in bytes(session.output[start:])):
+                                            assert session.process.poll() is None, "JOURNEY-ASSERT q inside the cancel confirmation detached the TUI"
+                                            assert time.monotonic() < deadline, ("q did not close the cancel confirmation", session.screen.text())
+                                            session.pump()
                                         key_until(b"i", "steer did not start: the manager offers no interrupt-now steer for this run.", "steer")
                                         session.send(b"?")
                                         session.wait_screen("Keyboard shortcuts")

@@ -2012,9 +2012,10 @@ handleServiceEventCore client event = do
       _ | serviceIdle state -> handleEditorInput event >> recordServiceDraft
         | otherwise -> pure ()
     VtyEvent (Vty.EvKey key modifiers)
-      | key == Vty.KChar 'q' && null modifiers -> halt
-      -- An open confirmation of a withdrawal or a discard takes the keys.
+      -- An open confirmation of a withdrawal, a discard or a cancel takes the
+      -- keys, q included.
       | Just confirmation <- stateServiceConfirm state -> handleServiceConfirm client confirmation key modifiers
+      | key == Vty.KChar 'q' && null modifiers -> halt
       | key == Vty.KChar '?' && null modifiers && not (serviceResendConfirm state) -> put state {stateKeyHelp = not (stateKeyHelp state)}
       -- Under the key help, an approval key on the review still has one
       -- visible outcome, and only Esc closes the help.
@@ -2286,8 +2287,8 @@ blankEditor = Edit.editorText InputEditor Nothing ""
 -- closes it and decides the mutation once with 'serviceMutationKey'. The
 -- mutation starts only for the resource that the key named, while that
 -- resource is still displayed and installed, with the installed observation
--- as its precondition. n and Esc close the confirmation with a key outcome,
--- and every other key does nothing.
+-- as its precondition. n, q and Esc close the confirmation with a key
+-- outcome, and every other key does nothing.
 handleServiceConfirm :: Manager.Client -> Lane.Confirmation -> Vty.Key -> [Vty.Modifier] -> EventM Name AppState ()
 handleServiceConfirm client confirmation key modifiers = case key of
   Vty.KChar 'y' | null modifiers -> do
@@ -2311,6 +2312,7 @@ handleServiceConfirm client confirmation key modifiers = case key of
               beginServiceMutation client mutation (Just observed)
         _ -> serviceKeyOutcome False (Lane.confirmChangedText operation)
   Vty.KChar 'n' | null modifiers -> closed
+  Vty.KChar 'q' | null modifiers -> closed
   Vty.KEsc -> closed
   _ -> pure ()
   where

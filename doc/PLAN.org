@@ -16231,6 +16231,98 @@ Evidence: resume-20260923/RD/R7/impl-r1 (r7-guide NN-*.log and .exit, every non-
 ]
 #+end_src
 
+* TODO [#D] Resolve the RW walkthrough fixes fess findings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-rw-fess-followup-brdl
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 03:54]
+:MODIFIED: [2026-10-04 Sun 03:54]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Non-blocking findings of fess audit fess/rd-RW-r1.md on readiness subtask RW (getting-started walkthrough fixes), with the implementer's disclosed limitations.
+
+1. Medium. The TUI documentation (tui/README.md, doc/agent-cat.texi, doc/tui-design.md) says that q in an open confirmation closes it as n does. The resend confirmation (x on an uncertain command) still halts on q, because tui/src/Agentic/Tui/App.hs checks q before the serviceResendConfirm branch, which handles only y, n and Esc. Add q to that branch and place it before the q halt, or limit the text to the discard, withdraw and cancel confirmations.
+2. Medium. Emacs wf-service.el (agent-workflows emacs-native, around lines 967 and 1114-1116): after approval the review buffer refreshes its header and Current: line, but the Admission: block still prints the stored wait lines, which can read "admission reserved". The ERT test checks only the header, and emacs-service does not read the buffer after approval. Rebuild or drop the stored admission lines once the run is set, and assert the review-buffer text after approval.
+3. Low. wf-service.el: the new wf-service--read-draft call runs after the run starts. If that read fails, the run outcome is not recorded and the run view does not open. Record the outcome and open the run view first, then report a failed refresh as a refresh failure.
+4. Low. doc/getting-started.md section 4 and the client README describe "this machine" (the worktree ~/src/agent-workflows-emacs-native). The guide gives no worktree-creation command, and the README command needs a local emacs-native branch, which is never pushed. The README on main still gives the old load-path. Merge the Emacs client into agent-workflows main when the operator authorizes it.
+5. Low. cli/src/Agentic/Cli.hs:3760-3761: the comment "ACP itself receives only an AdapterSpec" is out of date, because AcpConfig now carries acpAdapterName. When the name is Nothing, the refusal renders "adapter 'python3'". Update the comment and render that case without the word adapter.
+6. Low. manager/test/service_http.py: the tui-journey PASS line does not mention the new q close of the cancel confirmation. Add it.
+7. Low. The new ext-pi Nix route (export AGENT_CAT_RUNNER="$(command -v agentic-run)") was not run with a Pi session against a runner installed by nix profile add. Run it once and keep the log.
+8. Low (scope note). The RW change also fixed an emacs-service harness that R4 left stale (agent-workflows ci/emacs-ui.py and manager/test/service_http.py). The R4 evidence therefore did not cover emacs-service.
+9. Limitation. A fresh checkout with no ext-pi/node_modules has no documented way to create it except a copy from an existing checkout.
+10. Limitation. The new TUI journey q step was not shown failing before the fix. ALLBUILD was not run after the AcpConfig field addition.
+
+* TODO [#C] Move the supported Pi host to fork 1.0.1 (needs authorization)
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-rw-pi-host-1-0-1-bzd2
+:LABELS:   ["needs-authorization","workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 03:54]
+:MODIFIED: [2026-10-04 Sun 03:54]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Needs operator authorization (dependency upgrade). Move the supported Pi host from fork 0.99.1 (commit 7857926ee) to the current fork build 1.0.1 (commit 1ad18c15d, "feat: integrate upstream v1.0.1") in ~/src/fork/pi.
+
+Exact change:
+1. ext-pi/test/host-versions.test.ts: change every version in SUPPORTED_LINKED (chord, pi-ai, pi-client, pi-coding-agent, pi-protocol, pi-server, pi-telemetry, pi-tui) and the pi-agent-core entry from "0.99.1" to "1.0.1".
+2. ext-pi/package.json devDependencies: @earendil-works/pi-client, pi-coding-agent, pi-server and pi-tui from "0.99.1" to "1.0.1", plus the matching root and link-target entries in ext-pi/package-lock.json, edited to match, never through a registry install.
+3. ext-pi/README.md "Supported host": "commit `7857926ee`" becomes "commit `1ad18c15d`", and every "0.99.1" becomes "1.0.1".
+
+Current state (evidence RD/RW/impl-r1): ext-pi npm run check passes against 1.0.1 (pi-typecheck.log). The RW walkthrough found that the extension loads and works on 1.0.1. host-versions.test.ts fails only on the version strings (pi-host-versions.log, exit 1).
+
+* DONE [#C] Fix the getting-started walkthrough findings
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-rd-rw-walkthrough-fidw
+:LABELS:   ["workflow-manager"]
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-04 Sun 03:54]
+:MODIFIED: [2026-10-04 Sun 03:54]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-04 Sun 03:54]
+:CLOSE_REASON: Acceptance met by recorded evidence (RD/RW)
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Readiness subtask RW of 2026-10-03 (operator direction: functional readiness). Fix the findings of a fresh walkthrough of doc/getting-started.md at their cause.
+
+1. Emacs load-path (major): the service client wf-service.el exists only on the emacs-native branch of agent-workflows. The guide section 4 and the client README now name that branch, state that main does not have it, and give the load-path ~/src/agent-workflows-emacs-native/emacs. The client README gives the git worktree add command.
+2. Pi setup: ext-pi/README.md step 1 gives the Nix route (export AGENT_CAT_RUNNER="$(command -v agentic-run)") and lists Node 22, the built fork and the node_modules links as prerequisites. The guide Prerequisites list has Pi-only and Emacs-only entries.
+3. Guide section 6 uses mkdir -p -m 700, so each command exits 0 in the order given.
+4. Guide section 6 writes observer.json for the issued credential, says how the TUI uses it, and links OPERATIONS.md "Provision a client".
+5. TUI: q in an open discard, withdraw or cancel confirmation closes it as n does (tui/src/Agentic/Tui/App.hs). The guide says that O lists open requests and reviews. The TUI journey asserts the q close.
+6. Emacs: the review buffer refreshes after a successful approval (wf-service.el), with an ERT test.
+7. The ACP session-option refusal names the adapter, not the interpreter.
+
+Acceptance: each failed step works when the guide is followed exactly; build, make -C doc check and JOURNEY-ONCE at N8 pass.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 806,
+    "issue_id": "acat-rd-rw-walkthrough-fidw",
+    "author": "johnw",
+    "text": "Evidence RD/RW/impl-r1 (commands.log): build exit 0; JOURNEY-ONCE N8 with the new q step exit 0; make -C doc check exit 0; emacs-loadpath exit 0; Emacs ERT after exit 0; emacs-service exit 0; guide section 6 walkthrough exit 0; model refusal now names adapter 'stub'. Fess rd-RW-r1 not blocking; findings in acat-rd-rw-fess-followup-brdl. The Pi host version change is gated in acat-rd-rw-pi-host-1-0-1-bzd2.",
+    "created_at": "2026-10-04T10:54:35Z"
+  }
+]
+#+end_src
+
 * DONE [#D] Give the remaining tool "cat" questions honest addressees
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

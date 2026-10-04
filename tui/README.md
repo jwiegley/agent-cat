@@ -23,7 +23,7 @@ profile names. These keys cover daily use:
 | Show the result | `r` | The live monitor shows it when the run ends |
 | Save the result | `s`, a new file path, then `Ctrl-D` | `s`, a new file path, then `Ctrl-D` |
 | Return | `Esc` | `Esc` |
-| Quit | `q` on the browser | `q`, which detaches. The runs continue at the manager. |
+| Quit | `q` on the browser | `q`, which detaches. The runs continue at the manager. In an open confirmation, `q` closes the confirmation as `n` does. |
 
 `?` lists the keys of the current screen. The sections below describe each
 mode in full.
@@ -520,9 +520,10 @@ its confirmation (`Agentic.Tui.ServiceLane.Confirmation`) only when
 `mutationKeyOutcome` would start the mutation, and otherwise it shows that key
 outcome. In the confirmation, `y` decides the mutation once more with
 `mutationKeyOutcome` and starts it only for the request or preparation that
-the key named, while that resource is still displayed and installed. `n` or
-`Esc` closes the confirmation with a key outcome that states that nothing was
-sent, and the confirmation takes every other key without an action. Each
+the key named, while that resource is still displayed and installed. `n`,
+`q` or `Esc` closes the confirmation with a key outcome that states that
+nothing was sent, and the confirmation takes every other key without an
+action. `q` therefore detaches only when no confirmation is open. Each
 command is sent once and completes only on its own effect-observed receipt
 whose effect names the request (`receiptMatches`): `input-changed` for a
 removal, `withdrawn` for a withdrawal, and `discarded` for a discard. The
@@ -881,8 +882,8 @@ and the line `Control:` states `answer refused: 412 stale-revision; decision
 changed; draft kept`. Any failure that the client does not declare is an
 internal fault. The frontend then shows fixed text without exception detail,
 stops automatic refresh and every further mutation, and keeps only read-only
-actions and detachment. `Ctrl-C`, or `q` while no answer editor has the keys,
-exits without cancelling manager-owned work. Service mode owns no child
+actions and detachment. `Ctrl-C`, or `q` while no answer editor and no
+confirmation has the keys, exits without cancelling manager-owned work. Service mode owns no child
 process, so the manager runs continue and no process of the frontend remains.
 The exit prints `Manager command outcome may be uncertain. The manager run was
 not cancelled.` only when a send is in flight or a command is unresolved, in

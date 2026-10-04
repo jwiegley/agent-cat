@@ -1540,7 +1540,7 @@ routingInspectionCmd reg rendering persona mode = do
 -- A failure to start or to shake hands is a transport failure (exit 2).
 adapterOptionsCmd :: Text -> [Text] -> Render -> IO ()
 adapterOptionsCmd adapter arguments rendering = do
-  let cfg = adapterConfig (adapterSpecFor adapter) (map T.unpack arguments)
+  let cfg = (adapterConfig (adapterSpecFor adapter) (map T.unpack arguments)) {acpAdapterName = Just adapter}
   offered <- withAcp cfg offeredSessionOptions
   let values = map compactValue
       optionJson = maybe Null (\(optionId, choices) -> object ["option" .= optionId, "values" .= choices])
@@ -3779,7 +3779,8 @@ acpConfigForRoute rr dir route = case engineRouteBackend route of
           { acpCwd = dir,
             acpTurnTimeoutMs = fromMaybe (acpTurnTimeoutMs base) (rrTimeoutMs rr),
             acpChildEnvironment = environment,
-            acpVerbose = rrVerbose rr
+            acpVerbose = rrVerbose rr,
+            acpAdapterName = Just adapter
           }
   BackendDeck _ -> error "Agentic.Cli.acpConfigForRoute: deck route"
 
