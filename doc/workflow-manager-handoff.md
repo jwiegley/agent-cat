@@ -192,18 +192,36 @@ None of these issues blocks the steps of the guide.
    `acat-rd-rw-fess-followup-brdl`. The fess audits of PO2 and PO3 filed
    `acat-po2-paper-cut-fess-vs16` and `acat-po3-emacs-admission-fess-o40u`,
    also P3.
-6. **Publication.** `origin/workflow-manager-checkpoint-20260923` and the
-   local branch `tui` read `b93617d3`, the readiness record. The commits of
-   the follow-up run, `c7c4b5a2` to `4c06a8bc`, are not pushed.
+6. **Publication.** `origin/main` holds every commit of the readiness run
+   and of the follow-up run. The `emacs-native` branch is not pushed.
 
 The security items of "Deferred security items" below stay deferred under
 the operator direction of 2026-09-30.
 
+### Repository cleanup of 2026-10-05
+
+On 2026-10-05 the operator approved the removal of the superseded work.
+The cleanup removed the 20 worktrees of the former work lines under
+`~/Products/agent-cat-workflow-manager/implementation.9tGzKH` and the three
+`agent-cat-routing-v2` checkouts under `~/src`. It deleted every
+subdirectory of that implementation directory except
+`service-tui.purvEwEv/resume-20260923`, which freed about 660 GB of test
+scratch and build output. It deleted the 29 local branches other than
+`main` and the work branch. Each of them was contained in `main` or
+superseded by commits in `main`. On the remote it deleted `tui`,
+`docs-revision`, `workflow-manager-checkpoint-20260923`,
+`archive/service-tui-pre-broker-20260923` and the Dependabot branch of pull
+request 1, which closed that request. The remote now holds `main` alone,
+and the local work branch tracks `origin/main`. The two stashes became the
+local tags `archive/stash-pre-halt-service-tui-20260923` and
+`archive/stash-wm003-verified-20260910`. A path under the implementation
+directory in a dated section below names a record, and the directory it
+names may no longer exist.
+
 ### Next action
 
 1. The operator follows `doc/getting-started.md` and starts daily use.
-2. The operator decides on a push of the follow-up commits and of the
-   `emacs-native` branch.
+2. The operator decides on a push of the `emacs-native` branch.
 3. The medium findings of items 2, 3 and 4 above go to their owners when
    the operator schedules them.
 

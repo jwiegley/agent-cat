@@ -21,7 +21,7 @@ WM-029 after that. Every other package and gate is open in the tracker.
 
 ## Evidence conventions
 
-Two private directories hold the evidence. They are never committed.
+The evidence is kept in private directories that are never committed.
 
 - `$R` is
   `/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923`.
@@ -30,8 +30,11 @@ Two private directories hold the evidence. They are never committed.
   `<name>.exit` file, and a failed first attempt is kept as
   `<name>-attempt<n>`.
 - `$I` is `/Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH`.
-  It holds the units of the accepted packages WM-001 to WM-022, such as
-  `$I/vertical.d42c7UhQ`.
+  It held the units of the accepted packages WM-001 to WM-022, such as
+  `$I/vertical.d42c7UhQ`. The cleanup of 2026-10-05 removed every
+  subdirectory of `$I` except the one that holds `$R`. A path under `$I`
+  outside `$R` therefore names a record and no longer a file. The tracker
+  and `doc/checkpoints/` keep the record of each acceptance.
 
 A mode is a mode of `manager/test/service_http.py`. Unless the row states
 otherwise, a mode ran once at `-N8` against a real manager over local TLS with
