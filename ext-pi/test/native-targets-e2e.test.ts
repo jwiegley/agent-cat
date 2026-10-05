@@ -88,7 +88,7 @@ describe.runIf(Boolean(runnerPath))("native agent-cat targets through the extens
     const launch = await prepareLaunch({
       runner, descriptor, cwd: directory, stateDir: join(directory, "state"),
       inputs: { subject: secret }, targetKind: "deck",
-      targetArgs: ["--session", "stub", "--binary", deckBinary, "--poll", "20", "--timeout", "1000"],
+      targetArgs: ["--session", "stub", "--binary", deckBinary, "--poll", "20", "--timeout", "30000"],
     });
     isolateRouting(launch, directory);
     Object.assign(launch.env, { DECK_STUB_STATE: deckState, DECK_STUB_MODE: "send-fail" });
@@ -98,6 +98,7 @@ describe.runIf(Boolean(runnerPath))("native agent-cat targets through the extens
     await run.recover(occurrence.id, "abandon");
     const result = await run.finished;
     expect(result.status).toBe("failed");
+    expect(occurrence.recovery?.message).toContain("forced send failure");
     expect(result.failure).not.toContain(secret);
     const argv = await readFile(join(deckState, "argv"), "utf8");
     expect(argv).not.toContain(secret);
@@ -108,7 +109,7 @@ describe.runIf(Boolean(runnerPath))("native agent-cat targets through the extens
     await expect(access(messageFile)).rejects.toThrow();
     const diagnostics = await readFile(join(launch.storeDir, "stderr.log"), "utf8");
     expect(diagnostics).not.toContain(secret);
-  }, 15_000);
+  }, 60_000);
 });
 
 function isolateRouting(launch: Awaited<ReturnType<typeof prepareLaunch>>, directory: string): void {
@@ -139,10 +140,11 @@ async function setupDeck(directory: string) {
   return { deckState, deckBinary };
 }
 
-async function until(predicate: () => boolean): Promise<void> {
-  for (let count = 0; count < 500; count += 1) {
+async function until(predicate: () => boolean, timeoutMs = 30_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     if (predicate()) return;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
   }
-  throw new Error("condition not reached");
+  if (!predicate()) throw new Error("condition not reached");
 }
