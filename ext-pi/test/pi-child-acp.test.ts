@@ -32,7 +32,8 @@ async function temporaryDirectory(): Promise<string> {
 }
 
 async function openChild(directory: string): Promise<{ sessionId: string; close: () => Promise<number | null> }> {
-  const child = spawn(process.execPath, [resolve("src/pi-child-acp.mjs")], { cwd: directory, env: { ...process.env, PI_PACKAGE_DIR: piPackageRoot }, stdio: ["pipe", "pipe", "pipe"] });
+  const env = { ...process.env, PI_CODING_AGENT_DIR: join(directory, "agent"), XDG_CONFIG_HOME: join(directory, "isolated-config"), PI_PACKAGE_DIR: piPackageRoot };
+  const child = spawn(process.execPath, [resolve("src/pi-child-acp.mjs")], { cwd: directory, env, stdio: ["pipe", "pipe", "pipe"] });
   const lines = readline.createInterface({ input: child.stdout })[Symbol.asyncIterator]();
   child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: 1 } })}\n`);
   expect(JSON.parse((await lines.next()).value).result.protocolVersion).toBe(1);
