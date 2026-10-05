@@ -984,7 +984,7 @@ review of the queued request before any command of the lifetime, and
 completes its run after the approval. The manager log holds one enqueue
 command of that request, one receipt for each command and one start relay
 for each run. The local suites of the Emacs client (`ci/emacs.sh` of
-agent-workflows-emacs-native) and of the Pi extension (`npm test` and
+agent-workflows) and of the Pi extension (`npm test` and
 `npm run test:integration` of `ext-pi`) cover their local modes.
 
 ## The procedure exercise

@@ -24,8 +24,8 @@ cost.
   The section [Install and start](../ext-pi/README.md#install-and-start) of
   `ext-pi/README.md` states these prerequisites.
 - For the Emacs client of section 4 only: GNU Emacs and a checkout of the
-  branch `emacs-native` of the agent-workflows repository, which holds the
-  service client `emacs/wf-service.el`.
+  branch `main` of the agent-workflows repository, which holds the service
+  client `emacs/wf-service.el`.
 
 ## 1. Install the runner
 
@@ -258,13 +258,13 @@ section 3 and runs `hello` with `/wfm hello`.
 ### Emacs
 
 The Emacs client is part of the separate agent-workflows repository. Its
-service client, `emacs/wf-service.el`, is on the branch `emacs-native` of that
-repository. The branch `main` does not have it. On this machine the worktree
-`~/src/agent-workflows-emacs-native` holds that branch, so the `load-path` of
-the client is `~/src/agent-workflows-emacs-native/emacs`. The section "Using
-service mode" of the `README.md` of that worktree loads the client, names the
-client profile of section 3 in `wf-manager-profiles`, and runs a workflow
-with `M-x wf-service` and `M-x wf-run`.
+service client, `emacs/wf-service.el`, is on the branch `main` of that
+repository, and the `emacs` directory of a checkout of that branch must be
+on the `load-path` of Emacs. The section "Using service mode" of the
+`README.md` of that repository uses the checkout `~/src/agent-workflows` and
+puts `~/src/agent-workflows/emacs` on `load-path`. That section then loads
+the client, names the client profile of section 3 in `wf-manager-profiles`,
+and runs a workflow with `M-x wf-service` and `M-x wf-run`.
 
 ## 5. Real engines
 

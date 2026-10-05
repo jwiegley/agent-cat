@@ -67,11 +67,12 @@ re-check is under `PO/recheck`. The closeout of the follow-up run ran
   install, and `npm run check` and `npm test` pass on that host
   (`PO/PO1/impl-r1`).
 - Connect Emacs through the section "Using service mode" of the README of
-  the `emacs-native` branch of agent-workflows. A review that is closed with
-  `q` is discarded on confirmation, `M-x wf-requests` lists open requests,
-  and the run view opens after approval. After an approval or a `g`
-  refresh, the review buffer shows only the current admission: the
-  Current, Queue position and Blocking reasons lines.
+  the branch `main` of agent-workflows, with `~/src/agent-workflows/emacs`
+  on `load-path`. A review that is closed with `q` is discarded on
+  confirmation, `M-x wf-requests` lists open requests, and the run view
+  opens after approval. After an approval or a `g` refresh, the review
+  buffer shows only the current admission: the Current, Queue position and
+  Blocking reasons lines.
 - Run `nix build .#agentic-run` in the checkout without a change to
   `git status`, because `.gitignore` ignores the `/result` link.
 - Operate the manager: `status`, `check-store`, `reload-profiles`, `drain`,
@@ -180,10 +181,13 @@ None of these issues blocks the steps of the guide.
    (`acat-rd-r7-fess-followup-2tw0`). The box of the discard confirmation
    reads `n BACK`, but its footer reads `n/q/Esc BACK`. Both `n` and `q`
    close it.
-4. **Emacs client location.** The service client is only on the local
-   branch `emacs-native` of `~/src/agent-workflows-emacs-native`, 35
-   commits ahead of `origin/emacs-native` and never pushed. The branch
-   `main` of agent-workflows has the old client.
+4. **Emacs client.** The client is on the branch `main` of agent-workflows
+   since the merge commit `706dba4`. The `flake.lock` of agent-workflows
+   pins agent-cat `94573276`, which has neither the `frontend` verb nor the
+   `frontend-io` verb that the client needs in local mode. The `wf` of the
+   Nix package of agent-workflows therefore cannot prepare a local run
+   until that pin moves. `agentic-run` of agent-cat `main` serves local mode
+   as `wf-program`.
 5. **Follow-up findings.** The fess audits of R1 to RW filed one follow-up
    each, all P3: `acat-rd-r1-fess-followup-y8oy`,
    `acat-rd-r2-fess-followup-8hyu`, `acat-rd-r3-fess-followup-iyb4`,
@@ -193,7 +197,9 @@ None of these issues blocks the steps of the guide.
    `acat-po2-paper-cut-fess-vs16` and `acat-po3-emacs-admission-fess-o40u`,
    also P3.
 6. **Publication.** `origin/main` holds every commit of the readiness run
-   and of the follow-up run. The `emacs-native` branch is not pushed.
+   and of the follow-up run. The merge commit `706dba4` and the README
+   commit `c70db8c` are on the local branch `main` of agent-workflows, and
+   neither is pushed.
 
 The security items of "Deferred security items" below stay deferred under
 the operator direction of 2026-09-30.
@@ -218,10 +224,21 @@ local tags `archive/stash-pre-halt-service-tui-20260923` and
 directory in a dated section below names a record, and the directory it
 names may no longer exist.
 
+### Emacs client merge of 2026-10-05
+
+On 2026-10-05 the branch `emacs-native` of agent-workflows was merged into
+its branch `main` as the merge commit `706dba4`. The README commit `c70db8c`,
+which follows the merge, describes the client on `main`, with the
+`load-path` entry `~/src/agent-workflows/emacs`. The `emacs` directory of
+`706dba4` is the same tree as that of `0ff309b`, the `emacs-native` commit
+of PO3 that the re-check of the follow-up run exercised. Since this merge,
+the guide, the compatibility matrix of `doc/api/README.md` and the
+readiness items above name the branch `main`.
+
 ### Next action
 
 1. The operator follows `doc/getting-started.md` and starts daily use.
-2. The operator decides on a push of the `emacs-native` branch.
+2. The operator decides on a push of the branch `main` of agent-workflows.
 3. The medium findings of items 2, 3 and 4 above go to their owners when
    the operator schedules them.
 

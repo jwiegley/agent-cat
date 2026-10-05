@@ -16321,7 +16321,7 @@ Evidence: resume-20260923/RD/R7/impl-r1 (r7-guide NN-*.log and .exit, every non-
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-04 Sun 03:54]
-:MODIFIED: [2026-10-04 Sun 08:59]
+:MODIFIED: [2026-10-05 Mon 14:10]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -16358,6 +16358,13 @@ Non-blocking findings of fess audit fess/rd-RW-r1.md on readiness subtask RW (ge
     "author": "johnw",
     "text": "PO3 resolves item 2 (agent-workflows emacs-native, emacs/wf-service.el): wf-service-review-text prints the Admission: block only while stored lines exist, and wf-service-review-refresh and the run step of wf-service-review-approve clear the stored lines when they read the request again, so the review buffer shows only the current admission after approval or g. New ERT test wf-service-review-shows-the-current-admission-after-a-change runs the real refresh and approve commands and failed before the fix (ert-before-fix.log). Evidence PO/PO3/impl-r1: ci/emacs.sh exit 0 (byte compilation and checkdoc clean for 6 files, smoke 38/38, transport 104/104), emacs-service at N8 exit 0 (steps 1-9). Fess po-PO3-r1 non-blocking; notes in acat-po3-emacs-admission-fess-o40u. Items 1 and 2 are now resolved by PO2 and PO3; items 3 to 10 remain open.",
     "created_at": "2026-10-04T15:59:22Z"
+  },
+  {
+    "id": 813,
+    "issue_id": "acat-rd-rw-fess-followup-brdl",
+    "author": "johnw",
+    "text": "The agent-workflows merge commit 706dba4c7ee0b4ac938258c6cb77edeb212a870a resolves item 4. It merges emacs-native 0ff309b into agent-workflows main, and its emacs/ directory is the same tree as that of 0ff309b (3cc08ec2). The README commit c70db8c after it describes the client on main: a checkout of the repository with ~/src/agent-workflows/emacs on load-path, and no worktree command. The agent-cat commit that records this comment points the prerequisites and section 4 of doc/getting-started.md, the Emacs client row of doc/api/README.md (branch main, merge commit 706dba4), manager/OPERATIONS.md, the RECORD line of the rollback mode of manager/test/service_http.py and the readiness section of doc/workflow-manager-handoff.md at main. make -C doc check exit 0. Both agent-workflows commits are local, and the push of agent-workflows main is the decision of the operator (handoff, Next action 2). Items 3 and 5 to 10 remain open.\n",
+    "created_at": "2026-10-05T21:10:26Z"
   }
 ]
 #+end_src

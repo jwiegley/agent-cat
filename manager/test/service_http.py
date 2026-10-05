@@ -6149,7 +6149,7 @@ def rollback_checks():
     print("PASS rollback case 2c: the local run and the reads changed none of", len(before), "recorded paths of the manager",
           "root, no process of the manager remains, and run", waiting_run, "stays cancelled", flush=True)
     print("RECORD rollback: the local modes of the other clients are covered by their existing local suites, which the gate",
-          "runs: Emacs local mode by ci/emacs.sh of agent-workflows-emacs-native, and Pi local mode by npm test and",
+          "runs: Emacs local mode by ci/emacs.sh of agent-workflows, and Pi local mode by npm test and",
           "npm run test:integration of ext-pi", flush=True)
 
     # 2d. Offline status, only after the comparison.

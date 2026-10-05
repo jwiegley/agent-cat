@@ -1173,7 +1173,7 @@ repository exercise against this manager.
 | Component | Version that the checks exercise |
 |---|---|
 | Terminal frontend | `agentic-run --tui --service` of the same `agentic` package as the manager, version 0.1.0.0. |
-| Emacs client | `wf.el`, `wf-manager.el` and `wf-service.el` 0.1.0 of the `agent-workflows` repository, branch `emacs-native`, commit `6e8eac0bc0fc9a235f9eab66bfec0f3f9cda1c15`. |
+| Emacs client | `wf.el`, `wf-manager.el` and `wf-service.el` 0.1.0 of the `agent-workflows` repository, branch `main`, merge commit `706dba4c7ee0b4ac938258c6cb77edeb212a870a`. |
 | Emacs | GNU Emacs 30.2 is tested. The client declares Emacs 29.1 in `Package-Requires`, and no check runs Emacs 29.1. |
 | Pi extension | `ext-pi` of this repository on the built Pi fork 1.0.1, commit `1ad18c15d`, as [the extension README](../../ext-pi/README.md#supported-host) states, with Node 22.23.3. |
 | Platform | macOS 27.0 on arm64 is the only tested platform. |
