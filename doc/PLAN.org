@@ -27078,7 +27078,7 @@ explicitly authorized operation.
 :LABELS:   ["p10","wm-package","workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-09-09 Wed 22:33]
-:MODIFIED: [2026-10-03 Sat 18:07]
+:MODIFIED: [2026-10-04 Sun 09:13]
 :CREATED_BY: johnw
 :EXTERNAL_REF: agent-cat/workflow-manager/WM-044
 :SOURCE_REPO: agent-cat
@@ -27618,6 +27618,13 @@ is ready, not that an operator has deployed it.
     "author": "johnw",
     "text": "PH closeout (bacc4dc6): the handoff and release evidence record the PH run and the G5 functional result; make -C doc check passed. The independent human review is pending and the security review is deferred. Stays open.",
     "created_at": "2026-10-04T01:07:51Z"
+  },
+  {
+    "id": 812,
+    "issue_id": "acat-wm-044-6utw",
+    "author": "johnw",
+    "text": "Polish pass closeout (PO): doc/workflow-manager-handoff.md 'Readiness for daily use' now records PO1 (c7c4b5a2), PO2 (1d1bec1e), PO3 (4c06a8bc, emacs-native 0ff309b) and the re-check of the follow-up run. Evidence: PO/<subtask>/impl-r1, PO/recheck/commands.log, PO/closeout/doc-check.log (make -C doc check exit 0) in the resume directory. Fess: no findings. Package stays open for closeout review.",
+    "created_at": "2026-10-04T16:13:17Z"
   }
 ]
 #+end_src
