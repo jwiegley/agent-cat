@@ -166,7 +166,7 @@ run references.
 
 ## Supported host
 
-The supported host is the built Pi fork at `~/src/fork/pi`, commit `1ad18c15d`.
+The supported host is the built Pi fork at `~/src/fork/pi`, commit `bb5bf98f5`.
 The directory `node_modules/@earendil-works` holds one symbolic link for each
 host package, and each link points into `~/src/fork/pi/packages`. The linked
 packages are these, each at version 1.0.1:
