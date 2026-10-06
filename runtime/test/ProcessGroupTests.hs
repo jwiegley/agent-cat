@@ -20,7 +20,7 @@ import qualified Data.ByteString.Char8 as BC
 import GHC.Clock (getMonotonicTimeNSec)
 import GHC.IO.FD (FD (fdFD, fdIsNonBlocking))
 import GHC.IO.Handle.FD (handleToFd)
-import System.Directory (canonicalizePath, createDirectory, getTemporaryDirectory, removePathForcibly)
+import System.Directory (canonicalizePath, createDirectory, findExecutable, getTemporaryDirectory, removePathForcibly)
 import System.Environment (getExecutablePath, lookupEnv, setEnv, unsetEnv)
 import System.Exit (ExitCode (..), exitFailure)
 import System.FilePath ((</>))
@@ -47,6 +47,8 @@ import GHC.IO.Exception (IOErrorType (..), IOException (ioe_errno, ioe_filename,
 import System.Posix.IO (OpenFileFlags (cloexec, creat, exclusive), OpenMode (WriteOnly))
 #else
 import Data.List (sort)
+import Foreign.C.Error (Errno (Errno), eBADF, eNOEXEC)
+import GHC.IO.Exception (IOException (ioe_errno, ioe_location))
 import System.Directory (listDirectory)
 #endif
 
@@ -88,18 +90,36 @@ openDescriptors pid = sort . map read <$> listDirectory ("/proc/" <> show pid <>
 #endif
 
 -- | The soft descriptor limit of the spawn-cost check. It is the soft
--- @RLIMIT_NOFILE@ of the validation host, and the check refuses to run on a
--- host that does not allow it.
+-- @RLIMIT_NOFILE@ of the validation host. On a host whose hard limit is lower,
+-- the check measures at that hard limit instead.
 highDescriptorLimit :: Integer
 highDescriptorLimit = 1048576
+
+-- | The lowest hard descriptor limit at which the spawn-cost check runs. It is
+-- the default hard limit of systemd, which a build by root through the local
+-- Nix store inherits. A spawn that closes every descriptor up to this limit
+-- costs about 50 ms, which is more than three seconds for the whole check, so
+-- the check still tells such a spawn from @posix_spawn@. The check refuses to
+-- run on a host that does not allow this limit.
+lowestDescriptorLimit :: Integer
+lowestDescriptorLimit = 524288
+
+-- | The soft limit at which the spawn-cost check measures. It is
+-- 'highDescriptorLimit', or the hard limit of a host that allows less.
+spawnCostLimit :: IO Integer
+spawnCostLimit = do
+  allowed <- hardLimit <$> getResourceLimit ResourceOpenFiles
+  pure $ case allowed of
+    ResourceLimit hard -> min hard highDescriptorLimit
+    _ -> highDescriptorLimit
 
 -- | The number of spawns that the spawn-cost check times.
 timedSpawns :: Int
 timedSpawns = 64
 
 -- | The bound on the time that 'timedSpawns' spawns spend inside
--- 'createProcessGroup' at 'highDescriptorLimit'. A spawn that closes every
--- descriptor up to the limit costs about 100 ms at that limit, which is more
+-- 'createProcessGroup' at 'spawnCostLimit'. A spawn that closes every
+-- descriptor up to 'highDescriptorLimit' costs about 100 ms, which is more
 -- than six seconds for the whole check. A @posix_spawn@ costs about one
 -- millisecond, which is about 0.1 s for the whole check.
 spawnBudgetNs :: Integer
@@ -121,12 +141,25 @@ processGroupTests = do
     ownerLockCheck directory
 #endif
   spawnCostCheck
-  putStrLn ("PASS process group: stdio-only descriptors, nonblocking parent pipe ends, closed standard descriptors, session leader, stopped leader lives, execvp and find_executable resolution, exec error class/errno/file, inherited owner lock, spawn cost below one second for " <> show timedSpawns <> " spawns at soft RLIMIT_NOFILE " <> show highDescriptorLimit)
+  measuredLimit <- spawnCostLimit
+#if defined(darwin_HOST_OS)
+  let platformChecks = "closed standard descriptors, session leader, stopped leader lives, execvp and find_executable resolution, exec error class/errno/file, inherited owner lock"
+#else
+  let platformChecks = "closed standard descriptors or the process-library refusal, session leader, stopped leader lives, execvp and execvpe resolution, exec errors"
+#endif
+  putStrLn ("PASS process group: stdio-only descriptors, nonblocking parent pipe ends, " <> platformChecks <> ", spawn cost below one second for " <> show timedSpawns <> " spawns at soft RLIMIT_NOFILE " <> show measuredLimit)
 
 expect :: String -> Bool -> IO ()
 expect label condition = unless condition $ do
   hPutStrLn stderr ("FAIL " <> label)
   exitFailure
+
+-- | The absolute path of a tool on the search path. The checks spawn their
+-- tools by absolute path, so that only the resolution checks depend on
+-- executable resolution. The path comes from the search path because a build
+-- sandbox may hold no tool in @/bin@ or @/usr/bin@ except @/bin/sh@.
+pathTool :: String -> IO FilePath
+pathTool name = findExecutable name >>= maybe (ioError (userError ("process group test: no " <> name <> " on the search path"))) pure
 
 -- | Run a command to completion and return its exit status and standard
 -- output. The feed action runs first, for a command that reads input.
@@ -148,10 +181,11 @@ piped command = command {std_in = CreatePipe, std_out = CreatePipe, std_err = Cr
 -- that files which the dynamic loader opens and closes during exec cannot
 -- decide the result.
 descriptorCheck :: IO ()
-descriptorCheck =
+descriptorCheck = do
+  sleepPath <- pathTool "sleep"
   bracket (openFd "/dev/null" ReadOnly defaultFileFlags) closeFd $ \low ->
     bracket (dupTo low (Fd 900)) closeFd $ \high ->
-      bracket (createProcessGroup (piped (proc "/bin/sleep" ["30"]))) (\group -> terminateProcessGroup 2000000 group `finally` closeGroupPipes group) $ \group -> do
+      bracket (createProcessGroup (piped (proc sleepPath ["30"]))) (\group -> terminateProcessGroup 2000000 group `finally` closeGroupPipes group) $ \group -> do
         let settle :: Int -> IO [Int]
             settle remaining = do
               held <- openDescriptors (groupPid group)
@@ -165,8 +199,9 @@ descriptorCheck =
 -- so that a read or a write waits in the I/O manager and never blocks a
 -- capability.
 nonblockingCheck :: IO ()
-nonblockingCheck =
-  bracket (createProcessGroup (piped (proc "/bin/sleep" ["30"]))) (\group -> terminateProcessGroup 2000000 group `finally` closeGroupPipes group) $ \group ->
+nonblockingCheck = do
+  sleepPath <- pathTool "sleep"
+  bracket (createProcessGroup (piped (proc sleepPath ["30"]))) (\group -> terminateProcessGroup 2000000 group `finally` closeGroupPipes group) $ \group ->
     forM_ [("input", groupInput group), ("output", groupOutput group), ("error", groupErrors group)] $ \(name, end) -> do
       handle <- maybe (ioError (userError ("process group test: no " <> name <> " pipe"))) pure end
       descriptor <- handleToFd handle
@@ -208,32 +243,50 @@ withClosedStandard descriptors action = do
 -- has taken its number in the parent. The process-1.6.26.1 fork path refuses
 -- that second case with an exec error from @close(parent_end)@, because its
 -- 'NoStream' step closes descriptor 0, which holds the parent end of the error
--- pipe, before the error stream is set up.
+-- pipe, before the error stream is set up. The session spawn of macOS must
+-- spawn the child. Other platforms keep the process-library spawn, so there
+-- the check also accepts that refusal, which runs no command.
 closedStandardChecks :: IO ()
 closedStandardChecks = do
+  catPath <- pathTool "cat"
+  sleepPath <- pathTool "sleep"
   echoed <- withClosedStandard [Fd 0] $ do
     free <- try @IOException (queryFdOption (Fd 0) CloseOnExec)
     expect "closed standard input: descriptor 0 is free before the spawn" (either (const True) (const False) free)
-    capture (proc "/bin/cat" []) {std_in = CreatePipe, std_out = CreatePipe, std_err = NoStream} $ \group ->
+    capture (proc catPath []) {std_in = CreatePipe, std_out = CreatePipe, std_err = NoStream} $ \group ->
       maybe (ioError (userError "process group test: no stdin pipe")) (\input -> BC.hPut input (BC.pack "closed standard input\n") >> hClose input) (groupInput group)
   expect "closed standard input: a pipe end on descriptor 0 reaches the child as its standard input"
     (echoed == (ExitSuccess, BC.pack "closed standard input\n"))
-  held <- withClosedStandard [Fd 0, Fd 1] $ do
+  outcome <- withClosedStandard [Fd 0, Fd 1] $ do
     free <- forM [Fd 0, Fd 1] (try @IOException . flip queryFdOption CloseOnExec)
     expect "closed standard input and output: descriptors 0 and 1 are free before the spawn" (all (either (const True) (const False)) free)
-    let command = (proc "/bin/sleep" ["30"]) {std_in = NoStream, std_out = Inherit, std_err = CreatePipe}
-    bracket (createProcessGroup command) (\group -> terminateProcessGroup 2000000 group `finally` closeGroupPipes group) $ \group -> do
-      expect "closed standard input and output: the error stream is a pipe" (groupErrors group /= Nothing)
-      settledDescriptors (groupPid group) [2]
-  unless (held == [2]) $
-    hPutStrLn stderr ("     child descriptors: " <> unwords (map show held) <> "; expected 2 only")
-  expect "closed standard output inherited by the child stays closed when an error pipe end takes its number" (held == [2])
+    let command = (proc sleepPath ["30"]) {std_in = NoStream, std_out = Inherit, std_err = CreatePipe}
+    bracket (try @IOException (createProcessGroup command)) (either (const (pure ())) (\group -> terminateProcessGroup 2000000 group `finally` closeGroupPipes group)) $ \spawned ->
+      case spawned of
+        Left refusal -> pure (Left refusal)
+        Right group -> do
+          expect "closed standard input and output: the error stream is a pipe" (groupErrors group /= Nothing)
+          Right <$> settledDescriptors (groupPid group) [2]
+  case outcome of
+#if defined(darwin_HOST_OS)
+    Left refusal -> expect ("closed standard input and output: the session spawn spawns the child, not " <> show refusal) False
+#else
+    Left refusal -> do
+      putStrLn ("     closed standard input and output: the process-library spawn refuses the command: " <> show refusal)
+      expect "closed standard input and output: the process-library spawn refuses only at close(parent_end) with EBADF"
+        (fmap Errno (ioe_errno refusal) == Just eBADF && ioe_location refusal == "createProcess: close(parent_end)")
+#endif
+    Right descriptors -> do
+      unless (descriptors == [2]) $
+        hPutStrLn stderr ("     child descriptors: " <> unwords (map show descriptors) <> "; expected 2 only")
+      expect "closed standard output inherited by the child stays closed when an error pipe end takes its number" (descriptors == [2])
 
 -- | The child leads a new session and a new process group.
 sessionCheck :: IO ()
 sessionCheck = do
   parent <- getProcessID >>= getSessionOf
-  let command = (proc "/bin/sleep" ["30"]) {std_in = NoStream, std_out = NoStream, std_err = NoStream}
+  sleepPath <- pathTool "sleep"
+  let command = (proc sleepPath ["30"]) {std_in = NoStream, std_out = NoStream, std_err = NoStream}
   bracket (createProcessGroup command) (\group -> terminateProcessGroup 2000000 group `finally` closeGroupPipes group) $ \group -> do
     let pid = groupPid group
     session <- getSessionOf pid
@@ -248,7 +301,8 @@ sessionCheck = do
 -- published outcome, and then continues it before the cleanup ends it.
 stoppedCheck :: IO ()
 stoppedCheck = do
-  let command = (proc "/bin/sleep" ["30"]) {std_in = NoStream, std_out = NoStream, std_err = NoStream}
+  sleepPath <- pathTool "sleep"
+  let command = (proc sleepPath ["30"]) {std_in = NoStream, std_out = NoStream, std_err = NoStream}
   bracket (createProcessGroup command) (\group -> terminateProcessGroup 2000000 group `finally` closeGroupPipes group) $ \group -> do
     signalProcessGroup sigSTOP (groupPid group)
     threadDelay 300000
@@ -269,8 +323,9 @@ stoppedCheck = do
 -- spawn names a closed descriptor.
 ownerLockCheck :: FilePath -> IO ()
 ownerLockCheck directory = do
+  sleepPath <- pathTool "sleep"
   let path = directory </> "owner.lock"
-      command = (proc "/bin/sleep" ["30"]) {std_in = NoStream, std_out = NoStream, std_err = NoStream}
+      command = (proc sleepPath ["30"]) {std_in = NoStream, std_out = NoStream, std_err = NoStream}
   parent <- openFd path WriteOnly defaultFileFlags {creat = Just 0o600, exclusive = True, cloexec = True}
   group <- (do
       lockPrivateDescriptor "owner lock check" parent
@@ -298,7 +353,8 @@ ownerLockCheck directory = do
 
 -- | The executable resolution of the process-library fork path. With an
 -- explicit environment, @find_executable@ resolves the name and @execve@ runs
--- it without a shell fallback. Without one, @execvp@ runs it in the child
+-- it without a shell fallback, where the C library lacks @execvpe@, as on
+-- macOS. Without an explicit environment, @execvp@ runs it in the child
 -- working directory, with the shell fallback for a file that is not an
 -- executable image.
 resolutionChecks :: FilePath -> IO ()
@@ -329,10 +385,15 @@ resolutionChecks directory = do
 -- still listed as a child of the caller for a short time. The kernel removes
 -- it without a wait by the caller, so the check allows five seconds for every
 -- new child to disappear without a reap. Other platforms check only that each
--- failure raises an exec error.
+-- failure raises an exec error, with one exception. Their process-library
+-- fork path runs a command with an explicit environment through @execvpe@
+-- where the C library provides one, and the @execvpe@ of glibc runs a file
+-- without an image format through @/bin/sh@. The check of that file therefore
+-- accepts either its @ENOEXEC@ exec error or its run in the working directory.
 execErrorChecks :: FilePath -> IO ()
 #if defined(darwin_HOST_OS)
 execErrorChecks directory = do
+  truePath <- pathTool "true"
   writeFile (directory </> "noexec") "#!/bin/sh\n"
   setFileMode (directory </> "noexec") 0o600
   let explicit = Just [("PATH", "/usr/bin:/bin")]
@@ -344,8 +405,8 @@ execErrorChecks directory = do
           ("an unresolved name, explicit environment", "agentic-missing-tool", Nothing, explicit, OtherError, -2, "agentic-missing-tool"),
           ("an executable without execute permission, inherited environment", directory </> "noexec", Nothing, Nothing, PermissionDenied, 13, directory </> "noexec"),
           ("an executable without execute permission, explicit environment", directory </> "noexec", Nothing, explicit, PermissionDenied, 13, directory </> "noexec"),
-          ("a missing working directory, inherited environment", "/usr/bin/true", Just missing, Nothing, NoSuchThing, 2, "/usr/bin/true"),
-          ("a missing working directory, explicit environment", "/usr/bin/true", Just missing, explicit, NoSuchThing, 2, "/usr/bin/true"),
+          ("a missing working directory, inherited environment", truePath, Just missing, Nothing, NoSuchThing, 2, truePath),
+          ("a missing working directory, explicit environment", truePath, Just missing, explicit, NoSuchThing, 2, truePath),
           ("a directory as the executable, inherited environment", directory, Nothing, Nothing, PermissionDenied, 13, directory),
           ("a directory as the executable, explicit environment", directory, Nothing, explicit, PermissionDenied, 13, directory),
           ("a file without an image format, explicit environment", directory </> "plain", Just directory, explicit, InvalidArgument, 8, directory </> "plain")
@@ -376,23 +437,33 @@ execErrorChecks directory = do
       raises executable environment = do
         outcome <- try @IOException (createProcessGroup (proc executable []) {cwd = Just directory, env = environment, std_in = NoStream, std_out = NoStream, std_err = NoStream})
         either (const (pure True)) (\group -> (terminateProcessGroup 2000000 group `finally` closeGroupPipes group) >> pure False) outcome
-  raises "./plain" explicit >>= expect "explicit environment: a file without an image format is an exec error"
+  plain <- bracket (try @IOException (createProcessGroup (proc "./plain" []) {cwd = Just directory, env = explicit, std_in = NoStream, std_out = CreatePipe, std_err = NoStream})) (either (const (pure ())) (\group -> terminateProcessGroup 2000000 group `finally` closeGroupPipes group)) $ \spawned ->
+    case spawned of
+      Left failure -> pure (Left failure)
+      Right group -> do
+        output <- maybe (ioError (userError "process group test: no stdout pipe")) pure (groupOutput group)
+        bytes <- BC.hGetContents output
+        status <- waitProcessGroup group
+        pure (Right (status, bytes))
+  let plainHolds = either ((== Just eNOEXEC) . fmap Errno . ioe_errno) (== (ExitSuccess, BC.pack ("plain ran in " <> directory <> "\n"))) plain
+  unless plainHolds $
+    hPutStrLn stderr ("     explicit environment, a file without an image format: observed " <> show plain)
+  expect "explicit environment: a file without an image format is an ENOEXEC exec error, or runs through /bin/sh under execvpe" plainHolds
   raises (directory </> "missing") Nothing >>= expect "a missing absolute executable is an exec error"
   raises "agentic-missing-tool" explicit >>= expect "an unresolved name under an explicit environment is an exec error"
 #endif
 
 -- | Spawn cost must not grow with the soft @RLIMIT_NOFILE@. Each measurement
 -- runs in a fresh process, which sets its soft limit before its first spawn.
--- The check requires a host whose hard limit allows 'highDescriptorLimit'.
+-- The check measures at 'spawnCostLimit', and it requires a host whose hard
+-- limit allows at least 'lowestDescriptorLimit'.
 spawnCostCheck :: IO ()
 spawnCostCheck = do
   executable <- getExecutablePath
-  allowed <- hardLimit <$> getResourceLimit ResourceOpenFiles
-  case allowed of
-    ResourceLimit hard | hard < highDescriptorLimit ->
-      expect ("spawn-cost check requires a hard RLIMIT_NOFILE of at least " <> show highDescriptorLimit <> ", and this host allows " <> show hard) False
-    _ -> pure ()
-  costs <- forM [highDescriptorLimit, 4096] $ \limit -> do
+  measuredLimit <- spawnCostLimit
+  expect ("spawn-cost check requires a hard RLIMIT_NOFILE of at least " <> show lowestDescriptorLimit <> ", and this host allows " <> show measuredLimit)
+    (measuredLimit >= lowestDescriptorLimit)
+  costs <- forM [measuredLimit, 4096] $ \limit -> do
     (status, output) <- capture (proc executable ["--process-group-spawn-cost", show limit, show timedSpawns]) {std_in = NoStream, std_out = CreatePipe, std_err = Inherit} (const (pure ()))
     expect ("spawn-cost probe at soft RLIMIT_NOFILE " <> show limit <> " completes") (status == ExitSuccess)
     case reads (BC.unpack output) of
@@ -402,7 +473,7 @@ spawnCostCheck = do
         pure nanoseconds
       _ -> expect "spawn-cost probe reports nanoseconds" False >> pure 0
   case costs of
-    high : _ -> expect ("spawn cost at soft RLIMIT_NOFILE " <> show highDescriptorLimit <> " stays below one second for " <> show timedSpawns <> " spawns")
+    high : _ -> expect ("spawn cost at soft RLIMIT_NOFILE " <> show measuredLimit <> " stays below one second for " <> show timedSpawns <> " spawns")
       (high < spawnBudgetNs)
     [] -> expect "spawn-cost probe ran" False
 
@@ -418,9 +489,10 @@ spawnCostProbe limitText countText = do
   either (\failure -> expect ("spawn-cost check requires a soft RLIMIT_NOFILE of " <> show limit <> ", and this host refused it: " <> show failure) False) pure refused
   applied <- getResourceLimit ResourceOpenFiles
   expect ("soft RLIMIT_NOFILE set to " <> show limit) (softLimit applied == ResourceLimit limit)
+  truePath <- pathTool "true"
   spent <- forM [1 .. count] $ \_ -> do
     started <- getMonotonicTimeNSec
-    group <- createProcessGroup (proc "/usr/bin/true" []) {std_in = NoStream, std_out = NoStream, std_err = NoStream}
+    group <- createProcessGroup (proc truePath []) {std_in = NoStream, std_out = NoStream, std_err = NoStream}
     ended <- getMonotonicTimeNSec
     status <- waitProcessGroup group
     expect "spawn-cost child exits successfully" (status == ExitSuccess)

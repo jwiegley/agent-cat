@@ -369,11 +369,25 @@ close.
 
 The runtime contract test checks the descriptor set, nonblocking parent pipe
 ends, closed standard descriptors, session leadership, resolution rules, exec
-errors, the inherited owner lock and a bound on the spawn cost at a soft
-`RLIMIT_NOFILE` of 1048576. The owner-lock case closes the parent descriptor
-after the spawn, shows that a fresh open of the lock file cannot take the lock
-while the session leader lives, and shows that it can take the lock after the
-group ends.
+errors, the inherited owner lock and a bound on the spawn cost. It spawns
+`sleep`, `cat` and `true` by the absolute paths that the search path gives,
+because a build sandbox may hold no tool in `/bin` or `/usr/bin` except
+`/bin/sh`. The owner-lock case closes the parent descriptor after the spawn,
+shows that a fresh open of the lock file cannot take the lock while the session
+leader lives, and shows that it can take the lock after the group ends. The
+bound on the spawn cost applies at a soft `RLIMIT_NOFILE` of 1048576, or at the
+hard limit of a host that allows less. The test refuses that check below a hard
+limit of 524288, the default of systemd, which a build by root through the
+local Nix store inherits.
+
+A platform that keeps the process-library spawn takes two cases differently.
+The closed standard descriptor case also accepts the refusal at
+`close(parent_end)` with `EBADF` that process-1.6.26.1 raises, which runs no
+command. That library runs a command with an explicit environment through
+`execvpe` where the C library provides one, and the `execvpe` of glibc runs a
+file without an image format through `/bin/sh`. The case of such a file
+therefore accepts either its run in the working directory or an `ENOEXEC` exec
+error.
 
 ## Process-group termination grace
 

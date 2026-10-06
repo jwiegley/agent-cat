@@ -28091,6 +28091,43 @@ Non-blocking findings of fess audit fess/pd-PD21-r1.md (2026-10-02) on subtask P
 
 Implementer limitations recorded with PD21: wf-answer refuses a recovery head and sends nothing; wf-control, wf-result, wf-kill and the lineage commands remain pending in service mode; the emacs-client fixture now has two execution reservations and a second profile, profile_2, because the manager refuses a second concurrent run of one profile with profile-busy. No security hardening was added, per the 2026-09-30 direction.
 
+* DOING [#B] Make the process-group tests pass on Linux and under a lower descriptor ceiling
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-yu5u
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-10-06 Tue 15:22]
+:MODIFIED: [2026-10-06 Tue 15:47]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+runtime/test/ProcessGroupTests.hs had never passed on Linux. On 2026-10-06 runtime-contract-test failed in the Linux Nix build sandboxes of the shared-work hosts and of Vulcan, where nix-config builds this runner for agent-cat-pi-extension. Four faults lay one behind another.
+
+1. The checks spawn /bin/sleep, /bin/cat and /usr/bin/true. A Linux build sandbox holds only /bin/sh, and NixOS has none of the three.
+2. The second case of closedStandardChecks requires a spawned child that holds only descriptor 2. Off macOS the Runtime keeps the process-library spawn, as runtime/README.md says. process-1.6.26.1 refuses that command at close(parent_end) with EBADF, which the README documents.
+3. The non-Darwin branch of execErrorChecks expects ./plain, a file without an image format, to be an exec error under an explicit environment. process-1.6.26.1 runs such a command through execvpe wherever the C library has one, and glibc's execvpe runs the file through /bin/sh.
+4. spawnCostCheck refuses to run below a hard RLIMIT_NOFILE of 1048576. A build by root through the local store on NixOS inherits the systemd default of 524288, so the same derivation passes through the nix-daemon and fails there.
+
+Resolve the tools from PATH once, give the two process-library expectations the platform split that the README documents, and let the spawn-cost check measure at the hard limit of a host that allows less, down to the systemd default. Keep every macOS check exact. Do not weaken the bound.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 814,
+    "issue_id": "acat-yu5u",
+    "author": "johnw",
+    "text": "2026-10-06, macOS (Hera, development shell): runtime-contract-test builds with -Wall and no warnings, and the full suite exits 0. The process-group checks run at a soft RLIMIT_NOFILE of 1048576. Under a hard limit of 524288 the spawn-cost check measures at 524288 (64 spawns in 19 ms) and passes. Under 262144 it refuses: spawn-cost check requires a hard RLIMIT_NOFILE of at least 524288, and this host allows 262144.",
+    "created_at": "2026-10-06T22:47:58Z"
+  }
+]
+#+end_src
+
 * DONE [#B] Shortest-list 4: delete the four standard-library replications
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
