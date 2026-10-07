@@ -5508,6 +5508,38 @@ The refocus note says to add no new evidence tooling. The 2026-09-29 closeout us
 ]
 #+end_src
 
+* TODO [#C] The manager admission check fails as UnreadableConfiguration when its work directory path runs through a symlink
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-cpp5
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-10-06 Tue 16:16]
+:MODIFIED: [2026-10-06 Tue 16:16]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+manager-admission-check restart-interruption, run by manager/test/admission_audit.py restore-interruption from manager/ci/store.sh and cli/ci/policies.sh, fails with "manager-admission-check: UnreadableConfiguration" (AdmissionCheck.hs:112) whenever its work directory is reached through a symlinked path component. On macOS the default TMPDIR, /var/folders/<id>/T, runs through /var -> private/var. On 2026-10-06, on Hera, the same binary with the same arguments failed 3 of 3 times in a directory under /var/folders/<id>/T, and passed in the identical directory named as /private/var/folders/<id>/T. readPrivateConfigurationFile (manager/src/Agentic/Manager/Configuration.hs:81) turns the IOException into UnreadableConfiguration. The private-file reader presumably refuses a symlinked component. That may be intended, but then the test and the audit should give the check a canonical work directory, or the refusal should name the symlink. Either way, cli/ci/policies.sh fails on a default macOS environment. The failure does not depend on acat-yu5u: manager-admission-check compiles only manager/test and manager/src. A workaround is to run the gate with TMPDIR=/private$TMPDIR.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-cpp5",
+    "depends_on_id": "acat-yu5u",
+    "type": "discovered-from",
+    "created_at": "2026-10-06T23:16:57.056663Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#B] Place request intent in the executable Plan representation
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -6681,6 +6713,38 @@ Adopted from the web survey (comparison judge). (1) CONTRACT: name the checker's
     "author": "johnw",
     "text": "Triage 2026-08-20, re-scoped: doc/dsl-guide.html died at 75c277c and the language changed underneath. Every item has a live referent but the page is now the SURVIVING CHECKER's contract (refusal clauses enumerated at Dsl/Check.lean:20-60) plus the Haskell surface's determinism/edit-preservation story. Write it against the spine, not the retired .wf.",
     "created_at": "2026-08-20T17:12:11Z"
+  }
+]
+#+end_src
+
+* TODO [#C] The store-cancel-mutant audit no longer compiles: its Store.hs instrumentation lacks withAsync and threadDelay
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-f9jw
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-10-06 Tue 16:55]
+:MODIFIED: [2026-10-06 Tue 16:55]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+manager/test/admission_audit.py store-cancel-mutant, run by manager/ci/store.sh within cli/ci/policies.sh, instruments manager/src/Agentic/Manager/Store.hs and builds the result. On 2026-10-06 at 21c9481 plus 6d93e5df, which does not touch manager/, the build failed with GHC-88464. Line 257 reports "Variable not in scope: withAsync", and the fix suggests the import of Control.Concurrent.Async at line 40. Line 1435 reports "Variable not in scope: threadDelay", and the fix suggests the import of Control.Concurrent at line 39. The audit then raised "instrumented/mutant compilation failed". The instrumentation's text replacements no longer match the imports of the current Store.hs, so cli/ci/policies.sh fails before it reaches the commands, drafts, workers, admission, approval, ingestion, controls and artifacts gates and the policy, lineage, control and frontend probes. The evidence is under $CABAL_BUILDDIR/audit-store-cancel-mutant.*/build.log.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-f9jw",
+    "depends_on_id": "acat-yu5u",
+    "type": "discovered-from",
+    "created_at": "2026-10-06T23:55:17.590099Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -8129,6 +8193,38 @@ From acat-ubt: CSemiring (MSemiring S K) under [CMonoid K] is now provable ({ins
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
 :END:
+
+* TODO [#C] policy-probe expects a usage text that the CLI no longer prints for --tui --service without a profile
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-gw8d
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-10-06 Tue 17:00]
+:MODIFIED: [2026-10-06 Tue 17:00]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+cli/test/PolicyProbe.hs:2701 requires parseCommand collidingRegistry ["--tui", "--service"] to fail with a message containing "usage:\n  wf --tui --service ABS_CLIENT_PROFILE". The check is pure. On 2026-10-06 policy-probe printed "FAIL a verb in head position beats a row of the same name: --tui --service with no profile names its usage, not a verb" and "policy probe: 1 failed", so cli/ci/policies.sh stops before the schema, lineage, control, person, frontend session, export and contract probes. cli/src/Agentic/Cli.hs:1006 renders the usage as "--tui --service ABS_CLIENT_PROFILE [ABS_CLIENT_PROFILE ...]", and ede9019 (2026-10-04, "Name usage and startup failures in runner and client messages") is the latest change to that text. Neither file changed in acat-yu5u. Decide which text is intended, then align the probe or the CLI.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-gw8d",
+    "depends_on_id": "acat-yu5u",
+    "type": "discovered-from",
+    "created_at": "2026-10-07T00:00:12.856787Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 * DONE [#B] Worked example in Lean: harden-a-patch, specified end-to-end
 :PROPERTIES:
@@ -28091,15 +28187,16 @@ Non-blocking findings of fess audit fess/pd-PD21-r1.md (2026-10-02) on subtask P
 
 Implementer limitations recorded with PD21: wf-answer refuses a recovery head and sends nothing; wf-control, wf-result, wf-kill and the lineage commands remain pending in service mode; the emacs-client fixture now has two execution reservations and a second profile, profile_2, because the manager refuses a second concurrent run of one profile with profile-busy. No security hardening was added, per the 2026-09-30 direction.
 
-* DOING [#B] Make the process-group tests pass on Linux and under a lower descriptor ceiling
+* DONE [#B] Make the process-group tests pass on Linux and under a lower descriptor ceiling
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-yu5u
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-10-06 Tue 15:22]
-:MODIFIED: [2026-10-06 Tue 15:47]
+:MODIFIED: [2026-10-06 Tue 17:05]
 :CREATED_BY: johnw
+:FINISHED: [2026-10-06 Tue 17:05]
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -28113,6 +28210,24 @@ runtime/test/ProcessGroupTests.hs had never passed on Linux. On 2026-10-06 runti
 4. spawnCostCheck refuses to run below a hard RLIMIT_NOFILE of 1048576. A build by root through the local store on NixOS inherits the systemd default of 524288, so the same derivation passes through the nix-daemon and fails there.
 
 Resolve the tools from PATH once, give the two process-library expectations the platform split that the README documents, and let the spawn-cost check measure at the hard limit of a host that allows less, down to the systemd default. Keep every macOS check exact. Do not weaken the bound.
+
+** Close Reason
+
+Fixed in 6d93e5df. Verified on 2026-10-06.
+
+macOS, Hera development shell:
+- runtime-contract-test builds with -Wall and no warnings, and the full suite exits 0.
+- Under a hard limit of 524288, the spawn-cost check measures at 524288 and passes. Under 262144 it refuses.
+
+Through nix-config:
+- Each host received this commit's source in its store from a git archive export (narHash sha256-1pwdVjZf8NTjf5k+J+apX4FyC55m/btw7evwYQNiDcs=).
+- andoria-08, andoria-t2, delphi-3bd4 and gpu-server (x86_64-linux, Nix build sandbox): runtime-contract-test, engine-api-test and tui-model-test all passed. The spawn-cost check measured at 1048576.
+- Vulcan (aarch64-linux): built as root through /etc/nixos/build, the three suites passed and the spawn-cost check measured at 524288.
+- Hera (aarch64-darwin): the three suites passed.
+
+cli/ci/policies.sh:
+- With AGENT_CAT_* unset and TMPDIR resolved, capture.sh, the profile and configuration gates and every probe after policy-probe passed, including the frontend contract probe that drives runtime-contract-test.
+- Three gate failures predate this change and do not touch the files it changes: acat-cpp5 (a symlinked TMPDIR), acat-f9jw (a stale store-cancel-mutant instrumentation) and acat-gw8d (a stale policy-probe usage text).
 
 ** Comments
 
