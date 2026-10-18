@@ -1,10 +1,10 @@
 import { createRequire } from "node:module";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 
-const packageRoot = process.env.PI_PACKAGE_DIR
-  ?? dirname(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))));
-const require = createRequire(join(packageRoot, "package.json"));
+// The remote socket protocol is retained from Pi 1.1 as an extension-owned
+// dependency. Pi 1.3 no longer ships its client/server packages.
+const require = createRequire(import.meta.url);
 
 function moduleUrl(root, path) {
   return pathToFileURL(join(root, path)).href;

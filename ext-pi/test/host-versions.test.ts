@@ -6,19 +6,23 @@ import { describe, expect, it } from "vitest";
 
 /** The host packages that `node_modules/@earendil-works` links into the built Pi fork. */
 const SUPPORTED_LINKED: Readonly<Record<string, string>> = {
-  "@earendil-works/chord": "1.0.1",
-  "@earendil-works/pi-ai": "1.0.1",
-  "@earendil-works/pi-client": "1.0.1",
-  "@earendil-works/pi-coding-agent": "1.0.1",
-  "@earendil-works/pi-protocol": "1.0.1",
-  "@earendil-works/pi-server": "1.0.1",
-  "@earendil-works/pi-telemetry": "1.0.1",
-  "@earendil-works/pi-tui": "1.0.1",
+  "@earendil-works/pi-ai": "1.3.0",
+  "@earendil-works/pi-coding-agent": "1.3.0",
+  "@earendil-works/pi-telemetry": "1.3.0",
+  "@earendil-works/pi-tui": "1.3.0",
+};
+
+/** The retired remote protocol is an extension-owned published dependency. */
+const SUPPORTED_REGISTRY: Readonly<Record<string, string>> = {
+  "@earendil-works/chord": "1.1.0",
+  "@earendil-works/pi-client": "1.1.0",
+  "@earendil-works/pi-protocol": "1.1.0",
+  "@earendil-works/pi-server": "1.1.0",
 };
 
 /** Host packages that resolve through the fork's own `node_modules` from pi-coding-agent. */
 const SUPPORTED_THROUGH_FORK: Readonly<Record<string, string>> = {
-  "@earendil-works/pi-agent-core": "1.0.1",
+  "@earendil-works/pi-agent-core": "1.3.0",
 };
 
 /** The supported toolchain. */
@@ -30,6 +34,7 @@ const SUPPORTED_TOOLCHAIN: Readonly<Record<string, string>> = {
 
 type ObservedHost = {
   linked: Record<string, string>;
+  registry: Record<string, string>;
   throughFork: Record<string, string>;
   toolchain: Record<string, string>;
 };
@@ -44,6 +49,7 @@ function hostFindings(observed: ObservedHost): string[] {
   ];
   return [
     ...compare("linked package", SUPPORTED_LINKED, observed.linked),
+    ...compare("registry package", SUPPORTED_REGISTRY, observed.registry),
     ...compare("fork package", SUPPORTED_THROUGH_FORK, observed.throughFork),
     ...compare("toolchain", SUPPORTED_TOOLCHAIN, observed.toolchain),
   ];
@@ -62,14 +68,18 @@ function resolvedManifest(specifier: string, base: string): { path: string; name
 
 function observeHost(): ObservedHost & { linkTargets: string[]; forkCore: string } {
   const linked: Record<string, string> = {};
+  const registry: Record<string, string> = {};
   const linkTargets: string[] = [];
   for (const entry of readdirSync(scopeDirectory).sort()) {
     const specifier = `@earendil-works/${entry}`;
-    if (!lstatSync(join(scopeDirectory, entry)).isSymbolicLink()) throw new Error(`${specifier} is not a link into the Pi fork`);
     const manifest = resolvedManifest(specifier, import.meta.url);
     if (manifest.name !== specifier) throw new Error(`${specifier} resolves to ${manifest.name}`);
-    linked[specifier] = manifest.version;
-    linkTargets.push(dirname(manifest.path));
+    if (lstatSync(join(scopeDirectory, entry)).isSymbolicLink()) {
+      linked[specifier] = manifest.version;
+      linkTargets.push(dirname(manifest.path));
+    } else {
+      registry[specifier] = manifest.version;
+    }
   }
   const codingAgent = resolvedManifest("@earendil-works/pi-coding-agent", import.meta.url);
   const throughFork: Record<string, string> = {};
@@ -81,11 +91,11 @@ function observeHost(): ObservedHost & { linkTargets: string[]; forkCore: string
   }
   const toolchain: Record<string, string> = { node: process.versions.node };
   for (const name of ["typescript", "vitest"]) toolchain[name] = resolvedManifest(name, import.meta.url).version;
-  return { linked, throughFork, toolchain, linkTargets, forkCore };
+  return { linked, registry, throughFork, toolchain, linkTargets, forkCore };
 }
 
 describe("supported Pi host", () => {
-  it("links every supported host package into one built Pi fork at its supported version", () => {
+  it("links Pi 1.3 host packages and keeps the remote protocol on its own release", () => {
     const observed = observeHost();
     expect(hostFindings(observed)).toEqual([]);
     const packages = new Set([...observed.linkTargets, observed.forkCore].map((target) => dirname(target)));
@@ -96,18 +106,19 @@ describe("supported Pi host", () => {
   it("reports another version, an unlisted package, and a missing package", () => {
     const supported = {
       linked: { ...SUPPORTED_LINKED },
+      registry: { ...SUPPORTED_REGISTRY },
       throughFork: { ...SUPPORTED_THROUGH_FORK },
       toolchain: { ...SUPPORTED_TOOLCHAIN },
     };
     expect(hostFindings(supported)).toEqual([]);
     expect(hostFindings({ ...supported, linked: { ...SUPPORTED_LINKED, "@earendil-works/pi-tui": "0.84.3" } }))
-      .toEqual(["linked package @earendil-works/pi-tui is 0.84.3, not the supported 1.0.1"]);
-    expect(hostFindings({ ...supported, linked: { ...SUPPORTED_LINKED, "@earendil-works/pi-mcp": "1.0.1" } }))
-      .toEqual(["linked package @earendil-works/pi-mcp 1.0.1 is not in the supported set"]);
-    const { "@earendil-works/chord": _chord, ...withoutChord } = SUPPORTED_LINKED;
-    expect(hostFindings({ ...supported, linked: withoutChord })).toEqual(["linked package @earendil-works/chord is missing"]);
+      .toEqual(["linked package @earendil-works/pi-tui is 0.84.3, not the supported 1.3.0"]);
+    expect(hostFindings({ ...supported, linked: { ...SUPPORTED_LINKED, "@earendil-works/pi-mcp": "1.3.0" } }))
+      .toEqual(["linked package @earendil-works/pi-mcp 1.3.0 is not in the supported set"]);
+    const { "@earendil-works/chord": _chord, ...withoutChord } = SUPPORTED_REGISTRY;
+    expect(hostFindings({ ...supported, registry: withoutChord })).toEqual(["registry package @earendil-works/chord is missing"]);
     expect(hostFindings({ ...supported, throughFork: { "@earendil-works/pi-agent-core": "0.98.0" } }))
-      .toEqual(["fork package @earendil-works/pi-agent-core is 0.98.0, not the supported 1.0.1"]);
+      .toEqual(["fork package @earendil-works/pi-agent-core is 0.98.0, not the supported 1.3.0"]);
     expect(hostFindings({ ...supported, toolchain: { ...SUPPORTED_TOOLCHAIN, node: "24.0.0" } }))
       .toEqual(["toolchain node is 24.0.0, not the supported 22.23.3"]);
   });

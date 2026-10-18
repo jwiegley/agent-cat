@@ -14,7 +14,7 @@ fork is the supported host, as the section "Supported host" states. They
 need these prerequisites:
 
 - Node 22 on `PATH`.
-- The built Pi fork at version 1.0.1: a checkout of the fork in which
+- The built Pi fork at version 1.3.0: a checkout of the fork in which
   `npm install --ignore-scripts` and `npm run build` ran, as the `README.md`
   of the fork states. The steps run `packages/coding-agent/dist/cli.js` of
   that checkout.
@@ -167,43 +167,29 @@ run references.
 ## Supported host
 
 The supported host is the built Pi fork at `~/src/fork/pi`, commit `bb5bf98f5`.
-The directory `node_modules/@earendil-works` holds one symbolic link for each
-host package, and each link points into `~/src/fork/pi/packages`. The linked
-packages are these, each at version 1.0.1:
+The directory `node_modules/@earendil-works` links the active Pi host packages
+into `~/src/fork/pi/packages`. These links are at version 1.3.0:
 
 | Package | Fork directory |
 |---|---|
-| `@earendil-works/chord` | `packages/chord` |
 | `@earendil-works/pi-ai` | `packages/ai` |
-| `@earendil-works/pi-client` | `packages/client` |
 | `@earendil-works/pi-coding-agent` | `packages/coding-agent` |
-| `@earendil-works/pi-protocol` | `packages/protocol` |
-| `@earendil-works/pi-server` | `packages/server` |
 | `@earendil-works/pi-telemetry` | `packages/telemetry` |
 | `@earendil-works/pi-tui` | `packages/tui` |
 
-`@earendil-works/pi-agent-core` 1.0.1 is not linked. It resolves from
+`@earendil-works/pi-agent-core` 1.3.0 is not linked. It resolves from
 `pi-coding-agent` through the `node_modules` directory at the root of the fork,
 to `packages/agent`. The supported toolchain is Node 22.23.3, TypeScript 5.9.3,
 and vitest 4.1.9.
 
-The links are never replaced by a registry install. The `devDependencies`
-strings of `package.json`, and of the root entry of `package-lock.json`, name
-the fork release 1.0.1 for `pi-client`, `pi-coding-agent`, `pi-server` and
-`pi-tui`. In `package-lock.json`, the entry of each package of the table
-above is a link entry in the form that npm writes for a linked local package.
-Its `resolved` path names the fork directory relative to the main checkout
-`~/src/agent-cat/ext-pi`, for example `../../fork/pi/packages/ai`, and the
-target entry of that path records the fork package at 1.0.1. In a worktree
-under `~/src/agent-cat/.worktrees`, these relative paths do not reach the
-fork, and the links of `node_modules` are absolute. The lock file also keeps
-the registry entries of the dependencies of the earlier registry releases,
-and no linked package uses them. The lock file is not an install source.
-`node_modules` links the fork, and `test/host-versions.test.ts` enforces the
-supported set. The test enumerates every linked package, resolves it and
-`pi-agent-core` through the Node resolver, and fails when a version is outside
-the supported set, a linked package is not listed, or a listed package is
-missing.
+Pi 1.3.0 no longer ships `pi-client`, `pi-server`, or `pi-protocol`. The optional
+remote socket bridge retains their published 1.1.0 releases and Chord 1.1.0
+as extension-owned dependencies. The extension's lock file records those
+registry packages alongside its Pi 1.3.0 development dependencies; the
+managed build replaces only the active Pi host packages with links into the
+same fork revision. `test/host-versions.test.ts` checks both sets separately.
+In a worktree, copy the prepared `node_modules` as described above; the host
+links remain absolute.
 
 agent-cat owns `ext-pi` and its manager client. The Pi owner owns the host. The
 fork is built for this extension and is not edited by agent-cat work.

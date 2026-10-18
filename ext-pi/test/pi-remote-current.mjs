@@ -4,10 +4,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { findPackageJSON } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import readline from "node:readline";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { piPackageRoot } from "./fixtures/pi-package-root.ts";
 
-const packageBase = join(piPackageRoot, "package.json");
+const packageBase = fileURLToPath(new URL("../package.json", import.meta.url));
 const chordRoot = dirname(findPackageJSON("@earendil-works/chord", packageBase));
 const serverRoot = dirname(findPackageJSON("@earendil-works/pi-server", packageBase));
 const { createRemoteServiceEndpoint, defineService, RemoteServiceProvider, replicatedState } =
