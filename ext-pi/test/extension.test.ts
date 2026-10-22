@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { Value } from "typebox/value";
+import type { Component } from "@earendil-works/pi-tui";
 import extension, { parseWorkflowCommand } from "../src/index.ts";
 import { isJsonObject, jsonMember, parseJson, type JsonValue } from "../src/manager/json.ts";
 import { requiredScopes, type Operation } from "../src/manager/resources.ts";
@@ -17,13 +18,17 @@ const created: string[] = [];
 afterEach(async () => Promise.all(created.splice(0).map((path) => rm(path, { recursive: true, force: true }))));
 
 describe("Pi extension lifecycle", () => {
-  it("launches selected and named /wf runs in the current Agent Deck session", async () => {
+  it("searches all /wf runners, preserves identity and approval, and keeps named launches", async () => {
     const directory = await mkdtemp(join(tmpdir(), "agent-cat-extension-ui-"));
     created.push(directory);
     const previousRunner = process.env.AGENT_CAT_RUNNER;
+    const previousRunners = process.env.AGENT_CAT_RUNNERS;
     const previousState = process.env.AGENT_CAT_STATE_DIR;
     const previousDeckSession = process.env.AGENTDECK_INSTANCE_ID;
-    process.env.AGENT_CAT_RUNNER = resolve("test/fixtures/runner.mjs");
+    delete process.env.AGENT_CAT_RUNNER;
+    process.env.AGENT_CAT_RUNNERS = JSON.stringify(["agent-cat", "wf"].map((id) => ({
+      id, executable: resolve("test/fixtures/runner.mjs"),
+    })));
     process.env.AGENT_CAT_STATE_DIR = join(directory, "state");
     process.env.AGENTDECK_INSTANCE_ID = "current-deck-session";
     try {
@@ -41,41 +46,73 @@ describe("Pi extension lifecycle", () => {
       };
       extension(pi as never);
       let workflowSelections = 0;
+      let inputCount = 0;
+      let approve = false;
+      let keys = ["\u001b"];
+      const confirmations: string[] = [];
       const ui = {
-        select: async (title: string, choices: string[]) => {
-          if (title !== "agent-cat workflows") throw new Error(`unexpected selector: ${title}`);
-          workflowSelections += 1;
-          return choices[0];
-        },
-        editor: async () => "subject",
-        confirm: async () => true,
+        select: () => { throw new Error("TUI workflow selection must be searchable"); },
+        editor: async () => { inputCount += 1; return "subject"; },
+        confirm: async (_title: string, message: string) => { confirmations.push(message); return approve; },
         notify: () => {},
         setWidget: (_id: string, value: unknown) => widgets.push(value),
         setStatus: () => {},
-        custom: async () => undefined,
+        custom: async <T>(factory: (tui: unknown, theme: unknown, bindings: unknown, done: (value: T) => void) => unknown) => {
+          workflowSelections += 1;
+          let finished = false;
+          let chosen: T | undefined;
+          const component = factory(
+            { terminal: { rows: 24 }, requestRender: () => {} },
+            { fg: (_color: string, value: string) => value }, {},
+            (value) => { finished = true; chosen = value; },
+          ) as Component;
+          expect(component.render(100)[0]).toContain("2/2");
+          for (const key of keys) component.handleInput?.(key);
+          expect(finished).toBe(true);
+          return chosen;
+        },
       };
       const ctx = { cwd: directory, mode: "tui", hasUI: true, isProjectTrusted: () => true, ui, isIdle: () => true, abort: () => {}, sessionManager: { getBranch: () => [] } };
       for (const handler of events.get("session_start") ?? []) await handler({ type: "session_start" }, ctx);
       await commands.get("wf")!.handler("", ctx);
+      expect(inputCount).toBe(0);
+      expect(confirmations).toEqual([]);
+      await expect(access(join(directory, "state", "runs"))).rejects.toMatchObject({ code: "ENOENT" });
+
+      keys = ["wf:", "\r"];
+      await commands.get("wf")!.handler("", ctx);
+      expect(inputCount).toBe(1);
+      expect(confirmations).toHaveLength(1);
+      expect(confirmations[0]).toContain("workflow=wf:fixture");
+      await expect(access(join(directory, "state", "runs"))).rejects.toMatchObject({ code: "ENOENT" });
+
+      approve = true;
+      await commands.get("wf")!.handler("", ctx);
       await until(() => entries.length === 1);
       await commands.get("wf")!.handler("fixture", ctx);
       await until(() => entries.length === 2);
-      expect(workflowSelections).toBe(1);
+      expect(workflowSelections).toBe(3);
+      expect(confirmations[2]).toContain("workflow=agent-cat:fixture");
       for (const entry of entries) {
         expect(entry).toEqual({ type: "agent-cat-run", data: expect.objectContaining({ status: "succeeded", billFresh: "1", billMemo: "1", storeDir: expect.stringContaining("/runs/") }) });
       }
       const runIds = await readdir(join(directory, "state", "runs"));
       expect(runIds).toHaveLength(2);
+      const runnerIds: string[] = [];
       for (const runId of runIds) {
         const manifest = JSON.parse(await readFile(join(directory, "state", "runs", runId, "supervisor-manifest.json"), "utf8"));
         expect(manifest).toMatchObject({ targetKind: "deck", targetArgs: ["--session", "current-deck-session"] });
+        runnerIds.push(manifest.runnerId);
       }
+      expect(runnerIds.sort()).toEqual(["agent-cat", "wf"]);
       expect(widgets.some((value) => typeof value === "function")).toBe(true);
       await until(() => widgets.at(-1) === undefined);
       for (const handler of events.get("session_shutdown") ?? []) await handler({ type: "session_shutdown" }, ctx);
     } finally {
       if (previousRunner === undefined) delete process.env.AGENT_CAT_RUNNER;
       else process.env.AGENT_CAT_RUNNER = previousRunner;
+      if (previousRunners === undefined) delete process.env.AGENT_CAT_RUNNERS;
+      else process.env.AGENT_CAT_RUNNERS = previousRunners;
       if (previousState === undefined) delete process.env.AGENT_CAT_STATE_DIR;
       else process.env.AGENT_CAT_STATE_DIR = previousState;
       if (previousDeckSession === undefined) delete process.env.AGENTDECK_INSTANCE_ID;

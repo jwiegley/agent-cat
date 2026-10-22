@@ -8,6 +8,13 @@ describe("trusted extension configuration", () => {
     expect(configuredManagerProfiles()).toEqual({ kind: "local" });
   });
 
+  it("does not inherit the operator's workflow runners", () => {
+    expect(process.env.AGENT_CAT_RUNNER).toBe("");
+    expect(process.env.AGENT_CAT_RUNNERS).toBe("");
+    expect(process.env.AGENT_CAT_RUNNER_ID).toBe("agent-cat");
+    expect(configuredRunners("/work")).toEqual([]);
+  });
+
   it("loads runners only from explicit absolute user configuration", () => {
     expect(configuredRunners("/work", {})).toEqual([]);
     expect(() => configuredRunners("/work", { AGENT_CAT_RUNNER: "relative/runner" })).toThrow("must be an absolute path");

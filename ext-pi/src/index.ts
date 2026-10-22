@@ -9,6 +9,7 @@ import { CurrentSessionBridge } from "./current-bridge.ts";
 import { assertNoCredentialArgs, prepareLaunch, preflightLineage, previewPlan, type LineageEdit, type PreparedLaunch } from "./launch.ts";
 import { formatControl, formatMonitor } from "./monitor.ts";
 import { WorkflowMonitorComponent } from "./monitor-ui.ts";
+import { pickWorkflow } from "./workflow-picker.ts";
 import { openRemotePi } from "./pi-remote-runtime.mjs";
 import type { SessionOptions } from "./manager/session.ts";
 import { ManagerRequests, toolContext, type CommandRecord, type ModelForkEdit } from "./manager-ui.ts";
@@ -231,10 +232,8 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
       let selected = invocation.workflow ? selectWorkflow(catalogue, invocation.workflow) : undefined;
       if (invocation.workflow && !selected) return ctx.ui.notify(`Unknown workflow: ${invocation.workflow}`, "error");
       if (!invocation.workflow) {
-        const choices = catalogue.map(({ runner, descriptor }) => `${runner.id}:${descriptor.name} — ${descriptor.blurb}`);
-        const choice = await ctx.ui.select("agent-cat workflows", choices);
-        if (!choice) return;
-        selected = catalogue[choices.indexOf(choice)];
+        selected = await pickWorkflow(ctx, "agent-cat workflows", catalogue,
+          ({ runner, descriptor }) => `${runner.id}:${descriptor.name} — ${descriptor.blurb}`);
       }
       if (!selected) return;
       let supplied: Record<string, string>;

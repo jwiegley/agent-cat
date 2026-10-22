@@ -11535,6 +11535,24 @@ Non-blocking findings of fess audit fess/pd-PD19-r1.md (2026-10-02) on subtask P
 
 6. (low) emacs/wf-service.el wf-service--rows. The profile identifier is joined into /v1/workflows?profileId= without URL encoding. Fix: use url-hexify-string.
 
+* DONE [#C] Add type-to-narrow selection to Pi workflow pickers
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-omyg
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-10-22 Thu 06:52]
+:MODIFIED: [2026-10-22 Thu 07:22]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-22 Thu 07:22]
+:CLOSE_REASON: Implemented the /wf searchable TUI picker with native Input, SelectList and fuzzyFilter, exact runner identity, RPC fallback, and unchanged input/approval boundaries. Typecheck, 238 unit tests, 9 deterministic integration tests, and make -C doc check passed. An isolated real-Pi PTY displayed all 85 configured workflows and verified typing, no-match Enter, Backspace recovery, resize, Escape, reset, and zero workflow runs. Evidence: /tmp/wg-wf-picker.fuLyfI/source-picker-pty.log and extension-final.log. Managed activation is tracked separately by nix-hy60.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The operator requests /wf to show all configured workflows and provide type-to-narrow workflow selection, like an fzf-style interaction without an fzf dependency. Preserve qualified runner identity, trust checks, private inputs, cancellation, and explicit launch approval. Verify typing, deletion, no-match and recovery, navigation, duplicate workflow names across runners, and cancellation with deterministic tests.
+
 * TODO [#C] Resolve F14 fess findings in the manager-log reader and consent check
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

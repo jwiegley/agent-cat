@@ -1440,7 +1440,7 @@ for the control descriptor.
 
 | Command | Purpose |
 |---|---|
-| `/wf [RUNNER:WORKFLOW]` | Launch in the current Agent Deck session. Omit the name to select from the catalogue. |
+| `/wf [RUNNER:WORKFLOW]` | Launch in the current Agent Deck session. Omit the name to select from every configured runner. In the TUI, type to narrow by qualified name or description with case-insensitive fuzzy matching. Arrow keys move, Enter selects, and Escape cancels. Input collection and explicit launch approval follow selection. RPC clients retain the ordinary selection dialog. |
 | `/wf-help [RUNNER:WORKFLOW]` | Without a name, list every agent-cat command with its description. With a name, show the exact `help` output of the runner. |
 | `/wf-plan RUNNER:WORKFLOW` | Show `plan --json --raw` with the actual inputs. |
 | `/wf-launch RUNNER:WORKFLOW` | Launch wizard for alternate targets. |
