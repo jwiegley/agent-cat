@@ -18609,6 +18609,24 @@ Non-blocking findings of fess pg-PG4-r1 (report fess/pg-PG4-r1.md in the private
 3. (low) PG/PG4/impl-r1/diagnosis.txt: the before run had load 9.7 to 17.4 and the after run 5.1 to 10.3, so the headline p50 change mixes in the load change. The per-window decode drop (ol-files median 135 to 30 ms) is the primary evidence. Fix: state the per-window figures and the load ranges in the run of record of the gate issue.
 4. (note) retainViews (median 44 to 47 ms per window) is now the largest part of the first page, and the first-page p95 (968 ms) comes from the one-time insertion of 4096 handles in retainLegacyHandles. Both are inside their ceilings.
 
+* DONE [#C] Keep imports used outside Store audit mutants
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-uvwz
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-10-21 Wed 22:08]
+:MODIFIED: [2026-10-21 Wed 22:18]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-21 Wed 22:18]
+:CLOSE_REASON: The Store mutation now removes only the asynchronous imports its replacement makes unused. threadDelay and withAsync remain for other Store operations. Both store-cancel-mutant and store-expiry-mutant compile with -Werror and fail at their intended assertions at N1 and N8. Logs are under /Users/johnw/Products/agent-cat-release-20261022.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The full policy gate reached store-cancel-mutant after the real N1/N8 checks passed. Its mutation deletes threadDelay and withAsync imports although Store now uses them outside boundedWith, so compilation fails before the intended assertion. Retain both imports, keep -Werror, and verify both cancellation and expiry mutants fail only at their named assertions.
+
 * TODO [#E] Handoff: cite the fix116b records for the 116-118 squash    :documentation:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

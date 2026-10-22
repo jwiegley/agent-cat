@@ -309,7 +309,7 @@ elif mode in {"store-cancel-gap", "store-cancel-mutant", "store-expiry-mutant"}:
         start = text.index("boundedWith db remaining action =")
         end = text.index("\nstorageErrors ::",start)
         replace(path,text[start:end],"boundedWith db remaining action = do\n  Audit.retainSqlInterrupt (SQL.interrupt db)\n  micros <- remaining\n  result <- timeout micros (SQL.interruptibly db action)\n  maybe (throwIO StoreDeadline) pure result\n")
-        replace(path,"import Control.Concurrent (threadDelay)\nimport Control.Concurrent.Async (race, withAsync, asyncWithUnmask, cancel, wait)","import Control.Concurrent.Async (race)")
+        replace(path,"import Control.Concurrent.Async (race, withAsync, asyncWithUnmask, cancel, wait)","import Control.Concurrent.Async (race, withAsync)")
         replace(path,", onException,",",")
         replace(path,", forever)",")")
     else:
