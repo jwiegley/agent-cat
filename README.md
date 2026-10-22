@@ -186,7 +186,7 @@ The module `model/Agentic/Core/DslFlagship.lean` holds the flagship as a
 `RawProgram`. This term is the same term that the corpus freezes as entry
 `example-000`. The module proves four facts inside the kernel by
 `decide +kernel`. The checker accepts the term, and its level is `branch`. Its
-cost tree has nine leaves with a minimum of 5 and a maximum of 15. Its
+cost tree has nine leaves with a minimum of 4 and a maximum of 14. Its
 transcript in four named worlds equals the transcript of the hand-written
 dialogue. The
 theorem `Dsl.checkProgram_level_le` states that every program

@@ -9905,6 +9905,22 @@ A3 fess finding (low). The approval notice number counts approval-key presses on
 ]
 #+end_src
 
+* DOING [#C] Make release checks safe in a configured Pi shell
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-kmss
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-10-21 Wed 21:25]
+:MODIFIED: [2026-10-21 Wed 21:27]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The readiness audit found that ext-pi ordinary tests inherit the live manager profile, admission_audit retains AGENT_CAT_* variables that its own assertion forbids, and README flagship cost-tree bounds differ from the proved 4 to 14. Isolate deterministic tests, preserve explicitly opted-in fixture tests, correct the bounds, and verify before downstream pinning.
+
 * TODO [#C] Resolve PC4 fess findings in orphaned-ask replies and lost-run pruning    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -15516,6 +15532,24 @@ Until then: the 'in module' prefix is the attribution, and the CLI's caret is be
   }
 ]
 #+end_src
+
+* DONE [#D] Correct README flagship cost-tree bounds
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-povv
+:LABELS:   []
+:ISSUE_TYPE: docs
+:CREATED:  [2026-10-21 Wed 21:32]
+:MODIFIED: [2026-10-21 Wed 21:32]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-21 Wed 21:32]
+:CLOSE_REASON: README now states the proved 4 to 14 cost-tree bounds. make -C doc check passed in the pinned direnv environment.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+README says the flagship cost tree ranges from 5 to 15. minFold_flagship and maxFold_flagship prove 4 and 14, and the example gate uses the same bounds. Correct the README without changing the theorems or corpus.
 
 * DONE [#B] Profunctor design research: term language and evaluator
 :PROPERTIES:
