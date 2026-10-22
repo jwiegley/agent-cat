@@ -2570,6 +2570,8 @@ with (work / "certificate.log").open("wb") as log:
     subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-sha256", "-nodes",
                     "-days", "1", "-subj", "/CN=localhost", "-addext", "subjectAltName=IP:127.0.0.1",
                     "-keyout", str(key), "-out", str(cert)], check=True, stdout=log, stderr=log, timeout=30)
+cert.chmod(0o600)
+key.chmod(0o600)
 with socket.socket() as reservation:
     reservation.bind(("127.0.0.1", 0))
     port = reservation.getsockname()[1]
@@ -13796,12 +13798,13 @@ def size_checks():
 
 def run_vitest(test_file, environment, report_file, log_file, steps, poll=None):
     """Run one live check of ext-pi with node from PATH in ext-pi, with the
-    variables of environment and AGENT_CAT_MANAGER_REPORT set to report_file
+    variables of environment, AGENT_CAT_MANAGER_LIVE=1 and the report path
     added to the environment of the harness, and give its report. poll, when
     given, runs about every 50 milliseconds while the check runs. The check
     must exit with status 0 within 720 seconds, vitest must report its steps
     passed, and the report file must exist."""
-    environment = dict(os.environ, AGENT_CAT_MANAGER_REPORT=str(report_file), **environment)
+    environment = dict(os.environ, AGENT_CAT_MANAGER_LIVE="1", AGENT_CAT_MANAGER_PROFILES="",
+                       AGENT_CAT_MANAGER_REPORT=str(report_file), **environment)
     with log_file.open("wb") as log:
         child = subprocess.Popen(["node", "node_modules/vitest/vitest.mjs", "run", test_file],
                                  cwd=source / "ext-pi", env=environment, stdout=log, stderr=subprocess.STDOUT)

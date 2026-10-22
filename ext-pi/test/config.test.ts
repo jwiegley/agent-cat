@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { configuredManagerProfiles, configuredRemote, configuredRunners, retentionPolicy, stateDirectory } from "../src/config.ts";
 
 describe("trusted extension configuration", () => {
+  it.skipIf(process.env.AGENT_CAT_MANAGER_LIVE === "1")("does not inherit a live manager in the ordinary test run", () => {
+    expect(process.env.AGENT_CAT_MANAGER_PROFILE).toBe("");
+    expect(process.env.AGENT_CAT_MANAGER_PROFILES).toBe("");
+    expect(configuredManagerProfiles()).toEqual({ kind: "local" });
+  });
+
   it("loads runners only from explicit absolute user configuration", () => {
     expect(configuredRunners("/work", {})).toEqual([]);
     expect(() => configuredRunners("/work", { AGENT_CAT_RUNNER: "relative/runner" })).toThrow("must be an absolute path");

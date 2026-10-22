@@ -357,8 +357,9 @@ else:
 
 (work / "instrumentation.json").write_text(json.dumps({"mode": mode, "changes": changes}, indent=2) + "\n")
 (work / "instrumentation.diff").write_text("".join(change["diff"] for change in changes))
-environment = dict(os.environ, CABAL_BUILDDIR=str(work / "build"))
-environment.pop("GHCRTS", None)
+environment = {name: value for name, value in os.environ.items()
+               if name != "GHCRTS" and not name.startswith("AGENT_CAT_")}
+environment["CABAL_BUILDDIR"] = str(work / "build")
 results = []
 
 def run(command, log, timeout=1200):
@@ -449,6 +450,7 @@ for capabilities in ["N1", "N8"]:
     else:
         fixture = work / capabilities
         fixture.mkdir()
+    fixture = fixture.resolve(strict=True)
     command = [checker, *arguments]
     if mode != "policy-mutant":
         command.append(str(fixture))

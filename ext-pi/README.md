@@ -1743,6 +1743,12 @@ npm test
 AGENT_CAT_E2E_RUNNER="$(cd .. && direnv exec . bash test/cabal.sh list-bin agentic-run)" npm run test:integration
 ```
 
+Ordinary tests clear inherited `AGENT_CAT_MANAGER_PROFILE` and
+`AGENT_CAT_MANAGER_PROFILES`, so they do not select the operator's live
+manager. The HTTPS harness sets `AGENT_CAT_MANAGER_LIVE=1` and its own client
+profile when it explicitly runs the live checks. This opt-in belongs to a
+disposable test manager and not to the operator's shell configuration.
+
 The live check of the manager session runs through the `pi-client` mode of
 the HTTPS harness. From the repository root, with a built
 `routing-fixed-point-probe` as the runner and `node` on `PATH`:

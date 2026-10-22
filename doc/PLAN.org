@@ -5510,15 +5510,17 @@ The refocus note says to add no new evidence tooling. The 2026-09-29 closeout us
 ]
 #+end_src
 
-* TODO [#C] The manager admission check fails as UnreadableConfiguration when its work directory path runs through a symlink
+* DONE [#C] The manager admission check fails as UnreadableConfiguration when its work directory path runs through a symlink
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-cpp5
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-10-06 Tue 16:16]
-:MODIFIED: [2026-10-06 Tue 16:16]
+:MODIFIED: [2026-10-21 Wed 21:46]
 :CREATED_BY: johnw
+:FINISHED: [2026-10-21 Wed 21:46]
+:CLOSE_REASON: admission_audit resolves each created fixture path before native checks. The same instrumented restore binary that failed through macOS /var passes at N1 and N8 with the canonical name. Private-file rejection is unchanged. The complete policy gate is rebuilding the fixed audit, with evidence under /Users/johnw/Products/agent-cat-release-20261022.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -9905,21 +9907,37 @@ A3 fess finding (low). The approval notice number counts approval-key presses on
 ]
 #+end_src
 
-* DOING [#C] Make release checks safe in a configured Pi shell
+* DONE [#C] Make release checks safe in a configured Pi shell
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-kmss
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-10-21 Wed 21:25]
-:MODIFIED: [2026-10-21 Wed 21:27]
+:MODIFIED: [2026-10-21 Wed 21:46]
 :CREATED_BY: johnw
+:FINISHED: [2026-10-21 Wed 21:46]
+:CLOSE_REASON: Ordinary Pi tests clear both manager selectors unless the fixture harness explicitly opts in. The harness owns private TLS file modes. Instrumented checks remove inherited AGENT_CAT_* and GHCRTS. Typecheck, 224 ordinary tests under invalid inherited selectors, nine integration tests, remote bridge, three live control steps with independent manager assertions, docs and Nix runner build pass. Full policies continues separately after the canonical fixture fix.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 The readiness audit found that ext-pi ordinary tests inherit the live manager profile, admission_audit retains AGENT_CAT_* variables that its own assertion forbids, and README flagship cost-tree bounds differ from the proved 4 to 14. Isolate deterministic tests, preserve explicitly opted-in fixture tests, correct the bounds, and verify before downstream pinning.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 815,
+    "issue_id": "acat-kmss",
+    "author": "johnw",
+    "text": "Release validation on 2026-10-22: repaired the checkout dependency tree from the verified Pi 1.3 worktree. Typecheck, 224 ordinary tests with both inherited manager selectors deliberately invalid, nine local integration tests, the remote bridge check, documentation gate and root Nix runner package pass. The explicit live fixture initially refused a mode-0644 certificate under umask 022. The harness now sets certificate and key to 0600, and pi-client-controls passes all three Vitest steps and the independent manager-fact checks. Full policies passed the environment assertion and exposed acat-cpp5, the known lexical /var symlink refusal. Its fixture path now resolves before reaching the native checker. Evidence is under /Users/johnw/Products/agent-cat-release-20261022.",
+    "created_at": "2026-10-22T04:38:41Z"
+  }
+]
+#+end_src
 
 * TODO [#C] Resolve PC4 fess findings in orphaned-ask replies and lost-run pruning    :review:
 :PROPERTIES:
