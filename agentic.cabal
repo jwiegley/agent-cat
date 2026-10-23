@@ -366,7 +366,7 @@ executable policy-probe
   import:          settings
   hs-source-dirs:  cli/test
   main-is:         PolicyProbe.hs
-  other-modules:   SurfaceRefusals
+  other-modules:   SurfaceRefusals AmendmentProbe
   build-depends:
     , agentic
     , agentic:bisim-support

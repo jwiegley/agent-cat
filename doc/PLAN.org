@@ -27876,6 +27876,22 @@ is ready, not that an operator has deployed it.
 ]
 #+end_src
 
+* DOING [#C] Expose typed RHS amendments on the workflow authoring surface
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-wnxm
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-22 Thu 15:10]
+:MODIFIED: [2026-10-22 Thu 15:10]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/work/translation/translate-tool/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The builder and raw grammar already accept a function call as a bounded revision amendment. Expose that existing composition without changing semantics. Verify multi-question function execution, settlement and exhaustion, then run owning gates.
+
 * DONE [#C] An effect can run before an earlier read of what it changes
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

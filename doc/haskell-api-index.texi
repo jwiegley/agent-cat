@@ -148,6 +148,7 @@
 @hsindex Agentic.Workflow.Words
 @hsindex Agentic.Workflow.act
 @hsindex Agentic.Workflow.amend
+@hsindex Agentic.Workflow.amendWith
 @hsindex Agentic.Workflow.annotated
 @hsindex Agentic.Workflow.answer
 @hsindex Agentic.Workflow.answering

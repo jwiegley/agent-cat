@@ -407,6 +407,7 @@ module Agentic.Workflow
     Clauses,
     Amendment,
     amend,
+    amendWith,
 
     -- * The scope, as the block grammar's signatures need it
     Code (..),
@@ -1600,8 +1601,14 @@ amend ::
   KnownCode c =>
   Ask (An 'CodeVerdict ': An c ': s) ->
   W ('Amending c s) j Term
-amend q = W (\_ _ -> Amendment (B.one q))
+amend = amendWith . B.one
 
+-- | Amend with a typed right-hand side, such as a call whose body contains
+-- several questions. This exposes the same amendment grammar as the builder.
+amendWith ::
+  Rhs (An 'CodeVerdict ': An c ': s) c ->
+  W ('Amending c s) j Term
+amendWith rhs = W (\_ _ -> Amendment rhs)
 
 -- | @result <- revising draft (atMost n) \\patch -> W.do …@, and the
 -- @case result of@ that follows it.

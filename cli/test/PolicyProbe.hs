@@ -244,6 +244,7 @@ import System.IO (IOMode (WriteMode), hClose, openBinaryTempFile, withBinaryFile
 import System.IO.Error (ioeGetErrorString)
 import System.Timeout (timeout)
 
+import qualified AmendmentProbe
 import SurfaceRefusals
   ( callsAnUnlistedFunction,
     inputIsMisspelledRunFact,
@@ -2054,6 +2055,7 @@ promptRenderingProbe failures = do
 
 main :: IO ()
 main = do
+  AmendmentProbe.check
   failures <- newIORef (0 :: Int)
   inputSourceProbe failures
   promptRenderingProbe failures

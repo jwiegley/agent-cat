@@ -1642,7 +1642,9 @@ bound.
 @code{revising subject (atMost n)} reviews a candidate and can amend it up to
 @code{n} times.  The bound lies between zero and sixty-four.  Each round has
 exactly two source clauses.  The first is a review that produces a verdict, and
-the second is an @code{amend} at the answer kind of the candidate.  Additional
+the second is an amendment at the answer kind of the candidate.  Use
+@code{amend} for a question or @code{amendWith} for a typed right-hand side,
+including a function call with several questions in its body.  Additional
 statements have no first-order place inside the round, and they are rejected.
 
 The flagship's complete review clause is a compiled example:
@@ -3065,7 +3067,7 @@ zero through sixty-four.
 @c COVER API Agentic.Workflow.revising author
 @item revising subject bound clauses
 Build a two-ending bounded revision.  The subject fixes the carrier code.  The
-clauses must bind one verdict review and end with one @code{amend}.  The
+clauses must bind one verdict review and end with one amendment.  The
 Haskell case that follows immediately must consume its bind.
 
 @c COVER API Agentic.Workflow.revisingOn author
@@ -3077,6 +3079,13 @@ objection.  Its represented tail grows @code{2n+1} times.
 @item amend question
 Finish a revision clause with a question at the candidate's kind, with the review
 verdict and candidate live in its prompt scope.
+
+@c COVER API Agentic.Workflow.amendWith author
+@item amendWith rhs
+Finish a revision clause with a typed right-hand side at the candidate's kind.
+A function call here executes its body within the amendment and passes its
+result to the next review.  The function does not acquire permission to branch
+or perform a nested revision.
 @end table
 
 @section Functions, calls, and chains

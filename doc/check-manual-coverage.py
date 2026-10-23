@@ -33,6 +33,7 @@ AUTHOR_WORKFLOW = {
     "Outcome",
     "act",
     "amend",
+    "amendWith",
     "annotated",
     "answer",
     "answering",
