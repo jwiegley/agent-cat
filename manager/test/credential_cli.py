@@ -29,11 +29,16 @@ config.write_text(json.dumps(configuration))
 config.chmod(0o600)
 
 
-def call(request, path=None):
+def no_manager_notice(root):
+    return f"no manager serves on this administrationRoot ({root}); start one with --manager serve, or give the offline configuration when no manager serves"
+
+
+def call(request, path=None, *, diagnostic=None):
     payload = request if isinstance(request, bytes) else json.dumps(request).encode()
     result = subprocess.run([str(runner), "--manager", "admin", "--config", str(path or config)],
                             input=payload, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
-    assert not result.stderr, "admin diagnostics must not contain private input or paths"
+    expected_stderr = b"" if diagnostic is None else ("manager admin: " + diagnostic + "\n").encode()
+    assert result.stderr == expected_stderr, "admin diagnostic differs from the documented operator notice"
     assert len(result.stdout) <= 1048576, "bounded JSON including terminating newline"
     value = frozen.parse_json(result.stdout)
     assert not list(validator.iter_errors(value)), "actual admin output violates frozen schema"
@@ -54,7 +59,8 @@ for payload, code in [
     assert value["operation"] is None and value["error"]["code"] == code
     assert value["error"]["message"] == ""
 
-value = call({"version": 1, "operation": "drain"})
+value = call({"version": 1, "operation": "drain"},
+             diagnostic="drain needs a serving manager; give the serve configuration")
 assert not value["ok"] and value["error"]["code"] == "state-conflict"
 
 
@@ -75,10 +81,10 @@ assert len(validated["result"]["revision"]) == 64, validated
 invalid = work / "credential-cli-invalid.json"
 invalid.write_text(json.dumps(dict(configuration, profiles=configuration["profiles"] * 2)))
 invalid.chmod(0o600)
-refused_file = call(RELOAD, invalid)
+refused_file = call(RELOAD, invalid, diagnostic=f"the configuration file {invalid} is not a valid manager configuration (see manager/CONFIGURATION.md)")
 assert not refused_file["ok"] and refused_file["error"]["code"] == "state-conflict", refused_file
 invalid.chmod(0o644)
-unreadable = call(RELOAD, invalid)
+unreadable = call(RELOAD, invalid, diagnostic=f"the configuration file {invalid} cannot be read as a private file of this user: it must exist as a regular file that this user owns, with mode 0600")
 assert not unreadable["ok"] and unreadable["error"]["code"] == "storage-unavailable", unreadable
 assert store_files() == before, "offline reload-profiles changed a Store file"
 # Offline shutdown takes the free configuration lease, opens no Store and
@@ -156,24 +162,25 @@ assert not (Path(configuration["managerRoot"]) / "restore-in-progress").exists()
 unchanged = call({"version": 1, "operation": "status"})["result"]
 assert (unchanged["authorityEpoch"], unchanged["streamId"]) == (status["result"]["authorityEpoch"], status["result"]["streamId"]), unchanged
 
+offline_refused = "the offline configuration cannot take the manager root: a serving manager holds it, or a configured directory is missing or not private (mode 0700)"
 holding = subprocess.Popen([str(owner), "hold-credentials", str(original)],
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 try:
     assert holding.stdout.readline().strip() == "ready", "original Store owner did not acquire lease"
-    value = call({"version": 1, "operation": "list-credentials"})
+    value = call({"version": 1, "operation": "list-credentials"}, diagnostic=offline_refused)
     assert not value["ok"] and value["error"]["code"] == "storage-unavailable"
     # Offline reload-profiles takes no lease, so a Store owner does not refuse it.
     assert call(RELOAD)["ok"], "offline reload-profiles waited for the configuration lease"
     # Offline shutdown takes the lease, so a Store owner refuses it.
-    held_shutdown = call(SHUTDOWN)
+    held_shutdown = call(SHUTDOWN, diagnostic=offline_refused)
     assert not held_shutdown["ok"] and held_shutdown["error"]["code"] == "storage-unavailable", held_shutdown
     # Offline backup takes the lease too, so a Store owner refuses it before
     # the destination exists.
-    held_backup = call({**BACKUP, "outputFile": str(work / "cli-held-backup")})
+    held_backup = call({**BACKUP, "outputFile": str(work / "cli-held-backup")}, diagnostic=offline_refused)
     assert not held_backup["ok"] and held_backup["error"]["code"] == "storage-unavailable", held_backup
     assert not (work / "cli-held-backup").exists(), "a refused backup created its destination"
     # Offline restore takes the lease too, so a Store owner refuses it.
-    held_restore = call({**RESTORE, "fencingEvidenceFile": evidence("cli-evidence-held", status)})
+    held_restore = call({**RESTORE, "fencingEvidenceFile": evidence("cli-evidence-held", status)}, diagnostic=offline_refused)
     assert not held_restore["ok"] and held_restore["error"]["code"] == "storage-unavailable", held_restore
 finally:
     holding.terminate()
@@ -321,7 +328,7 @@ try:
         relay.start()
         lost_file = work / "cli-lost-reply.credential"
         try:
-            uncertain = call({**issue, "label": "Lost reply", "outputFile": str(lost_file)})
+            uncertain = call({**issue, "label": "Lost reply", "outputFile": str(lost_file)}, diagnostic=no_manager_notice(proxy_root))
         finally:
             relay.join(timeout=20)
             configuration["administrationRoot"] = str(admin_root)
@@ -369,10 +376,10 @@ assert not address.exists(), "normal original-owner cleanup removes its socket"
 
 # The configured channel never falls back to offline mutation, even when its owner is gone.
 unavailable_file = work / "cli-no-offline-fallback.credential"
-unavailable = call({**issue, "outputFile": str(unavailable_file)})
+unavailable = call({**issue, "outputFile": str(unavailable_file)}, diagnostic=no_manager_notice(admin_root))
 assert not unavailable["ok"] and unavailable["error"]["code"] == "storage-unavailable"
 assert not unavailable_file.exists()
-unavailable_reload = call(RELOAD)
+unavailable_reload = call(RELOAD, diagnostic=no_manager_notice(admin_root))
 assert not unavailable_reload["ok"] and unavailable_reload["error"]["code"] == "storage-unavailable", unavailable_reload
 
 # A stale private socket name is disposable only after acquiring its exclusive directory lease.

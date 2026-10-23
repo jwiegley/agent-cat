@@ -8001,6 +8001,24 @@ Full failure/capacity evidence, operational procedures, reproducible packages, r
 ]
 #+end_src
 
+* DONE [#C] Assert documented local-admin notices without weakening JSON or credential checks
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-g5km
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-22 Thu 18:50]
+:MODIFIED: [2026-10-22 Thu 19:53]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-22 Thu 19:53]
+:CLOSE_REASON: Exact documented notices asserted; manager/ci/commands.sh passed N1/N8, frozen response/credential checks, opacity checks, and authorization audit.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/work/translation/translate-tool/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+credential_cli.py still required empty stderr although OPERATIONS.md and Cli.LocalAdmin deliberately emit exact actionable operator notices. Keep frozen stdout/exit checks and assert only the documented exact notices at the affected refusals. No production CLI changes.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PG5
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

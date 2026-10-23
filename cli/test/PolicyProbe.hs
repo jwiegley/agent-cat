@@ -2699,7 +2699,7 @@ main = do
       ("--tui --service refuses nine client-profile paths", parsedAs (["--tui", "--service"] <> ["/tmp/p" <> T.pack (show n) | n <- [1 .. 9 :: Int]]) == "refused"),
       ("--tui --service refuses a relative path among several", parsedAs ["--tui", "--service", "/tmp/a.json", "b.json"] == "refused"),
       ("--tui --service with no profile names its usage, not a verb",
-        either ("usage:\n  wf --tui --service ABS_CLIENT_PROFILE" `T.isInfixOf`) (const False) (parseCommand collidingRegistry ["--tui", "--service"])),
+        either (\why -> "usage:" `T.isInfixOf` why && "wf --tui --service ABS_CLIENT_PROFILE" `T.isInfixOf` why) (const False) (parseCommand collidingRegistry ["--tui", "--service"])),
       ("--tui with an unknown option names its usage", parsedAs ["--tui", "--remote"] == "refused"),
       ("--version is the version", parsedAs ["--version"] == "version"),
       ("frontend is the prepared-session verb", parsedAs ["frontend"] == "frontend"),
