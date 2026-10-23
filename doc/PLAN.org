@@ -27876,15 +27876,17 @@ is ready, not that an operator has deployed it.
 ]
 #+end_src
 
-* DOING [#C] Expose typed RHS amendments on the workflow authoring surface
+* DONE [#C] Expose typed RHS amendments on the workflow authoring surface
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-wnxm
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-22 Thu 15:10]
-:MODIFIED: [2026-10-22 Thu 15:10]
+:MODIFIED: [2026-10-23 Fri 12:16]
 :CREATED_BY: johnw
+:FINISHED: [2026-10-23 Fri 12:16]
+:CLOSE_REASON: Full cli/ci/policies.sh completed with exit 0 in policy-v5 after focused artifact/history N1/N8 checks; amendment, mutation, schema, control, lineage, and frontend checks passed. No production manager change.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/work/translation/translate-tool/agent-cat
 :ORIGINAL_SIZE: 0
@@ -28319,15 +28321,17 @@ Update manual and generated indexes together; make -C doc check and make -C doc 
 ]
 #+end_src
 
-* DOING [#C] Refresh audit mutations for shared decision checks and tagged Store boundaries
+* DONE [#C] Refresh audit mutations for shared decision checks and tagged Store boundaries
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-ym69
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-22 Thu 21:42]
-:MODIFIED: [2026-10-22 Thu 21:43]
+:MODIFIED: [2026-10-23 Fri 12:16]
 :CREATED_BY: johnw
+:FINISHED: [2026-10-23 Fri 12:16]
+:CLOSE_REASON: Full cli/ci/policies.sh completed with exit 0 in policy-v5 after focused artifact/history N1/N8 checks; amendment, mutation, schema, control, lineage, and frontend checks passed. No production manager change.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/work/translation/translate-tool/agent-cat
 :ORIGINAL_SIZE: 0
