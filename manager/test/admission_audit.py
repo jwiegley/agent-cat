@@ -219,7 +219,7 @@ elif mode in {"control-reservation-mutant", "control-body-mutant", "control-rele
     path = "manager/src/Agentic/Manager/State.hs"
     target, arguments = "manager-approval-check", ["controls"]
     if mode == "control-reservation-mutant":
-        replace(path, '| state/="pending" -> pure(Left Command.StaleRevision)', '| False && state/="pending" -> pure(Left Command.StaleRevision)')
+        replace(path, '| state /= "pending" = Just Command.StaleRevision', '| False && state /= "pending" = Just Command.StaleRevision')
         marker = "FAIL reserved generation cannot accept another answer before write"
     elif mode == "control-body-mutant":
         replace(path, 'maybe Null id (KM.lookup "value" fields)', 'maybe Null (\\rawAnswer -> if rawAnswer==Bool False then Bool True else rawAnswer) (KM.lookup "value" fields)')
@@ -228,7 +228,7 @@ elif mode in {"control-reservation-mutant", "control-body-mutant", "control-rele
         replace(path, 'if state `elem` ["rejected-stale","unsupported","failed"] then releaseDecision', 'if state `elem` ["accepted","rejected-stale","unsupported","failed"] then releaseDecision')
         marker = "FAIL native Accepted cannot release submitting decision"
     else:
-        replace(path, 'headId/=ident;_->True -> pure(Left Command.DecisionNotHead)', 'headId/=headId;_->False -> pure(Left Command.DecisionNotHead)')
+        replace(path, '| take 1 queue /= [ident] = Just Command.DecisionNotHead', '| False && take 1 queue /= [ident] = Just Command.DecisionNotHead')
         target, arguments = "manager-approval-check", ["controls-live"]
         marker = "FAIL genuine mixed non-head refuses through both internal entrypoints"
 elif mode in {"interruption", "ticket-mutant", "approval-interruption", "control-interruption", "control-ticket-mutant"}:
@@ -241,7 +241,7 @@ elif mode in {"interruption", "ticket-mutant", "approval-interruption", "control
             "        Right () -> do\n          Audit.recordDelivery ident state\n          Right <$> restore (action payload)")
     if mode in {"ticket-mutant", "control-ticket-mutant"}:
         replace(commands, "  reconcile = do\n   outcome <-", "  reconcile = do\n   replacement <- newIORef (TicketState Unreserved Nothing)\n   outcome <-")
-        replace(commands, "if dispatch then Just(DispatchTicket store candidate generation refs retained)", "if dispatch then Just(DispatchTicket store candidate generation refs replacement)")
+        replace(commands, "if dispatch then Just(DispatchTicket (outsideRequest store) candidate generation refs retained)", "if dispatch then Just(DispatchTicket (outsideRequest store) candidate generation refs replacement)")
     if mode in {"approval-interruption", "control-interruption", "control-ticket-mutant"}:
         replace(commands, "          Right <$> restore (action payload)", "          Right <$> restore (action payload <* Audit.afterNativeReturn ident state)")
         target, arguments = "manager-approval-check", ["interrupted-approval" if mode == "approval-interruption" else "controls-interruption"]
@@ -293,7 +293,7 @@ elif mode in {"ingestion-race", "ingestion-race-mutant"}:
     replace(path,"\n  empty <- valid (captureSnapshotCheckpoint (associationNative association) [])\n",'\n  Audit.afterCurrentReview "state-prefix"\n  empty <- valid (captureSnapshotCheckpoint (associationNative association) [])\n')
     replace(path,'          revision = "runtime_" <> sequenceKey\n      runTransaction store $ do\n','          revision = "runtime_" <> sequenceKey\n      Audit.afterCurrentReview "state-publication"\n      runTransaction store $ do\n')
     if mode == "ingestion-race-mutant":
-        replace(path,"        unless (actual == expected) (refuseTransaction StoreBusy)","        void (pure (actual == expected))")
+        replace(path,'        unless (actual == expected) (refuseBusyTransaction "state-ingestion-boundary")',"        void (pure (actual == expected))")
     target, arguments = "manager-approval-check", ["ingestion-race"]
     marker = "FAIL stale concurrent publication returns explicit StoreBusy"
 elif mode == "ingestion-cleanup-mutant":

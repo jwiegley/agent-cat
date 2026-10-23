@@ -28303,6 +28303,22 @@ Update manual and generated indexes together; make -C doc check and make -C doc 
 ]
 #+end_src
 
+* DOING [#C] Refresh audit mutations for shared decision checks and tagged Store boundaries
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ym69
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-22 Thu 21:42]
+:MODIFIED: [2026-10-22 Thu 21:43]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/work/translation/translate-tool/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Anchor-only preflight found five stale modes after existing refactors: FIFO and reservation checks moved into decisionHeadRefusal, tickets now retain outsideRequest store, and ingestion uses a tagged refuseBusyTransaction. Update only test mutations, preserve intended defects and failure markers, and compile/run all affected modes plus policy gate. No production changes.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PD21
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
