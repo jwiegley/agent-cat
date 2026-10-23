@@ -96,7 +96,15 @@ if mode == "package-boundary":
     print(f"PASS positive Cabal package boundary: {work}")
     raise SystemExit(0)
 
-changes = []
+# A captured package below the checkout must not inherit the checkout's project.
+project_path = copy / "cabal.project"
+project_before = project_path.read_text() if project_path.exists() else ""
+project = "packages: .\n"
+project_path.write_text(project)
+changes = [{"path": "cabal.project",
+            "beforeSha256": hashlib.sha256(project_before.encode()).hexdigest() if project_before else None,
+            "afterSha256": hashlib.sha256(project.encode()).hexdigest(),
+            "diff": "".join(difflib.unified_diff(project_before.splitlines(True), project.splitlines(True), fromfile="cabal.project", tofile="cabal.project"))}]
 
 def replace(path, old, new):
     target = copy / path

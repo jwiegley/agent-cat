@@ -10986,6 +10986,24 @@ validated pass (P1, attribution corrected by the pass itself). example/harden.wf
 ]
 #+end_src
 
+* DONE [#C] Keep captured audit builds inside their standalone Cabal package
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ni7g
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-10-22 Thu 17:36]
+:MODIFIED: [2026-10-22 Thu 19:53]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-22 Thu 19:53]
+:CLOSE_REASON: Captured standalone Cabal project verified by real restore-interruption N1/N8 and the subsequent policy run progressing past store audits.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/work/translation/translate-tool/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The restore-interruption audit inherited the enclosing checkout cabal.project and compiled uninstrumented original modules. Evidence: dist-newstyle/audit-restore-interruption.ny_rfqvd/build.log and N1.log. Give the captured package an explicit local project and verify the real interruption rendezvous at N1/N8. No manager production behavior change.
+
 * DONE [#D] msSmul semimodule laws, so panels compose with gating
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
