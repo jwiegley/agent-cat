@@ -5,6 +5,10 @@ cd "$root"
 : "${CABAL_BUILDDIR:?Use the configured project environment}"
 umask 077
 unset GHCRTS
+for name in ${!AGENT_CAT_@}; do unset "$name"; done
+# The checks open their fixtures without following links, so the temporary root
+# is named by its resolved path.
+TMPDIR=$(cd "${TMPDIR:?Use a short private temporary root}" && pwd -P)
 export PYTHONDONTWRITEBYTECODE=1
 bash test/cabal.sh build lib:agentic manager-artifact-check manager-history-check --ghc-options=-Werror
 checker=$(bash test/cabal.sh list-bin manager-artifact-check)

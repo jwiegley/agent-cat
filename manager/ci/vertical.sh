@@ -5,6 +5,11 @@ cd "$root"
 : "${CABAL_BUILDDIR:?Use the configured project environment}"
 : "${TMPDIR:?Use a short private temporary root}"
 umask 077
+unset GHCRTS
+for name in ${!AGENT_CAT_@}; do unset "$name"; done
+# The checks open their fixtures without following links, so the temporary root
+# is named by its resolved path.
+TMPDIR=$(cd "$TMPDIR" && pwd -P)
 export PYTHONDONTWRITEBYTECODE=1
 python3 - <<'PY'
 import os

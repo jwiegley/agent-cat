@@ -7,6 +7,9 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 : "${TMPDIR:?Use a short private temporary root}"
 umask 077
+# The checks open their fixtures without following links, so the temporary root
+# is named by its resolved path.
+TMPDIR=$(cd "$TMPDIR" && pwd -P)
 export PYTHONDONTWRITEBYTECODE=1
 
 steps=(closure lean build cases admission vertical history refusals corpus)
@@ -152,6 +155,9 @@ step_admission() {
 }
 
 step_vertical() {
+  local name
+  unset GHCRTS
+  for name in ${!AGENT_CAT_@}; do unset "$name"; done
   python3 - <<'PY'
 import os
 assert "GHCRTS" not in os.environ
