@@ -5263,6 +5263,24 @@ Non-blocking findings of the fess audit of Phase B part 2 subtask C26 (the part 
 
 6. (low, open) manager/test/service_http.py page_checks: the lineage-requests ETag check compares the ETag with page.revision from the same response, which proves agreement but not that the value is the parent run revision. The exports check has the same pattern. Fix: assert that the first lineage page revision equals the parent run revision from GET /v1/runs/{id}.
 
+* DONE [#D] The policies gate leaves Python bytecode in the source tree
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-c2uc
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-10-24 Sat 10:24]
+:MODIFIED: [2026-10-24 Sat 14:46]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-24 Sat 14:31]
+:CLOSE_REASON: Fixed in cd9754e. cli/ci/policies.sh and runtime/ci/capture.sh now export PYTHONDONTWRITEBYTECODE=1 before their first Python step. The full cli/ci/policies.sh gate on the tree of cd9754e ran from a shell that does not set the variable and left no __pycache__ directory and no untracked file in the worktree.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+test/answer_schema_evidence.py and test/capture_build_evidence.py import test/policy_refusal_evidence.py, and test/frontend_contract_probe.py imports test/frontend_session_probe.py. cli/ci/policies.sh and runtime/ci/capture.sh run them without PYTHONDONTWRITEBYTECODE, so a gate run leaves an untracked test/__pycache__ in the checkout. artifacts.sh and vertical.sh export the variable, commands.sh and drafts.sh set it for their Python steps, and test/frontend_export_probe.py turns bytecode off itself. A run of 2026-10-24 that stopped in store.sh left test/__pycache__/policy_refusal_evidence.cpython-314.pyc behind.
+
 * TODO [#D] Resolve C4 fess findings on the pruned flow reader
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -5517,7 +5535,7 @@ The refocus note says to add no new evidence tooling. The 2026-09-29 closeout us
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-10-06 Tue 16:16]
-:MODIFIED: [2026-10-21 Wed 21:46]
+:MODIFIED: [2026-10-24 Sat 14:31]
 :CREATED_BY: johnw
 :FINISHED: [2026-10-21 Wed 21:46]
 :CLOSE_REASON: admission_audit resolves each created fixture path before native checks. The same instrumented restore binary that failed through macOS /var passes at N1 and N8 with the canonical name. Private-file rejection is unchanged. The complete policy gate is rebuilding the fixed audit, with evidence under /Users/johnw/Products/agent-cat-release-20261022.
@@ -5540,6 +5558,20 @@ manager-admission-check restart-interruption, run by manager/test/admission_audi
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
+  }
+]
+#+end_src
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 816,
+    "issue_id": "acat-cpp5",
+    "author": "johnw",
+    "text": "The fix in admission_audit.py names only the audit's own fixtures by their resolved paths. artifacts.sh, vertical.sh and the vertical step of bisim/ci/manager.sh still gave their checks fixtures under the unresolved TMPDIR, and at 144fb1b vertical.sh stopped with UnreadableConfiguration. acat-i1w5 records this, and 5d35dbd fixes it.\n",
+    "created_at": "2026-10-24T21:31:21Z"
   }
 ]
 #+end_src
@@ -6721,15 +6753,17 @@ Adopted from the web survey (comparison judge). (1) CONTRACT: name the checker's
 ]
 #+end_src
 
-* TODO [#C] The store-cancel-mutant audit no longer compiles: its Store.hs instrumentation lacks withAsync and threadDelay
+* DONE [#C] The store-cancel-mutant audit no longer compiles: its Store.hs instrumentation lacks withAsync and threadDelay
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-f9jw
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-10-06 Tue 16:55]
-:MODIFIED: [2026-10-06 Tue 16:55]
+:MODIFIED: [2026-10-24 Sat 14:31]
 :CREATED_BY: johnw
+:FINISHED: [2026-10-24 Sat 14:31]
+:CLOSE_REASON: Duplicate of acat-uvwz, which 0a136ed fixed: the Store mutation now removes only the asynchronous imports that its replacement makes unused, so threadDelay and withAsync stay in scope. The full cli/ci/policies.sh gate on the tree of cd9754e built the mutant and printed "PASS store-cancel-mutant N1: intended mutant assertion" and the same line at N8.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -8216,15 +8250,17 @@ From acat-ubt: CSemiring (MSemiring S K) under [CMonoid K] is now provable ({ins
 :ORIGINAL_SIZE: 0
 :END:
 
-* TODO [#C] policy-probe expects a usage text that the CLI no longer prints for --tui --service without a profile
+* DONE [#C] policy-probe expects a usage text that the CLI no longer prints for --tui --service without a profile
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-gw8d
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-10-06 Tue 17:00]
-:MODIFIED: [2026-10-06 Tue 17:00]
+:MODIFIED: [2026-10-24 Sat 14:31]
 :CREATED_BY: johnw
+:FINISHED: [2026-10-24 Sat 14:31]
+:CLOSE_REASON: Fixed in 4593c5b. ede9019 added both the usage text and the probe case that misread it, and the CLI text is the intended one. The probe now compares the whole refusal of five refused --tui command lines with a text written out in the probe: the problem sentence, a blank line and the usage lines of both --tui forms. A mutant that swaps the two usage lines fails all five cases, and one that rewords the no-profile problem sentence fails that case alone. The full cli/ci/policies.sh gate on the tree of cd9754e printed "policy probe: all checks passed".
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -8804,6 +8840,40 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
     "author": "johnw",
     "text": "Applied in the second 2026-09-27 closeout: the new handoff section and report revision 3 carry this correction. The fess audit Z-HANDOFF-r1 (2026-09-27, second closeout) confirms that the acat-hzs9, acat-tlhm and acat-6bih corrections are applied. Evidence: /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/impl-r1/H29-accuracy.log, /Users/johnw/Products/agent-cat-workflow-manager/implementation.9tGzKH/service-tui.purvEwEv/resume-20260923/Z/HANDOFF/verify-r1/V8-report-structure.log.",
     "created_at": "2026-09-27T19:44:23Z"
+  }
+]
+#+end_src
+
+* DONE [#C] The manager gates leave TMPDIR resolution and AGENT_CAT_* clearing to the caller
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-i1w5
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-10-24 Sat 09:15]
+:MODIFIED: [2026-10-24 Sat 14:46]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-24 Sat 14:45]
+:CLOSE_REASON: Fixed in 5d35dbd. artifacts.sh, vertical.sh and the vertical step of bisim/ci/manager.sh now clear every AGENT_CAT_* variable and name TMPDIR by its resolved path, and vertical.sh and the vertical step also unset GHCRTS, as artifacts.sh already did. Their assertions are unchanged. At 144fb1b, vertical.sh stopped with UnreadableConfiguration even with the AGENT_CAT_* variables removed. From a shell that sets AGENT_CAT_RUNNER and AGENT_CAT_STATE_DIR and keeps the default TMPDIR under /var/folders, vertical.sh passed on the tree of cd9754e, and artifacts.sh passed within the full cli/ci/policies.sh gate on the same tree. bisim/ci/manager.sh, run from the same session shell, whose environment was recorded after the run, passed all nine steps and detected all three controls at 5f11fcd. 5f11fcd differs from 5d35dbd only in cli/ci/policies.sh, manager/ADMISSION.md and manager/test/admission_audit.py, none of which the bisim gate runs.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+artifacts.sh, vertical.sh and the vertical step of bisim/ci/manager.sh write configuration into fixtures under TMPDIR, and their checks read it back with readPrivateConfigurationFile, which refuses a path that runs through a link. On macOS the default TMPDIR lies under /var/folders, and /var is a link to private/var, so manager-artifact-check and manager-vertical-check stop with UnreadableConfiguration. acat-cpp5 resolved the same paths only inside admission_audit.py. The same scripts assert that no AGENT_CAT_* variable reaches their checks, and vertical.sh and the vertical step also assert that GHCRTS is unset, but none of them clears these. A shell that configures the Pi extension sets AGENT_CAT_RUNNER and AGENT_CAT_STATE_DIR, so the gates cannot run from it.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-i1w5",
+    "depends_on_id": "acat-cpp5",
+    "type": "discovered-from",
+    "created_at": "2026-10-24T16:15:44.384270Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -10324,6 +10394,24 @@ The design names three homomorphisms: extensional, quantitative, rendering. Term
   }
 ]
 #+end_src
+
+* DONE [#D] Two real admission audit modes print the mutant PASS label
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-m4rz
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-10-24 Sat 09:15]
+:MODIFIED: [2026-10-24 Sat 14:46]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-24 Sat 14:31]
+:CLOSE_REASON: Fixed in cab9e4a. One table now gives each of the 16 real modes its success line and its PASS label, and the evaluation reads both from it. A comparison of the real or mutant role, success line and label of all 46 modes before and after the change found that only the labels of ingestion-race and store-cancel-gap differ. The full cli/ci/policies.sh gate on the tree of cd9754e printed "real competing ingestion publication" for ingestion-race and "real SQL interrupt rollback" for store-cancel-gap, at N1 and N8.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+admission_audit.py names its real modes three times: in the set that decides whether a mode passes as real, in a chain of success lines and in a chain of PASS labels. The label chain has no branch for ingestion-race or store-cancel-gap, so both print 'intended mutant assertion' after passing as real modes, and the three lists can drift apart again.
 
 * TODO [#D] Give each missing Ctrl-D prerequisite its own outcome text
 :PROPERTIES:
@@ -16387,7 +16475,7 @@ Evidence: resume-20260923/RD/R5/impl-r1 (tsc exit 0; ext-pi unit tests 222 passe
 :LABELS:   ["workflow-manager"]
 :ISSUE_TYPE: task
 :CREATED:  [2026-10-04 Sun 02:48]
-:MODIFIED: [2026-10-04 Sun 02:48]
+:MODIFIED: [2026-10-24 Sat 14:31]
 :CREATED_BY: johnw
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
@@ -16404,6 +16492,20 @@ Non-blocking findings of fess audit fess/rd-R6-r1.md on readiness subtask R6 (ru
 6. Low. manager/test/client_native.py and manager/test/service_http.py gained six scenarios beyond the acceptance list. No action required; noted against the 2026-10-03 direction for no excessive testing.
 
 Limitations disclosed by the implementer: a CN-only certificate whose common name equals an IP endpoint host (no subjectAltName) is still accepted by the Haskell client, because crypton-x509-validation 1.9.1 falls back to the common name; refusing it is security hardening and is deferred to the security stage. The Pi extension keeps its own ClientFileUnavailable message (ext-pi/src not changed). cli/ci/examples.sh was not run (its width and help-page checks were covered by the a1 and a5 logs). cli/ci/policies.sh was not run, as the run rules require.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 817,
+    "issue_id": "acat-rd-r6-fess-followup-mbtm",
+    "author": "johnw",
+    "text": "4593c5b resolves item 1, recorded as acat-gw8d, and item 4: the probe now expects the whole refusal of each refused --tui command line, including its problem sentence, such as \"--tui --service takes at most eight client profile paths\". Items 2, 3 and 5 remain open. Item 2 would change the exit code of \"agentic-run --tui --help\", and cli/AGENTS.md asks that exit codes be preserved, so it awaits a decision. Item 6 needs no action.\n",
+    "created_at": "2026-10-24T21:31:22Z"
+  }
+]
+#+end_src
 
 * DONE [#C] Make runner and client messages name their usage and failures
 :PROPERTIES:
@@ -17253,6 +17355,24 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
   }
 ]
 #+end_src
+
+* DONE [#D] A stale mutation anchor stops the policies gate only when its audit runs
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-t8kv
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-24 Sat 09:15]
+:MODIFIED: [2026-10-24 Sat 14:46]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-24 Sat 14:31]
+:CLOSE_REASON: Fixed in 429f659. "admission_audit.py ROOT anchors" applies the source patches of every mode to a fresh copy without building it and names each mode that fails, and cli/ci/policies.sh runs it after its source-boundary probes and before its first build. With the four anchors restored to their text before 144fb1b, it named exactly the five modes that use them. On fresh CABAL_BUILDDIR directories it passed all 46 modes in 22 to 46 seconds and left no audit copy behind. The full cli/ci/policies.sh gate on the tree of cd9754e printed "PASS audit anchors: all 46 modes apply their source patches" before runtime/ci/capture.sh.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Each admission_audit.py mode patches the source at anchors that must occur exactly once. a5fedb1, e541d2f and 6ed7b0f changed the source under four anchors in early October, and the gate found each one only when its mode ran, hours into cli/ci/policies.sh. 144fb1b updated the four anchors. The gate needs a check that applies every mode's patches before it builds anything.
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PH3
 :PROPERTIES:
