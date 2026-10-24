@@ -442,6 +442,26 @@ def binary(name):
 
 checker, native = binary(target), binary("routing-fixed-point-probe")
 (work / "executables.json").write_text(json.dumps({path: hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in [checker, native]}, indent=2) + "\n")
+# A real mode passes when its checker exits 0 and prints the success line, and
+# its PASS line carries the label. Every other mode is a mutant.
+real_modes = {
+    "authorization-commit-gap": ("PASS authorization acknowledgement refuses committed but unnotified state", "real authorization commit boundary"),
+    "restore-interruption": ("PASS interrupted restore refuses ordinary startup without fabricated success", "real offline restore interruption"),
+    "shutdown-races": ("PASS one committed approval has one original attempted delivery", "real shutdown acceptance boundaries"),
+    "history-policy": ("PASS actual WM018 non-null routed policy provenance", "real WM018 owner checks"),
+    "history-corrections": ("PASS actual WM018 native lineage preservation and original ownership", "real WM018 owner checks"),
+    "history-observation": ("PASS removed retention root cannot enter artifact response", "real WM018 owner checks"),
+    "interruption": ("PASS original cleanup effect commits with release", "real interrupted acceptance"),
+    "approval-interruption": ("PASS interrupted original start retains one native start and immutable receipt", "real interrupted acceptance"),
+    "approval-review-gap": ("PASS catalogue change cannot retroactively reinterpret accepted consent", "real catalogue race and unchanged/replay controls"),
+    "store-cancel-gap": ("PASS rollback restores autocommit for subsequent real commit", "real SQL interrupt rollback"),
+    "ingestion-race": ("PASS competing publication preserves advanced boundary and exact earlier evidence", "real competing ingestion publication"),
+    "control-unsupported": ("PASS genuine Accepted to Unsupported remains distinct with no effect", "real Accepted-to-Unsupported evidence"),
+    "control-write": ("PASS actual partial-write outcome remains unresolved without a native acknowledgement", "real original-handle write evidence"),
+    "control-interruption": ("PASS interrupted controls retain one original native write", "real original control interruption"),
+    "control-reload-race": ("PASS profile reload racing control acceptance cannot authorize write", "real control authorization race"),
+    "control-preparation": ("PASS independent run progresses during held original preparation", "real per-entry preparation ownership"),
+}
 for capabilities in ["N1", "N8"]:
     if mode in {"history-policy", "history-corrections", "history-observation"}:
         fixture = Path(tempfile.mkdtemp(prefix=f"wm018-{capabilities}.", dir=os.environ["TMPDIR"]))
@@ -461,39 +481,12 @@ for capabilities in ["N1", "N8"]:
     command.extend(["+RTS", "-" + capabilities, "-RTS"])
     code = run(command, capabilities + ".log", timeout=120)
     output = (work / (capabilities + ".log")).read_text()
-    if mode in {"authorization-commit-gap", "restore-interruption", "shutdown-races", "history-policy", "history-corrections", "history-observation", "interruption", "approval-interruption", "approval-review-gap", "store-cancel-gap", "ingestion-race", "control-unsupported", "control-write", "control-interruption", "control-reload-race", "control-preparation"}:
-        success = "PASS original cleanup effect commits with release" if mode == "interruption" else "PASS interrupted original start retains one native start and immutable receipt"
-        if mode == "authorization-commit-gap":
-            success = "PASS authorization acknowledgement refuses committed but unnotified state"
-        if mode == "restore-interruption":
-            success = "PASS interrupted restore refuses ordinary startup without fabricated success"
-        if mode == "shutdown-races":
-            success = "PASS one committed approval has one original attempted delivery"
-        if mode == "history-policy":
-            success = "PASS actual WM018 non-null routed policy provenance"
-        if mode == "history-corrections":
-            success = "PASS actual WM018 native lineage preservation and original ownership"
-        if mode == "history-observation":
-            success = "PASS removed retention root cannot enter artifact response"
-        if mode == "control-preparation":
-            success = "PASS independent run progresses during held original preparation"
-        if mode == "control-reload-race":
-            success = "PASS profile reload racing control acceptance cannot authorize write"
-        if mode == "control-write":
-            success = "PASS actual partial-write outcome remains unresolved without a native acknowledgement"
-        if mode == "control-interruption":
-            success = "PASS interrupted controls retain one original native write"
-        if mode == "control-unsupported":
-            success = "PASS genuine Accepted to Unsupported remains distinct with no effect"
-        if mode == "store-cancel-gap":
-            success = "PASS rollback restores autocommit for subsequent real commit"
-        if mode == "ingestion-race":
-            success = "PASS competing publication preserves advanced boundary and exact earlier evidence"
-        if mode == "approval-review-gap":
-            success = "PASS catalogue change cannot retroactively reinterpret accepted consent"
+    if mode in real_modes:
+        success, label = real_modes[mode]
         if code or success not in output:
             raise RuntimeError(f"real {mode} checks failed")
-    elif not code or marker not in output:
-        raise RuntimeError("compiled mutant did not fail its intended assertion")
-    label = "real authorization commit boundary" if mode == "authorization-commit-gap" else "real offline restore interruption" if mode == "restore-interruption" else "real shutdown acceptance boundaries" if mode == "shutdown-races" else "real WM018 owner checks" if mode in {"history-policy", "history-corrections", "history-observation"} else "real per-entry preparation ownership" if mode == "control-preparation" else "real control authorization race" if mode == "control-reload-race" else "real original-handle write evidence" if mode == "control-write" else "real original control interruption" if mode == "control-interruption" else "real Accepted-to-Unsupported evidence" if mode == "control-unsupported" else "real catalogue race and unchanged/replay controls" if mode == "approval-review-gap" else "real interrupted acceptance" if mode in {"interruption", "approval-interruption"} else "intended mutant assertion"
+    else:
+        label = "intended mutant assertion"
+        if not code or marker not in output:
+            raise RuntimeError("compiled mutant did not fail its intended assertion")
     print(f"PASS {mode} {capabilities}: {label}", flush=True)
