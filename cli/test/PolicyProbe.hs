@@ -561,6 +561,19 @@ parsedAs args = case parseCommand collidingRegistry args of
     | "no verb '" `T.isInfixOf` t -> "no-verb"
     | otherwise -> "refused"
 
+-- | The whole text of a refused parse over 'collidingRegistry', or nothing
+-- when the parse succeeds.
+refusalOf :: [Text] -> Maybe Text
+refusalOf = either Just (const Nothing) . parseCommand collidingRegistry
+
+-- | The refusal of an incomplete @--tui@ command line over 'collidingRegistry':
+-- the problem, a blank line, and the usage lines of both @--tui@ forms, as an
+-- operator reads them. The usage is written out here rather than taken from the
+-- CLI, so a change to the usage text is also a change to this probe.
+tuiRefusal :: Text -> Maybe Text
+tuiRefusal problem =
+  Just (problem <> "\n\nusage:\n  wf --tui [--local]\n  wf --tui --service ABS_CLIENT_PROFILE [ABS_CLIENT_PROFILE ...]")
+
 pureProbe :: IORef Int -> String -> [(String, Bool)] -> IO ()
 pureProbe failures name cases = case [c | (c, ok) <- cases, not ok] of
   [] -> TIO.putStrLn ("ok   " <> T.pack name)
@@ -2692,15 +2705,22 @@ main = do
       ("leading --tui cannot collide with a workflow name", parsedAs ["--tui"] == "tui"),
       ("--tui --local is the explicit local mode of --tui", parsedAs ["--tui", "--local"] == "tui"),
       ("--tui --service takes an absolute client-profile path", parsedAs ["--tui", "--service", "/tmp/client-profile.json"] == "tui-service /tmp/client-profile.json"),
-      ("--tui --service refuses a relative client-profile path", parsedAs ["--tui", "--service", "client-profile.json"] == "refused"),
+      ("--tui --service refuses a relative client-profile path",
+        refusalOf ["--tui", "--service", "client-profile.json"]
+          == tuiRefusal "--tui --service takes absolute client profile paths of at most 4096 UTF-8 bytes, without NUL or line breaks"),
       ("--tui --service takes up to eight absolute client-profile paths in order",
         parsedAs (["--tui", "--service"] <> ["/tmp/p" <> T.pack (show n) | n <- [1 .. 8 :: Int]])
           == "tui-service " <> unwords ["/tmp/p" <> show n | n <- [1 .. 8 :: Int]]),
-      ("--tui --service refuses nine client-profile paths", parsedAs (["--tui", "--service"] <> ["/tmp/p" <> T.pack (show n) | n <- [1 .. 9 :: Int]]) == "refused"),
-      ("--tui --service refuses a relative path among several", parsedAs ["--tui", "--service", "/tmp/a.json", "b.json"] == "refused"),
+      ("--tui --service refuses nine client-profile paths",
+        refusalOf (["--tui", "--service"] <> ["/tmp/p" <> T.pack (show n) | n <- [1 .. 9 :: Int]])
+          == tuiRefusal "--tui --service takes at most eight client profile paths"),
+      ("--tui --service refuses a relative path among several",
+        refusalOf ["--tui", "--service", "/tmp/a.json", "b.json"]
+          == tuiRefusal "--tui --service takes absolute client profile paths of at most 4096 UTF-8 bytes, without NUL or line breaks"),
       ("--tui --service with no profile names its usage, not a verb",
-        either ("usage:\n  wf --tui --service ABS_CLIENT_PROFILE" `T.isInfixOf`) (const False) (parseCommand collidingRegistry ["--tui", "--service"])),
-      ("--tui with an unknown option names its usage", parsedAs ["--tui", "--remote"] == "refused"),
+        refusalOf ["--tui", "--service"] == tuiRefusal "--tui --service needs at least one client profile path"),
+      ("--tui with an unknown option names its usage",
+        refusalOf ["--tui", "--remote"] == tuiRefusal "--tui takes --local or --service ABS_CLIENT_PROFILE..."),
       ("--version is the version", parsedAs ["--version"] == "version"),
       ("frontend is the prepared-session verb", parsedAs ["frontend"] == "frontend"),
       ("frontend capabilities are a distinct discovery command", parsedAs ["frontend", "--capabilities"] == "frontend-capabilities"),
