@@ -19,8 +19,27 @@ import time
 
 source = Path(sys.argv[1]).resolve()
 mode = sys.argv[2]
-if mode not in {"authorization-commit-gap", "restore-interruption", "shutdown-races", "history-policy", "history-corrections", "history-observation", "interruption", "ticket-mutant", "retry-mutant", "deadline-mutant", "watchdog-mutant", "policy-mutant", "package-boundary", "termination-mutant", "approval-interruption", "approval-live-mutant", "approval-review-gap", "approval-publication-mutant", "approval-catalogue-mutant", "approval-reservation-mutant", "approval-quoted-mutant", "approval-supervision-mutant", "approval-live-target-mutant", "approval-delimiter-mutant", "ingestion-retained-mutant", "ingestion-duplicate-mutant", "store-cancel-gap", "store-cancel-mutant", "store-expiry-mutant", "ingestion-race", "ingestion-race-mutant", "ingestion-cleanup-mutant", "ingestion-observer-mutant", "control-reservation-mutant", "control-body-mutant", "control-release-mutant", "control-fifo-mutant", "control-unsupported", "control-unsupported-mutant", "control-steer-observation-mutant", "control-write", "control-interruption", "control-ticket-mutant", "control-reload-race", "control-preparation", "control-preparation-mutant"}:
+modes = {"authorization-commit-gap", "restore-interruption", "shutdown-races", "history-policy", "history-corrections", "history-observation", "interruption", "ticket-mutant", "retry-mutant", "deadline-mutant", "watchdog-mutant", "policy-mutant", "package-boundary", "termination-mutant", "approval-interruption", "approval-live-mutant", "approval-review-gap", "approval-publication-mutant", "approval-catalogue-mutant", "approval-reservation-mutant", "approval-quoted-mutant", "approval-supervision-mutant", "approval-live-target-mutant", "approval-delimiter-mutant", "ingestion-retained-mutant", "ingestion-duplicate-mutant", "store-cancel-gap", "store-cancel-mutant", "store-expiry-mutant", "ingestion-race", "ingestion-race-mutant", "ingestion-cleanup-mutant", "ingestion-observer-mutant", "control-reservation-mutant", "control-body-mutant", "control-release-mutant", "control-fifo-mutant", "control-unsupported", "control-unsupported-mutant", "control-steer-observation-mutant", "control-write", "control-interruption", "control-ticket-mutant", "control-reload-race", "control-preparation", "control-preparation-mutant"}
+usage = "usage: admission_audit.py ROOT MODE [--anchors-only], or ROOT anchors"
+if mode == "anchors":
+    # Every mode applies its source patches to a fresh copy and stops before its
+    # build, so a stale anchor stops a gate at once rather than at its audit.
+    if len(sys.argv) != 3:
+        raise SystemExit(usage)
+    if not os.environ.get("CABAL_BUILDDIR"):
+        raise SystemExit("CABAL_BUILDDIR: Use the configured project environment")
+    Path(os.environ["CABAL_BUILDDIR"]).mkdir(parents=True, exist_ok=True)
+    failed = [name for name in sorted(modes)
+              if subprocess.run([sys.executable, __file__, str(source), name, "--anchors-only"]).returncode]
+    if failed:
+        raise SystemExit("audit modes that fail before their build: " + ", ".join(failed))
+    print(f"PASS audit anchors: all {len(modes)} modes apply their source patches", flush=True)
+    raise SystemExit(0)
+if mode not in modes:
     raise SystemExit("unknown audit mode")
+if sys.argv[3:] not in ([], ["--anchors-only"]):
+    raise SystemExit(usage)
+anchors_only = sys.argv[3:] == ["--anchors-only"]
 work = Path(tempfile.mkdtemp(prefix=f"audit-{mode}.", dir=os.environ["CABAL_BUILDDIR"]))
 copy = work / "agentic-0.1.0.0"
 def capture_package(origin, destination, label):
@@ -70,6 +89,10 @@ def capture_package(origin, destination, label):
 
 original_members = capture_package(source, copy, "source")
 if mode == "package-boundary":
+    if anchors_only:
+        # This mode checks the package boundary and patches nothing.
+        shutil.rmtree(work)
+        raise SystemExit(0)
     (copy / ".audit-cache").mkdir()
     (copy / ".audit-cache/unlisted").write_text("must not be copied")
     (copy / "unlisted-sentinel").write_text("must not be hashed")
@@ -357,6 +380,9 @@ else:
 
 (work / "instrumentation.json").write_text(json.dumps({"mode": mode, "changes": changes}, indent=2) + "\n")
 (work / "instrumentation.diff").write_text("".join(change["diff"] for change in changes))
+if anchors_only:
+    shutil.rmtree(work)
+    raise SystemExit(0)
 environment = {name: value for name, value in os.environ.items()
                if name != "GHCRTS" and not name.startswith("AGENT_CAT_")}
 environment["CABAL_BUILDDIR"] = str(work / "build")

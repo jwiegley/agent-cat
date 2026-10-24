@@ -108,13 +108,16 @@
 # that cancels and cleans up a blocked sibling.
 #
 # No Lean or corpus is required. The shared compiler-parsed source-boundary gate
-# runs before the runtime policy and compatibility probes.
+# runs before the runtime policy and compatibility probes. Every mutation audit
+# then applies its source patches to a fresh copy without building it, so that a
+# stale anchor stops the gate before its first build rather than at its audit.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 python3 test/cabal_env_probe.py
 runghc -package=ghc -package=Cabal-syntax test/source-boundaries.hs "$(ghc --print-libdir)"
 python3 test/source_roots_probe.py
+python3 manager/test/admission_audit.py "$root" anchors
 bash runtime/ci/capture.sh
 bash manager/ci/profiles.sh
 bash manager/ci/configuration.sh

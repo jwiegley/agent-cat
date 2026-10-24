@@ -362,6 +362,14 @@ configured build directory. These are specific guard/identity sensitivity checks
 not a claim that arbitrary fault schedules or WM-014 approved-running transitions
 have been proved.
 
+Each mode patches the source at anchors that must occur exactly once, so a source
+change can leave an anchor stale. `python3 manager/test/admission_audit.py "$PWD"
+anchors` applies the patches of every mode, including the modes that no script
+runs, to a fresh copy and stops before each build. It names every mode that
+fails before its build. `cli/ci/policies.sh` runs it after its source-boundary
+probes and before its first script, so that a stale anchor stops the gate before
+its first build.
+
 Audit capture uses Cabal's positive source enumeration rather than recursively
 copying a checkout. Members must be regular relative paths without traversal,
 duplicates or symlink components, and copied bytes are checked against their
