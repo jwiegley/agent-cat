@@ -114,6 +114,7 @@
 set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
+export PYTHONDONTWRITEBYTECODE=1
 python3 test/cabal_env_probe.py
 runghc -package=ghc -package=Cabal-syntax test/source-boundaries.hs "$(ghc --print-libdir)"
 python3 test/source_roots_probe.py

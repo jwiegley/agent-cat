@@ -3,6 +3,7 @@ set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$root"
 : "${CABAL_BUILDDIR:?Run through the configured project environment}"
+export PYTHONDONTWRITEBYTECODE=1
 python3 test/capture_build_evidence.py
 work=$(mktemp -d "$CABAL_BUILDDIR/capture.XXXXXX")
 mkdir -p "$work/normal" "$work/fault" "$work/tmp"
