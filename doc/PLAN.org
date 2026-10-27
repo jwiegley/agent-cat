@@ -72,6 +72,38 @@ Acceptance: the unused functions and derived instances are removed, and the Werr
 
 Found by the live run on 2026-08-14 (workflow w5sz6gul7, live stage). SYMPTOM: in the REFUSING run (owner answered no, transcript has six turns and no 'tool apply' line, bill 6) the scratch parse.c was nevertheless replaced with the hardened 823-byte version (seed is 323 bytes, md5 f18314ef... -> 8e856c16...). Timestamps place the write inside the AUTHOR's draft turn (dir birth 12:03:34, file birth 12:04:08, author turn spans ~12:03:49-12:04:23), and it is a birth not a modification: write-and-rename, the signature of an editing tool. CAUSE: Agentic/Core/Acp.lean:271 'permission : Permission := .grant' is a single connection-wide policy that nothing sets; pickAllow answers allow_once to every session/request_permission regardless of the question's Code. To the permission layer, 'ask text model author' and 'act tool apply' are the same thing, so the program's ask/act distinction and the case ok { no -> done } consent branch are unenforceable against a live agent. Harden.no_ack_of_refused still holds — it is about acknowledgements, not bytes — which is exactly the point: there is no theorem and no runtime check saying 'a refused run leaves the workspace as it found it'. FIX (two parts): (1) make the permission decision a function of the QUESTION, not of the connection: grant only for the act (.ack), deny for every ask, and document the known consequence of denial (the turn completes with prose in place of an act, ~97k tokens, no protocol signal); thread the current question through Exec into Acp; log each decision in the transcript. (2) Add the empirical counterpart of the consent theorem: fingerprint the workspace before and after a run, report changes, and fail the run when no act was performed and the workspace changed. Cover both with stub tests. ALSO from the same run, separate issues: the adapter substituted claude-opus-4-8 (not in its advertised catalogue) after claude-fable-5 declined on policy grounds, reporting it only as prose inside the answer — so Conn.configValues is not a complete account of what may answer; and all three reviewers approved a draft that was a policy-refusal banner plus prose plus a fenced diff rather than 'a unified diff only'.
 
+* TODO [#C] Retain ownership of Cabal setup descendants after audit build timeout
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-0bgh
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-10-27 Tue 13:31]
+:MODIFIED: [2026-10-27 Tue 13:31]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/Products/translate-tool-routing-20261023/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+During Hera verification, manager/test/admission_audit.py reached its 1200-second compilation deadline, sent SIGINT to its original Cabal child and recorded original-child-joined with returncode -2. The Cabal act-as-setup descendant and its GHC child continued under PPID 1. Exact audit working-directory/build-directory arguments and compiler parent metadata proved ownership; the verifier terminated only those owned descendants and confirmed absence. No production workflow cancellation defect was observed. Keep this a separate CI-harness ownership issue; do not relax behavioral assertions or deadlines. A regression should exercise original-child exit while a setup descendant remains and prove complete owned cleanup or an explicit unproven outcome.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-0bgh",
+    "depends_on_id": "acat-zz72",
+    "type": "discovered-from",
+    "created_at": "2026-10-27T20:31:03.359168Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] Add source-aware args and stdin workflow inputs
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -28597,4 +28629,43 @@ HIGH (validated, machine-checked): at Cost with mA=d=fin 0, mB=fin 3, all of fin
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
 :END:
+
+* DONE [#C] Support workflow-specific native routing in Pi /wf
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-zz72
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-10-26 Mon 09:29]
+:MODIFIED: [2026-10-27 Tue 13:31]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-27 Tue 13:31]
+:CLOSE_REASON: Implemented and verified workflow-specific held native preparation in Pi /wf; unchanged Deck defaults, exact approval/binding, honest failures, cancellation and native-parent lineage covered; owning component gates and direct fess complete.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/Products/translate-tool-routing-20261023/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Add explicit runner workflow-to-persona selection while preserving unconfigured current Agent Deck execution. Reuse native routing and live frontend preparation for exact approval and frozen targets. Keep private file/multiline binding, failure/cancel visibility, source-hidden ACP back-translation, and existing controls. Deterministic extension/native integration tests and docs are required; no paid model in extension tests.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 816,
+    "issue_id": "acat-zz72",
+    "author": "johnw",
+    "text": "Hera implementation is complete in the Products clone: workflowPersonas selects native held preparation and preserves unconfigured Deck launches. Type check, 248 unit tests, all 22 native integration cases, then all 13 strengthened native routing cases (including actual cancel event and native-parent resume) passed. Original CLI: 7 non-live tests passed; helper: 36 passed; authoritative assets match. Documentation, 10 examples, routing-config, 23 ACP and 10 Deck scenarios passed. Complete policy first refused the caller because CABAL_BUILDDIR was absent; no test assertion was changed. A configured-root policy-only retry is active. Issue remains in progress until that gate and final fess closure. No publication/deployment or paid translation yet.",
+    "created_at": "2026-10-26T18:48:55Z"
+  },
+  {
+    "id": 817,
+    "issue_id": "acat-zz72",
+    "author": "johnw",
+    "text": "Final direct fess and abstraction review found no unresolved routing implementation defect. Type check, 248 unit tests, 22 native integrations, remote transport, and 13 strengthened native routing cases passed. Docs, 10 examples, routing configuration, 23 ACP and 10 Deck scenarios passed. Complete policy coverage is assembled from source-identical component runs: all 684 captured files match; every one of 13 control modes passed at N1/N8; the unchanged remaining policy suffix exits 0, including artifact/history, schema, lineage, controls, frontend IO/session/export/codecs and refusal probes. Original invocation and cold-build timeout failures remain recorded. A standard per-run Cabal -j8 compiler configuration resolved cold compilation limits without changing -Werror, optimization, source capture, or test/build deadlines. Separate audit descendant-cleanup limitation recorded as discovered work. No paid translation or deployment claimed.",
+    "created_at": "2026-10-27T20:31:04Z"
+  }
+]
+#+end_src
 

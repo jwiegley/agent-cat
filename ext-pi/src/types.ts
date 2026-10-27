@@ -3,6 +3,7 @@ export type RunnerConfig = {
   executable: string;
   prefixArgs?: string[];
   allowedCwds: string[];
+  workflowPersonas?: Record<string, string>;
 };
 
 /**
@@ -162,8 +163,16 @@ export type RunSnapshot = {
 
 export type TargetKind = "scripted" | "routing" | "acp" | "deck" | "current" | "child" | "remote";
 
+export type FrontendInvocation = {
+  version: 1;
+  runnerAlias: string;
+  executable: string;
+  prefixArgs: string[];
+};
+
 export type LaunchManifest = {
-  frontendManifestVersion?: 2;
+  frontendManifestVersion?: 2 | 3;
+  invocation?: FrontendInvocation;
   runId: string;
   runnerId: string;
   runnerExecutable?: string;

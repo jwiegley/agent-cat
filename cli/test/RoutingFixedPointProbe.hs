@@ -134,6 +134,7 @@ registry =
           ("captured-input", row (Needs $ taking (stdinInputAs "input" :> noInputs) capturedInputProgram)),
           ("tail-source", row (Needs $ taking (argsInputAs "input" :> noInputs) sourceProgram)),
           ("stdin-source", row (Needs $ taking (stdinInputAs "input" :> noInputs) sourceProgram)),
+          ("pinned-sources", row (Needs $ taking (argsInputAs "file" :> stdinInputAs "text" :> noInputs) pinnedSourcesProgram)),
           ("target-sensitive", row (Needs $ taking (input (runFactName runFactEngine) :> noInputs) targetSensitiveProgram)),
           ("in-process", toolRow inProcessProgram [("record", recordTool)]),
           ("in-process-mismatch", toolRow mismatchProgram [("record", textTool (\_ words' -> pure words'))]),
@@ -187,6 +188,12 @@ capturedInputProgram body = sourceProgram (T.pack (show (hash (TE.encodeUtf8 bod
 sourceProgram :: Text -> Program
 sourceProgram body = workflow W.do
   _answer <- ask (model "fixed-point") [wf|fixed-point source: {body}|]
+  stop
+
+pinnedSourcesProgram :: Text -> Text -> Program
+pinnedSourcesProgram file text = workflow W.do
+  _answer <- ask (model "fixed-point" `servedBy` "deep") [wf|fixed-point file: {file}
+{text}|]
   stop
 
 convergentExample :: Example

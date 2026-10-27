@@ -76,7 +76,7 @@ function terminal(run: OwnedRun): Promise<RunSnapshot> {
 }
 
 describe("run supervisor", () => {
-  it("normalizes shared legacy and version-2 frontend manifests", async () => {
+  it("normalizes shared legacy, version-2, and invocation-bearing version-3 frontend manifests", async () => {
     const fixture = async (name: string): Promise<unknown> =>
       JSON.parse(await readFile(resolve("../test/fixtures/runtime/frontend-manifest", name), "utf8")) as unknown;
     const legacy = parseLaunchManifest(await fixture("legacy-ext-pi.json"));
@@ -86,6 +86,17 @@ describe("run supervisor", () => {
       frontendManifestVersion: 2, runId: "run-v2", runnerId: "fixture", runnerExecutable: "/bin/agentic-run",
       personAnswering: "engine", ownerId: "tui:owner", runtimeStore: "runtime",
     });
+    const v3 = await fixture("v3.json") as Record<string, unknown>;
+    expect(parseLaunchManifest(v3)).toMatchObject({
+      frontendManifestVersion: 3, runId: "run-v3", invocation: { version: 1, runnerAlias: "configured-fixture", executable: "/trusted/wrapper", prefixArgs: ["--profile", "work"] },
+    });
+    expect(parseLaunchManifest({ ...v3, policyDigest: `sha256:${"c".repeat(64)}` }).policyDigest).toBe(`sha256:${"c".repeat(64)}`);
+    expect(() => parseLaunchManifest({ ...v3, policyDigest: `sha512:${"c".repeat(64)}` })).toThrow("policyDigest is invalid");
+    for (const invocation of [null, { ...v3.invocation as object, version: 2 }, { ...v3.invocation as object, prefixArgs: [3] }, { ...v3.invocation as object, future: true }]) {
+      expect(() => parseLaunchManifest({ ...v3, invocation })).toThrow();
+    }
+    expect(() => parseLaunchManifest({ ...v3, frontendManifestVersion: 4 })).toThrow("unsupported frontend manifest version");
+    expect(() => parseLaunchManifest({ ...v3, frontendManifestVersion: 2 })).toThrow("frontend manifest has unknown field(s): invocation");
     const unknown = { ...(await fixture("v2.json") as Record<string, unknown>), future: true };
     expect(() => parseLaunchManifest(unknown)).toThrow("unknown field");
   });

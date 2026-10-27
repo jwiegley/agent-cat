@@ -6,6 +6,7 @@ import { Type, type Static } from "typebox";
 import { discoverRunner, readHelp, readRouting, supportsRoutingInspection } from "./catalogue.ts";
 import { configuredManagerProfiles, configuredRemote, configuredRunners, retentionPolicy, stateDirectory, testHooksEnabled } from "./config.ts";
 import { CurrentSessionBridge } from "./current-bridge.ts";
+import { prepareRoutedLaunch } from "./frontend.ts";
 import { assertNoCredentialArgs, prepareLaunch, preflightLineage, previewPlan, type LineageEdit, type PreparedLaunch } from "./launch.ts";
 import { formatControl, formatMonitor } from "./monitor.ts";
 import { WorkflowMonitorComponent } from "./monitor-ui.ts";
@@ -26,6 +27,7 @@ export type ExtensionHooks = { readonly manager?: SessionOptions };
 
 export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHooks = {}): void {
   const supervisor = new RunSupervisor();
+  const preparations = new Set<AbortController>();
   let lastContext: ExtensionContext | undefined;
   let service: ServiceMode | undefined;
   const requests = new ManagerRequests(() => service);
@@ -85,7 +87,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
       return refuse("Lineage operations require a terminal or orphaned parent run");
     }
     const selected = (await discover(ctx)).find(
-      ({ runner, descriptor }) => runner.id === parent.manifest.runnerId && descriptor.name === parent.manifest.workflow,
+      ({ runner, descriptor }) => runner.id === (parent.manifest.invocation?.runnerAlias ?? parent.manifest.runnerId) && descriptor.name === parent.manifest.workflow,
     );
     if (!selected) return refuse("The parent workflow runner is no longer configured");
     let inputs = model?.inputs;
@@ -201,13 +203,14 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
   pi.on("session_shutdown", async () => {
     // Closing service mode closes the manager transport and sends no
     // command, so every manager run continues under manager supervision.
+    for (const preparation of preparations) preparation.abort();
     await service?.close();
     await supervisor.shutdown();
     await currentBridge.close();
   });
 
   registerCommand("wf", {
-    description: "Run an agent-cat workflow in the current Agent Deck session",
+    description: "Run an agent-cat workflow using its configured persona or the current Agent Deck session",
     getArgumentCompletions: async (prefix) => {
       if (!lastContext) return null;
       const catalogue = await discover(lastContext);
@@ -241,6 +244,24 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
       catch (error) { return ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"); }
       const inputs = await collectInputs(ctx, selected.descriptor, supplied);
       if (!inputs) return;
+      const personas = selected.runner.workflowPersonas;
+      const persona = personas && Object.hasOwn(personas, selected.descriptor.name) ? personas[selected.descriptor.name] : undefined;
+      if (persona !== undefined) {
+        const controller = new AbortController();
+        preparations.add(controller);
+        try {
+          const held = await prepareRoutedLaunch({ ...selected, cwd: ctx.cwd, stateDir: stateDirectory(), inputs, persona, signal: controller.signal });
+          try {
+            if (await ctx.ui.confirm("Launch prepared agent-cat workflow?", held.review)) {
+              controller.signal.throwIfAborted();
+              supervise(held.prepared, ctx, selected.descriptor.name);
+            }
+          } finally { await held.discard(); }
+        } catch (error) {
+          ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        } finally { preparations.delete(controller); }
+        return;
+      }
       const sourceSummary = Object.entries(supplied).map(([name, value]) => `${name}=${Buffer.byteLength(value)}B`).join(", ") || "none";
       if (!(await ctx.ui.confirm(
         "Launch agent-cat workflow?",
