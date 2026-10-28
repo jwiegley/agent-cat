@@ -807,6 +807,22 @@ Certify verdict: NOT yet certified; 25 declarations. V1: Mat.powSum/sumPow ARE M
 ]
 #+end_src
 
+* DOING [#B] Support Node 22.23.4 in the Pi host compatibility contract
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-2q8v
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-10-28 Wed 16:12]
+:MODIFIED: [2026-10-28 Wed 16:12]
+:CREATED_BY: johnw
+:SOURCE_REPO: shared-agent-cat
+:SOURCE_REPO_PATH: /private/tmp/nyx-athena-mvscsspv/shared-agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Nyx goal mvscsspv-ritnm4 preserves NixOS nixpkgs Node 22.23.4. The Pi extension host test currently rejects it solely for not being exactly 22.23.3, while other host/package/protocol checks pass. Explicitly validate both patch releases with real extension check/unit/integration suites; preserve exact package, protocol, TypeScript and Vitest checks and rejection of untested Node versions. Work is isolated from canonical source pending ownership coordination. No OS downgrade, disabled tests, endpoint bypass, push or activation authorized.
+
 * DONE [#C] Shortest-list 8: the three missing what-Mathlib-lacks docstrings
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

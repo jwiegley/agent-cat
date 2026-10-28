@@ -25,9 +25,11 @@ const SUPPORTED_THROUGH_FORK: Readonly<Record<string, string>> = {
   "@earendil-works/pi-agent-core": "1.3.0",
 };
 
-/** The supported toolchain. */
+/** Node patch releases covered by the real-host test matrix. */
+const SUPPORTED_NODE_RELEASES = ["22.23.3", "22.23.4"] as const;
+
+/** Exact compiler and test-runner versions shared by the supported Node releases. */
 const SUPPORTED_TOOLCHAIN: Readonly<Record<string, string>> = {
-  node: "22.23.3",
   typescript: "5.9.3",
   vitest: "4.1.9",
 };
@@ -47,11 +49,16 @@ function hostFindings(observed: ObservedHost): string[] {
         : supported[name] !== version ? [`${kind} ${name} is ${version}, not the supported ${supported[name]}`] : []),
     ...Object.keys(supported).filter((name) => actual[name] === undefined).map((name) => `${kind} ${name} is missing`),
   ];
+  const { node, ...toolchain } = observed.toolchain;
+  const nodeFindings = node === undefined ? ["toolchain node is missing"]
+    : SUPPORTED_NODE_RELEASES.some((release) => release === node) ? []
+      : [`toolchain node is ${node}, not a supported release (${SUPPORTED_NODE_RELEASES.join(", ")})`];
   return [
     ...compare("linked package", SUPPORTED_LINKED, observed.linked),
     ...compare("registry package", SUPPORTED_REGISTRY, observed.registry),
     ...compare("fork package", SUPPORTED_THROUGH_FORK, observed.throughFork),
-    ...compare("toolchain", SUPPORTED_TOOLCHAIN, observed.toolchain),
+    ...nodeFindings,
+    ...compare("toolchain", SUPPORTED_TOOLCHAIN, toolchain),
   ];
 }
 
@@ -95,6 +102,13 @@ function observeHost(): ObservedHost & { linkTargets: string[]; forkCore: string
 }
 
 describe("supported Pi host", () => {
+  const supported: ObservedHost = {
+    linked: { ...SUPPORTED_LINKED },
+    registry: { ...SUPPORTED_REGISTRY },
+    throughFork: { ...SUPPORTED_THROUGH_FORK },
+    toolchain: { node: SUPPORTED_NODE_RELEASES[0], ...SUPPORTED_TOOLCHAIN },
+  };
+
   it("links Pi 1.3 host packages and keeps the remote protocol on its own release", () => {
     const observed = observeHost();
     expect(hostFindings(observed)).toEqual([]);
@@ -104,12 +118,6 @@ describe("supported Pi host", () => {
   });
 
   it("reports another version, an unlisted package, and a missing package", () => {
-    const supported = {
-      linked: { ...SUPPORTED_LINKED },
-      registry: { ...SUPPORTED_REGISTRY },
-      throughFork: { ...SUPPORTED_THROUGH_FORK },
-      toolchain: { ...SUPPORTED_TOOLCHAIN },
-    };
     expect(hostFindings(supported)).toEqual([]);
     expect(hostFindings({ ...supported, linked: { ...SUPPORTED_LINKED, "@earendil-works/pi-tui": "0.84.3" } }))
       .toEqual(["linked package @earendil-works/pi-tui is 0.84.3, not the supported 1.3.0"]);
@@ -119,7 +127,28 @@ describe("supported Pi host", () => {
     expect(hostFindings({ ...supported, registry: withoutChord })).toEqual(["registry package @earendil-works/chord is missing"]);
     expect(hostFindings({ ...supported, throughFork: { "@earendil-works/pi-agent-core": "0.98.0" } }))
       .toEqual(["fork package @earendil-works/pi-agent-core is 0.98.0, not the supported 1.3.0"]);
-    expect(hostFindings({ ...supported, toolchain: { ...SUPPORTED_TOOLCHAIN, node: "24.0.0" } }))
-      .toEqual(["toolchain node is 24.0.0, not the supported 22.23.3"]);
+  });
+
+  it.each(["22.23.3", "22.23.4"])("accepts tested Node release %s", (node) => {
+    expect(hostFindings({ ...supported, toolchain: { ...supported.toolchain, node } })).toEqual([]);
+  });
+
+  it.each(["22.23.2", "22.23.5", "23.0.0", "24.0.0"])("rejects untested Node release %s", (node) => {
+    expect(hostFindings({ ...supported, toolchain: { ...supported.toolchain, node } }))
+      .toEqual([`toolchain node is ${node}, not a supported release (22.23.3, 22.23.4)`]);
+  });
+
+  it("reports a missing Node release", () => {
+    expect(hostFindings({ ...supported, toolchain: { ...SUPPORTED_TOOLCHAIN } }))
+      .toEqual(["toolchain node is missing"]);
+  });
+
+  it("keeps compiler and test-runner checks exact", () => {
+    expect(hostFindings({ ...supported, toolchain: { ...supported.toolchain, typescript: "5.9.2" } }))
+      .toEqual(["toolchain typescript is 5.9.2, not the supported 5.9.3"]);
+    expect(hostFindings({ ...supported, toolchain: { node: SUPPORTED_NODE_RELEASES[0], typescript: "5.9.3" } }))
+      .toEqual(["toolchain vitest is missing"]);
+    expect(hostFindings({ ...supported, toolchain: { ...supported.toolchain, tsx: "4.20.0" } }))
+      .toEqual(["toolchain tsx 4.20.0 is not in the supported set"]);
   });
 });
