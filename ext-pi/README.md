@@ -14,7 +14,7 @@ fork is the supported host, as the section "Supported host" states. They
 need these prerequisites:
 
 - Node 22 on `PATH`.
-- The built Pi fork at version 1.3.0: a checkout of the fork in which
+- The built Pi fork at version 1.4.0: a checkout of the fork in which
   `npm install --ignore-scripts` and `npm run build` ran, as the `README.md`
   of the fork states. The steps run `packages/coding-agent/dist/cli.js` of
   that checkout.
@@ -167,9 +167,9 @@ run references.
 
 ## Supported host
 
-The supported host is the built Pi fork at `~/src/fork/pi`, commit `bb5bf98f5`.
+The supported host is the built Pi fork at `~/src/fork/pi`, commit `7796fb2e1`.
 The directory `node_modules/@earendil-works` links the active Pi host packages
-into `~/src/fork/pi/packages`. These links are at version 1.3.0:
+into `~/src/fork/pi/packages`. These links are at version 1.4.0:
 
 | Package | Fork directory |
 |---|---|
@@ -178,19 +178,19 @@ into `~/src/fork/pi/packages`. These links are at version 1.3.0:
 | `@earendil-works/pi-telemetry` | `packages/telemetry` |
 | `@earendil-works/pi-tui` | `packages/tui` |
 
-`@earendil-works/pi-agent-core` 1.3.0 is not linked. It resolves from
+`@earendil-works/pi-agent-core` 1.4.0 is not linked. It resolves from
 `pi-coding-agent` through the `node_modules` directory at the root of the fork,
 to `packages/agent`. The supported toolchain is Node 22.23.3, TypeScript 5.9.3,
 and vitest 4.1.9.
 
-Pi 1.3.0 no longer ships `pi-client`, `pi-server`, or `pi-protocol`. The optional
-remote socket bridge retains their published 1.1.0 releases and Chord 1.1.0
-as extension-owned dependencies. The extension's lock file records those
-registry packages alongside its Pi 1.3.0 development dependencies; the
-managed build replaces only the active Pi host packages with links into the
-same fork revision. `test/host-versions.test.ts` checks both sets separately.
-In a worktree, copy the prepared `node_modules` as described above; the host
-links remain absolute.
+Pi 1.4.0 ships no `pi-client`, `pi-server`, or `pi-protocol` package. The
+optional remote socket bridge retains their published 1.1.0 releases and Chord
+1.1.0 as extension-owned dependencies. The lock file of the extension records
+those registry packages alongside its Pi 1.4.0 development dependencies, and
+the managed build replaces only the active Pi host packages with links into
+the same fork revision. `test/host-versions.test.ts` checks both sets
+separately. A worktree copies the prepared `node_modules` as described above,
+and the host links in that copy remain absolute.
 
 agent-cat owns `ext-pi` and its manager client. The Pi owner owns the host. The
 fork is built for this extension and is not edited by agent-cat work.

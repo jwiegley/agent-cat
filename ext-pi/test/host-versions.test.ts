@@ -6,10 +6,10 @@ import { describe, expect, it } from "vitest";
 
 /** The host packages that `node_modules/@earendil-works` links into the built Pi fork. */
 const SUPPORTED_LINKED: Readonly<Record<string, string>> = {
-  "@earendil-works/pi-ai": "1.3.0",
-  "@earendil-works/pi-coding-agent": "1.3.0",
-  "@earendil-works/pi-telemetry": "1.3.0",
-  "@earendil-works/pi-tui": "1.3.0",
+  "@earendil-works/pi-ai": "1.4.0",
+  "@earendil-works/pi-coding-agent": "1.4.0",
+  "@earendil-works/pi-telemetry": "1.4.0",
+  "@earendil-works/pi-tui": "1.4.0",
 };
 
 /** The retired remote protocol is an extension-owned published dependency. */
@@ -22,7 +22,7 @@ const SUPPORTED_REGISTRY: Readonly<Record<string, string>> = {
 
 /** Host packages that resolve through the fork's own `node_modules` from pi-coding-agent. */
 const SUPPORTED_THROUGH_FORK: Readonly<Record<string, string>> = {
-  "@earendil-works/pi-agent-core": "1.3.0",
+  "@earendil-works/pi-agent-core": "1.4.0",
 };
 
 /** The supported toolchain. */
@@ -95,7 +95,7 @@ function observeHost(): ObservedHost & { linkTargets: string[]; forkCore: string
 }
 
 describe("supported Pi host", () => {
-  it("links Pi 1.3 host packages and keeps the remote protocol on its own release", () => {
+  it("links Pi 1.4 host packages and keeps the remote protocol on its own release", () => {
     const observed = observeHost();
     expect(hostFindings(observed)).toEqual([]);
     const packages = new Set([...observed.linkTargets, observed.forkCore].map((target) => dirname(target)));
@@ -112,13 +112,13 @@ describe("supported Pi host", () => {
     };
     expect(hostFindings(supported)).toEqual([]);
     expect(hostFindings({ ...supported, linked: { ...SUPPORTED_LINKED, "@earendil-works/pi-tui": "0.84.3" } }))
-      .toEqual(["linked package @earendil-works/pi-tui is 0.84.3, not the supported 1.3.0"]);
-    expect(hostFindings({ ...supported, linked: { ...SUPPORTED_LINKED, "@earendil-works/pi-mcp": "1.3.0" } }))
-      .toEqual(["linked package @earendil-works/pi-mcp 1.3.0 is not in the supported set"]);
+      .toEqual(["linked package @earendil-works/pi-tui is 0.84.3, not the supported 1.4.0"]);
+    expect(hostFindings({ ...supported, linked: { ...SUPPORTED_LINKED, "@earendil-works/pi-mcp": "1.4.0" } }))
+      .toEqual(["linked package @earendil-works/pi-mcp 1.4.0 is not in the supported set"]);
     const { "@earendil-works/chord": _chord, ...withoutChord } = SUPPORTED_REGISTRY;
     expect(hostFindings({ ...supported, registry: withoutChord })).toEqual(["registry package @earendil-works/chord is missing"]);
     expect(hostFindings({ ...supported, throughFork: { "@earendil-works/pi-agent-core": "0.98.0" } }))
-      .toEqual(["fork package @earendil-works/pi-agent-core is 0.98.0, not the supported 1.3.0"]);
+      .toEqual(["fork package @earendil-works/pi-agent-core is 0.98.0, not the supported 1.4.0"]);
     expect(hostFindings({ ...supported, toolchain: { ...SUPPORTED_TOOLCHAIN, node: "24.0.0" } }))
       .toEqual(["toolchain node is 24.0.0, not the supported 22.23.3"]);
   });

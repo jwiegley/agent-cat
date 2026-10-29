@@ -20,7 +20,7 @@ cost.
 - A checkout of this repository. The commands of section 1 run in the root of
   that checkout. All other commands run in any directory.
 - For the Pi client of section 4 only: Node 22 on `PATH`, the built Pi fork at
-  version 1.0.1, and the `ext-pi/node_modules` directory that links the fork.
+  version 1.4.0, and the `ext-pi/node_modules` directory that links the fork.
   The section [Install and start](../ext-pi/README.md#install-and-start) of
   `ext-pi/README.md` states these prerequisites.
 - For the Emacs client of section 4 only: GNU Emacs and a checkout of the
