@@ -50,18 +50,20 @@ def main():
     environment_record = {"privateOverrides": private, "names": sorted(environment),
                           "sha256": hashlib.sha256(json.dumps(environment, sort_keys=True).encode()).hexdigest()}
     identities = {str(path): {"sha256": sha(path), "bytes": path.stat().st_size}
-                  for path in [helper, scripts / "check.py", scripts / "case.py", scripts / "fixture.py"]}
+                  for path in [helper, scripts / "check.py", scripts / "case.py",
+                               scripts / "fixture.py", scripts / "orphan.py"]}
     write_new(artifacts / "preflight.json", {"identities": identities,
               "environment": environment_record, "python": sys.executable,
               "processCreationTimingUnderTest": False})
     completed = []
     primary = None
     try:
-        for mode in ["success", "timeout", "interruption"]:
+        for mode in ["success", "timeout", "interruption", "orphan"]:
             assert sha(helper) == inputs["helperSha256"]
             work = root / "cases" / mode
             work.mkdir(mode=0o700)
-            command = [sys.executable, "-u", str(scripts / "case.py"), mode, str(work)]
+            script = scripts / ("orphan.py" if mode == "orphan" else "case.py")
+            command = [sys.executable, "-u", str(script), mode, str(work)]
             start = datetime.datetime.now(datetime.timezone.utc).isoformat()
             tick = time.monotonic()
             write_new(work / "command.json", {"command": command, "cwd": str(root),
@@ -109,14 +111,14 @@ def main():
         unchanged = sha(helper) == inputs["helperSha256"]
         summary = {"completedCases": [case["case"] for case in completed],
                    "caseRecords": completed, "helperUnchanged": unchanged,
-                   "passed": primary is None and len(completed) == 3 and unchanged,
+                   "passed": primary is None and len(completed) == 4 and unchanged,
                    "primaryFailure": type(primary).__name__ if primary else None,
                    "actualManagerOrWorkflowTested": False}
         write_new(artifacts / "summary.json", summary)
     if primary is not None:
         raise primary
     assert summary["passed"]
-    print("PASS all three supervision regressions; no manager workflow executed", flush=True)
+    print("PASS all four supervision regressions; no manager workflow executed", flush=True)
 
 
 if __name__ == "__main__":

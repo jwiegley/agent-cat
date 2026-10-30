@@ -1,6 +1,6 @@
 """One live regression case, observing real handles without replacing wait outcomes."""
 from pathlib import Path
-import ast,datetime,hashlib,json,os,signal,subprocess,sys,threading,time,types
+import ast,datetime,dis,hashlib,json,os,signal,subprocess,sys,threading,time,types
 scripts=Path(__file__).resolve().parent
 mode=sys.argv[1]
 work=Path(sys.argv[2]).resolve()
@@ -22,6 +22,7 @@ assert signal.SIGINT not in signal.pthread_sigmask(signal.SIG_BLOCK,[])
 main_thread=threading.main_thread()
 created=threading.Event();ready=threading.Event();finished=threading.Event()
 originals=[];coordination_failures=[];observed_exceptions=[];wait_calls=[]
+native_wait_calls=[]
 lock=threading.Lock()
 def event(name,**values):
     with lock:
@@ -50,14 +51,24 @@ def create_original(command,**kwargs):
     ready.set()
     return process
 # The helper's run() reads the audit mode global. No audit mode applies here.
+def original_waitid(idtype,pid,options):
+    return os.waitid(idtype,pid,options)
+native_wait_ops=list(dis.get_instructions(original_waitid))
+native_wait_call=next(i for i,op in enumerate(native_wait_ops) if op.opname.startswith('CALL'))
+native_wait_bounds=(native_wait_ops[native_wait_call].offset,native_wait_ops[native_wait_call+1].offset)
 namespace={'mode':'supervision','work':work,'copy':work,'environment':environment,'results':[], 'json':json,'signal':signal,'time':time,
+           'os':types.SimpleNamespace(waitid=original_waitid,P_PID=os.P_PID,WEXITED=os.WEXITED,WNOWAIT=os.WNOWAIT,killpg=os.killpg),
            'subprocess':types.SimpleNamespace(Popen=create_original,STDOUT=subprocess.STDOUT,TimeoutExpired=subprocess.TimeoutExpired)}
 exec(compile(ast.Module(body=nodes,type_ignores=[]),str(helper),'exec'),namespace)
 actual_run=namespace['run'];run_code=actual_run.__code__
 def in_original_wait(timed):
     if not originals:return False
     frame=sys._current_frames().get(main_thread.ident)
-    # Require execution inside stdlib wait body, not inside the observational trace callback.
+    if not timed and frame is not None and frame.f_code is original_waitid.__code__ and native_wait_bounds[0]<=frame.f_lasti<native_wait_bounds[1]:
+        if frame.f_back.f_code is run_code and frame.f_back.f_locals.get('process') is originals[0]:
+            native_wait_calls.append({'handleIdentity':hex(id(originals[0])),'monotonic_ns':time.monotonic_ns()})
+            return True
+    # Require execution inside a real wait, not inside an observational callback.
     if frame is None or frame.f_code.co_filename!=real_wait_code.co_filename:return False
     found_wait=False;found_run=False
     while frame is not None:
@@ -155,6 +166,8 @@ try:
         assert returned==0 and primary is None and status['primaryFailure'] is None
         assert child['sigintCount']==0 and not (work/'child.cleanup-held').exists()
         assert child['descendantHandleIdentity'] is None and status['joinInterruptions']==0
+        assert status['groupCleanup']=='not-required' and not native_wait_calls
+        assert status['groupSignalFailure'] is None
     else:
         expected=subprocess.TimeoutExpired if mode=='timeout' else KeyboardInterrupt
         assert isinstance(primary,expected) and observed_exceptions and primary is observed_exceptions[0]['exception']
@@ -163,12 +176,19 @@ try:
         descendant=json.loads((work/'descendant.report.json').read_text())
         assert descendant['primaryType'] is None and descendant['cleanupType'] is None and descendant['sigintCount']==0 and not descendant['aborted']
         assert any(item['timeout'] is None for item in wait_calls)
+        assert native_wait_calls
+        if status['groupSignalFailure'] is None:
+            assert status['groupCleanup'] in {'owned-group-signalled-before-reap','owned-group-gone-before-reap'}
+        else:
+            # macOS can refuse a signal to a group containing only its exited leader.
+            assert status['groupSignalFailure']=='PermissionError'
+            assert status['groupCleanup']=='owned-group-signal-UNPROVEN'
         if mode=='interruption':
             assert status['joinInterruptions']==1 and len(observed_exceptions)==2 and primary is not observed_exceptions[1]['exception']
         else:assert status['joinInterruptions']==0
     assert digest(helper)==inputs['helperSha256']
 except BaseException as error:failure=error
-report={'case':mode,'passed':failure is None,'returned':returned,'primaryType':type(primary).__name__ if primary else None,'primaryIdentity':hex(id(primary)) if primary else None,'firstExceptionPreserved':bool(primary is not None and observed_exceptions and primary is observed_exceptions[0]['exception']),'observedExceptions':[{k:v for k,v in item.items() if k!='exception'} for item in observed_exceptions],'actualWaitCalls':wait_calls,'outerOriginalHandleJoins':outer_joins,'coordinationFailures':[{'type':type(e).__name__,'message':str(e)} for e in coordination_failures],'cleanupFailures':[{'type':type(e).__name__,'message':str(e)} for e in cleanup_failures],'assertionFailure':{'type':type(failure).__name__,'message':str(failure)} if failure else None,'durationSeconds':(end-start)/1e9,'helperSha256After':digest(helper),'testTimeoutArgument':budget,'processCreationTimingUnderTest':False}
+report={'case':mode,'passed':failure is None,'returned':returned,'primaryType':type(primary).__name__ if primary else None,'primaryIdentity':hex(id(primary)) if primary else None,'firstExceptionPreserved':bool(primary is not None and observed_exceptions and primary is observed_exceptions[0]['exception']),'observedExceptions':[{k:v for k,v in item.items() if k!='exception'} for item in observed_exceptions],'actualWaitCalls':wait_calls,'actualNativeWaitCalls':native_wait_calls,'outerOriginalHandleJoins':outer_joins,'coordinationFailures':[{'type':type(e).__name__,'message':str(e)} for e in coordination_failures],'cleanupFailures':[{'type':type(e).__name__,'message':str(e)} for e in cleanup_failures],'assertionFailure':{'type':type(failure).__name__,'message':str(failure)} if failure else None,'durationSeconds':(end-start)/1e9,'helperSha256After':digest(helper),'testTimeoutArgument':budget,'processCreationTimingUnderTest':False}
 with (work/'case-report.json').open('x') as out:json.dump(report,out,indent=2);out.write('\n')
 event('case-finished',passed=report['passed'],primaryType=report['primaryType'],durationSeconds=report['durationSeconds'])
 print(('PASS ' if report['passed'] else 'FAIL ')+mode,flush=True)

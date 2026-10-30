@@ -72,21 +72,25 @@ Acceptance: the unused functions and derived instances are removed, and the Werr
 
 Found by the live run on 2026-08-14 (workflow w5sz6gul7, live stage). SYMPTOM: in the REFUSING run (owner answered no, transcript has six turns and no 'tool apply' line, bill 6) the scratch parse.c was nevertheless replaced with the hardened 823-byte version (seed is 323 bytes, md5 f18314ef... -> 8e856c16...). Timestamps place the write inside the AUTHOR's draft turn (dir birth 12:03:34, file birth 12:04:08, author turn spans ~12:03:49-12:04:23), and it is a birth not a modification: write-and-rename, the signature of an editing tool. CAUSE: Agentic/Core/Acp.lean:271 'permission : Permission := .grant' is a single connection-wide policy that nothing sets; pickAllow answers allow_once to every session/request_permission regardless of the question's Code. To the permission layer, 'ask text model author' and 'act tool apply' are the same thing, so the program's ask/act distinction and the case ok { no -> done } consent branch are unenforceable against a live agent. Harden.no_ack_of_refused still holds — it is about acknowledgements, not bytes — which is exactly the point: there is no theorem and no runtime check saying 'a refused run leaves the workspace as it found it'. FIX (two parts): (1) make the permission decision a function of the QUESTION, not of the connection: grant only for the act (.ack), deny for every ask, and document the known consequence of denial (the turn completes with prose in place of an act, ~97k tokens, no protocol signal); thread the current question through Exec into Acp; log each decision in the transcript. (2) Add the empirical counterpart of the consent theorem: fingerprint the workspace before and after a run, report changes, and fail the run when no act was performed and the workspace changed. Cover both with stub tests. ALSO from the same run, separate issues: the adapter substituted claude-opus-4-8 (not in its advertised catalogue) after claude-fable-5 declined on policy grounds, reporting it only as prose inside the answer — so Conn.configValues is not a complete account of what may answer; and all three reviewers approved a draft that was a policy-refusal banner plus prose plus a fenced diff rather than 'a unified diff only'.
 
-* TODO [#C] Retain ownership of Cabal setup descendants after audit build timeout
+* DONE [#C] Retain ownership of Cabal setup descendants after audit build timeout
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-0bgh
 :LABELS:   []
 :ISSUE_TYPE: bug
 :CREATED:  [2026-10-27 Tue 13:31]
-:MODIFIED: [2026-10-27 Tue 13:31]
+:MODIFIED: [2026-10-30 Fri 13:15]
 :CREATED_BY: johnw
+:FINISHED: [2026-10-30 Fri 13:15]
+:CLOSE_REASON: Private-session/WNOWAIT cleanup before original reap; real orphan regression red/green, original assertions preserved, four supervision cases and package boundary pass. Fresh audit still times out1200s but records group signal before reap and no matching compiler in follow-up. Full policy gate remains failed; no release waiver.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/Products/translate-tool-routing-20261023/agent-cat
 :ORIGINAL_SIZE: 0
 :END:
 
 During Hera verification, manager/test/admission_audit.py reached its 1200-second compilation deadline, sent SIGINT to its original Cabal child and recorded original-child-joined with returncode -2. The Cabal act-as-setup descendant and its GHC child continued under PPID 1. Exact audit working-directory/build-directory arguments and compiler parent metadata proved ownership; the verifier terminated only those owned descendants and confirmed absence. No production workflow cancellation defect was observed. Keep this a separate CI-harness ownership issue; do not relax behavioral assertions or deadlines. A regression should exercise original-child exit while a setup descendant remains and prove complete owned cleanup or an explicit unproven outcome.
+
+2026-10-30: John explicitly approved the audit-only cleanup/regression scope. Each audit command starts a private session; original cooperative SIGINT and unbounded cleanup join remain. WNOWAIT reserves original PID until one remaining-group signal is attempted before the original handle is reaped; delivery failure or an already-reaped original is explicitly unproven. The original successful/timeout/repeated-interruption behavioral assertions are all preserved. The real exiting-driver/live-worker regression fails on the old helper with descendant survived driver cleanup, releases its own negative-control worker through a lifetime pipe, and passes with the fix. Final supervision4/4 and positive Cabal package boundary passed. Fresh approval-live-mutant.ehonspvw still exceeded unchanged1200s before N1/N8 assertions; its failed result honestly records original-child-joined/-2, owned-group-signalled-before-reap and no signal/wait failure. Follow-up found no matching recognized compiler for that case. This closes the cleanup defect, not the remaining build-performance/aggregate gate gap. macOS refusal on a zombie-only group remains unproven, never fabricated success. No production runtime, model policy, deadline, mutation assertion or source-capture requirement changed.
 
 ** Dependencies
 

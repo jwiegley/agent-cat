@@ -375,7 +375,8 @@ def run(command, log, timeout=1200):
         assert not any(name == "GHCRTS" or name.startswith("AGENT_CAT_") for name in environment)
     entry = {"command": command, "log": log, "executionDeadlineSeconds": timeout,
              "returncode": None, "primaryFailure": None, "signalFailure": None,
-             "waitFailure": None, "joinInterruptions": 0, "ownership": "not-started"}
+             "waitFailure": None, "joinInterruptions": 0, "ownership": "not-started",
+             "groupCleanup": "not-required", "groupSignalFailure": None}
     results.append(entry)
     def record(primary=None):
         try:
@@ -392,7 +393,7 @@ def run(command, log, timeout=1200):
         waiting = False
         try:
             process = subprocess.Popen(command, cwd=copy, env=environment,
-                                       stdout=output, stderr=subprocess.STDOUT)
+                                       stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
             deadline = time.monotonic() + timeout
             entry["ownership"] = "original-child-running"
             record()
@@ -423,6 +424,22 @@ def run(command, log, timeout=1200):
             # Execution deadline has failed. Joining the original child has no kill deadline.
             while True:
                 try:
+                    if process.returncode is None and entry["groupCleanup"] == "not-required":
+                        # Keep the original PID reserved until its private group is signalled.
+                        exited = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOWAIT)
+                        if exited is None or exited.si_pid != process.pid:
+                            raise ChildProcessError("original-child exit was not observed")
+                        entry["groupCleanup"] = "owned-group-signal-UNPROVEN"
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            entry["groupCleanup"] = "owned-group-gone-before-reap"
+                        except BaseException as failure:
+                            entry["groupSignalFailure"] = type(failure).__name__
+                        else:
+                            entry["groupCleanup"] = "owned-group-signalled-before-reap"
+                    elif process.returncode is not None and entry["groupCleanup"] == "not-required":
+                        entry["groupCleanup"] = "original-reaped-before-group-cleanup-UNPROVEN"
                     entry["returncode"] = process.wait()
                     entry["ownership"] = "original-child-joined"
                     record(primary)
