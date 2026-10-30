@@ -115,6 +115,7 @@ data EngineDefinition = EngineDefinition
   { engineBackend :: !Backend,
     engineProvider :: !Text,
     engineEnvironment :: !(Map Text EnvironmentBinding),
+    engineSessionMetadata :: !(Map Text Value),
     engineCatalogue :: !(Maybe Catalogue)
   }
   deriving (Eq, Show)
@@ -258,13 +259,14 @@ instance FromJSON Catalogue where
 
 instance FromJSON EngineDefinition where
   parseJSON = withObject "engine" $ \o -> do
-    onlyKeys "engine" ["backend", "provider", "environment", "catalogue"] o
+    onlyKeys "engine" ["backend", "provider", "environment", "session-meta", "catalogue"] o
     backendText <- nonBlank "engine backend" =<< o .: "backend"
     backend <- either (fail . T.unpack) pure (parseBackend backendText)
     provider <- nonBlank "engine provider" =<< o .: "provider"
     environment <- fromMaybe Map.empty <$> o .:? "environment"
+    sessionMetadata <- maybe (pure Map.empty) parseJSON (KeyMap.lookup "session-meta" o)
     catalogue <- o .:? "catalogue"
-    pure (EngineDefinition backend provider environment catalogue)
+    pure (EngineDefinition backend provider environment sessionMetadata catalogue)
 
 instance FromJSON ModelOrder where
   parseJSON value = do
@@ -392,7 +394,9 @@ validateRoutingV2 config@RoutingConfigV2 {..} = do
 validateEngine :: Map Text SecretReference -> Text -> EngineDefinition -> Either Text ()
 validateEngine secrets name EngineDefinition {..} = do
   case engineBackend of
-    BackendDeck _ -> unless (Map.null engineEnvironment) (Left ("deck engine '" <> name <> "' cannot declare child environment bindings"))
+    BackendDeck _ -> do
+      unless (Map.null engineEnvironment) (Left ("deck engine '" <> name <> "' cannot declare child environment bindings"))
+      unless (Map.null engineSessionMetadata) (Left ("deck engine '" <> name <> "' cannot declare ACP session metadata"))
     _ -> pure ()
   forM_ (Map.toList engineEnvironment) $ \(variable, binding) -> do
     unless (environmentName variable) (Left ("engine '" <> name <> "' has invalid environment variable '" <> variable <> "'"))
@@ -401,10 +405,18 @@ validateEngine secrets name EngineDefinition {..} = do
         unless (secret `Map.member` secrets) (Left ("engine '" <> name <> "' names unknown secret '" <> secret <> "'"))
       EnvironmentValue _ ->
         when (sensitiveName variable) (Left ("engine '" <> name <> "' environment variable '" <> variable <> "' must use a secret reference"))
+  forM_ (Map.toList engineSessionMetadata) (uncurry publicMetadata)
   forM_ engineCatalogue $ \catalogue ->
     forM_ (catalogueAuth catalogue) $ \auth ->
       unless (catalogueAuthSecret auth `Map.member` secrets) $
         Left ("engine '" <> name <> "' catalogue names unknown secret '" <> catalogueAuthSecret auth <> "'")
+  where
+    publicMetadata path (String _) =
+      when (sensitiveName path) (Left ("engine '" <> name <> "' session-meta field '" <> path <> "' may carry a secret"))
+    publicMetadata path (Object fields) =
+      forM_ (KeyMap.toList fields) $ \(key, value) -> publicMetadata (path <> "." <> Key.toText key) value
+    publicMetadata path (Array values) = mapM_ (publicMetadata path) values
+    publicMetadata _ _ = pure ()
 
 
 validateConcreteModel :: Map Text EngineDefinition -> Text -> ConcreteModel -> Either Text ()

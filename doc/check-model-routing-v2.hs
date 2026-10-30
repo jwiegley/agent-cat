@@ -68,6 +68,7 @@ data EngineDef = EngineDef
   { engineBackend :: !Text,
     engineProvider :: !Text,
     engineEnvironment :: !(Map Text EnvBinding),
+    engineSessionMetadata :: !(Map Text Value),
     engineCatalogue :: !(Maybe Catalogue)
   }
   deriving (Eq, Show)
@@ -174,11 +175,12 @@ instance FromJSON Catalogue where
 
 instance FromJSON EngineDef where
   parseJSON = withObject "engine" $ \o -> do
-    onlyKeys "engine" ["backend", "provider", "environment", "catalogue"] o
+    onlyKeys "engine" ["backend", "provider", "environment", "session-meta", "catalogue"] o
     EngineDef
       <$> o .: "backend"
       <*> o .: "provider"
       <*> (fromMaybe Map.empty <$> o .:? "environment")
+      <*> maybe (pure Map.empty) parseJSON (KeyMap.lookup "session-meta" o)
       <*> o .:? "catalogue"
 
 instance FromJSON Selector where
@@ -380,6 +382,8 @@ validateUser UserDoc {..} = do
 validateEngine :: Map Text SecretDef -> Text -> EngineDef -> Check ()
 validateEngine secrets name EngineDef {..} = do
   ensure (not (T.null name) && not (T.null engineBackend) && not (T.null engineProvider)) "engine identity is empty"
+  ensure (Map.null engineSessionMetadata || not ("deck:" `T.isPrefixOf` engineBackend)) "Deck engine cannot declare ACP session metadata"
+  forM_ (Map.toList engineSessionMetadata) $ \(field, value) -> publicMetadata field value
   forM_ (Map.toList engineEnvironment) $ \(variable, binding) -> do
     ensure (headerNameValid variable) ("invalid environment variable name " <> variable)
     case binding of
@@ -402,6 +406,12 @@ validateEngine secrets name EngineDef {..} = do
         ensure (Map.member (authSecret auth) secrets) ("catalogue references unknown secret " <> authSecret auth)
         ensure (authScheme auth `elem` [Nothing, Just "bearer"]) "catalogue auth scheme is invalid"
     validateHeaders (catalogueAuth catalogue) (catalogueHeaders catalogue)
+  where
+    publicMetadata path = \case
+      Object fields -> forM_ (KeyMap.toList fields) $ \(field, value) -> publicMetadata (path <> "." <> Key.toText field) value
+      Array values -> forM_ values (publicMetadata path)
+      String _ -> ensure (not (sensitiveName path)) "session metadata may carry a secret"
+      _ -> pure ()
 
 validateModel :: Map Text EngineDef -> Text -> ModelDef -> Check ()
 validateModel engines name ModelDef {..} = do
@@ -636,6 +646,28 @@ main = do
         == [Right "work", Right "work", Right "agent-cat", Right "personal"]
     )
   codexEngine <- maybe (die "codex-work engine is missing") pure (Map.lookup "codex-work" (userEngines user))
+  claudeEngine <- maybe (die "claude-personal engine is missing") pure (Map.lookup "claude-personal" (userEngines user))
+  let tools = Object (KeyMap.singleton "options" (Object (KeyMap.singleton "tools" (Array mempty))))
+      parseMetadata :: Value -> Either String EngineDef
+      parseMetadata value =
+        parseEither parseJSON
+          ( Object
+              (KeyMap.fromList [("backend", String "acp:claude"), ("provider", String "anthropic"), ("session-meta", value)])
+          )
+      secretMetadata = Object (KeyMap.singleton "env" (Object (KeyMap.singleton "API_KEY" (String "metadata-canary"))))
+      validateMetadata value =
+        validateEngine (userSecrets user) "claude-personal" claudeEngine {engineSessionMetadata = Map.singleton "claudeCode" value}
+      refusesSecret value = case validateMetadata value of
+        Left problem -> not ("metadata-canary" `T.isInfixOf` problem)
+        Right _ -> False
+  expect "public metadata is retained and absent metadata defaults to empty" $
+    Map.lookup "claudeCode" (engineSessionMetadata claudeEngine) == Just tools && Map.null (engineSessionMetadata codexEngine)
+  expect "session metadata must be an object when present" $
+    all (either (const True) (const False) . parseMetadata) [Null, Array mempty, Bool True, Number 1, String "text"]
+  expect "nested metadata credential refusals never expose values" $
+    all refusesSecret [secretMetadata, Array (pure secretMetadata)]
+  either die pure (validateEngine (userSecrets user) "claude-personal" claudeEngine {engineSessionMetadata = Map.singleton "outputTokenBudget" (Number 100)})
+  expectLeft "Deck engines refuse ACP metadata" (validateEngine (userSecrets user) "claude-personal" claudeEngine {engineBackend = "deck:fixture"})
   codexCatalogue <- maybe (die "codex-work catalogue is missing") pure (engineCatalogue codexEngine)
   let checkCatalogue catalogue =
         validateEngine
@@ -782,4 +814,4 @@ main = do
     Left _ -> ok "project engine authority is refused by the project schema"
     Right _ -> die "project engine authority was accepted"
 
-  TIO.putStrLn "model routing v2 design: 4 YAML examples and 20 semantic outcomes verified"
+  TIO.putStrLn "model routing v2: 4 YAML examples and semantic outcomes verified"

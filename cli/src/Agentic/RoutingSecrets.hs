@@ -98,16 +98,18 @@ engineExecutionFingerprint :: RoutingConfigV2 -> Text -> EngineDefinition -> Tex
 engineExecutionFingerprint config alias engine =
   "sha256:" <> T.pack (show (hash bytes :: Digest SHA256))
   where
-    bytes = BL.toStrict . encode $
-      object
-        [ "engine" .= alias,
-          "backend" .= backendSpelling (engineBackend engine),
-          "provider" .= engineProvider engine,
-          "environment" .=
-            [ object ["name" .= name, "binding" .= bindingValue binding]
-              | (name, binding) <- Map.toAscList (engineEnvironment engine)
-            ]
-        ]
+    bytes =
+      BL.toStrict . encode $
+        object $
+          [ "engine" .= alias,
+            "backend" .= backendSpelling (engineBackend engine),
+            "provider" .= engineProvider engine,
+            "environment"
+              .= [ object ["name" .= name, "binding" .= bindingValue binding]
+                 | (name, binding) <- Map.toAscList (engineEnvironment engine)
+                 ]
+          ]
+            <> ["session-meta" .= engineSessionMetadata engine | not (Map.null (engineSessionMetadata engine))]
     bindingValue :: EnvironmentBinding -> Value
     bindingValue (EnvironmentValue value) =
       object ["kind" .= ("literal" :: Text), "value" .= value]

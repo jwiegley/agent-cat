@@ -504,13 +504,15 @@ import Agentic.RoutingConfig
     ResolvedRealization (..),
     ResolvedRouting (..),
     Persona (personaProfiles),
-    SelectedRoutingV2 (selectedPersona, selectedPersonaName, selectedPersonaSource),
+    SelectedRoutingV2 (selectedRoutingV2, selectedPersona, selectedPersonaName, selectedPersonaSource),
     Router (..),
     decodeRoutingConfig,
     emptyRoutingConfig,
+    engineSessionMetadata,
     discoverRoutingInventories,
     loadRoutingConfig,
     routingUserFile,
+    routingV2Engines,
     expandRoutingConfigV2,
     freezeRoutingConfigV2,
     requireEngineCredentials,
@@ -3775,10 +3777,16 @@ acpConfigForRoute rr dir route = case engineRouteBackend route of
             inheritChildEnvironment
             (\alias -> Map.findWithDefault inheritChildEnvironment alias (rrChildEnvironments rr))
             (engineRouteAlias route)
+        sessionMetadata = fromMaybe Map.empty $ do
+          selected <- rrSelectedRoutingV2 rr
+          alias <- engineRouteAlias route
+          engine <- Map.lookup alias (routingV2Engines (selectedRoutingV2 selected))
+          pure (engineSessionMetadata engine)
      in base
           { acpCwd = dir,
             acpTurnTimeoutMs = fromMaybe (acpTurnTimeoutMs base) (rrTimeoutMs rr),
             acpChildEnvironment = environment,
+            acpSessionMetadata = sessionMetadata,
             acpVerbose = rrVerbose rr,
             acpAdapterName = Just adapter
           }

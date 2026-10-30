@@ -1026,6 +1026,14 @@ selected persona is never a workflow input or a @code{run.*} fact.  Exact or
 deterministically ordered-prefix selectors freeze one model identifier and its
 non-secret provenance before an engine starts.
 
+An ACP engine can declare a public @code{session-meta} object.  The runner
+sends it unchanged as @code{_meta} in both preflight and fresh
+@code{session/new} requests.  The adapter defines its meaning.  Empty metadata
+is omitted and preserves the previous execution fingerprint.  Nonempty metadata
+contributes to that fingerprint and appears in routing inspection.  String
+fields with credential-shaped paths are refused recursively.  Metadata does
+not resolve secrets or establish an operating-system sandbox.
+
 Fail-over occurs within the authored pin chain.  Routing can place different
 pins in different ACP adapters or agent-deck sessions.  One chain can therefore
 cross providers, and no backend identity enters the semantic question keys.

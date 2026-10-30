@@ -108,7 +108,7 @@ routingInspectionV2 loaded selected readiness inventories resolved =
     engineJson name = case Map.lookup name (routingV2Engines config) of
       Nothing -> object ["name" .= name, "status" .= ("invalid" :: Text)]
       Just engine ->
-        object
+        object $
           [ "name" .= name,
             "backend" .= backendSpelling (engineBackend engine),
             "provider" .= engineProvider engine,
@@ -121,6 +121,7 @@ routingInspectionV2 loaded selected readiness inventories resolved =
                 ],
             "catalogue" .= catalogueJson engine (Map.lookup name inventories)
           ]
+            <> ["session-meta" .= engineSessionMetadata engine | not (Map.null (engineSessionMetadata engine))]
 
     catalogueJson engine result = case engineCatalogue engine of
       Nothing -> object ["status" .= ("none" :: Text)]

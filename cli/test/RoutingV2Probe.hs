@@ -6,6 +6,7 @@ import Agentic.Acp (AcpConfig (..), childEnvironmentNames, defaultAcpConfig, wit
 import Agentic.Route (Backend (..), Routes (..), routes)
 import Agentic.RoutingConfig
 import Control.Exception (finally)
+import Data.Aeson (Value, object, (.=))
 import qualified Data.ByteString.Char8 as BS
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import qualified Data.Map.Strict as Map
@@ -203,6 +204,51 @@ main = do
   check failures "version detector reads v1 and v2" $
     routingDocumentVersion "version: 1\n" == Right 1
       && routingDocumentVersion userYaml == Right 2
+  let withSessionMetadata value =
+        BS.unlines
+          . concatMap
+            ( \line ->
+                if "    provider:" `BS.isPrefixOf` line
+                  then [line, "    session-meta: " <> value]
+                  else [line]
+            )
+          . BS.lines
+      sessionMetaYaml = withSessionMetadata "{claudeCode: {options: {tools: []}}}" userYaml
+      metadata = Map.singleton "claudeCode" (object ["options" .= object ["tools" .= ([] :: [Value])]])
+      fingerprint bytes = do
+        config <- decodeRoutingUserV2 bytes
+        selected <- selectRoutingPersona config Nothing Nothing Nothing
+        contexts <- resolveEngineContexts selected ["personal-claude"] Map.empty
+        maybe (Left "missing engine") (Right . resolvedEngineExecutionFingerprint) (Map.lookup "personal-claude" contexts)
+  check failures "ACP engine retains exact public session metadata" $
+    case decodeRoutingUserV2 sessionMetaYaml of
+      Right config -> fmap engineSessionMetadata (Map.lookup "personal-claude" (routingV2Engines config)) == Just metadata
+      Left _ -> False
+  check failures "absent session metadata defaults to empty" $
+    case decodeRoutingUserV2 userYaml of
+      Right config -> all (Map.null . engineSessionMetadata) (Map.elems (routingV2Engines config))
+      Left _ -> False
+  check failures "session metadata must be an object when present" $
+    all (either (const True) (const False) . decodeRoutingUserV2 . (`withSessionMetadata` userYaml)) ["null", "[]", "true", "3", "text"]
+  check failures "nested session metadata cannot expose credential strings" $
+    case decodeRoutingUserV2 (withSessionMetadata "{claudeCode: {options: {env: {API_KEY: metadata-canary}}}}" userYaml) of
+      Left problem -> "may carry a secret" `T.isInfixOf` problem && not ("metadata-canary" `T.isInfixOf` problem)
+      Right _ -> False
+  check failures "public numeric token metadata is not a credential string" $
+    either (const False) (const True) (decodeRoutingUserV2 (withSessionMetadata "{outputTokenBudget: 100}" userYaml))
+  let deckMetaYaml =
+        withSessionMetadata "{tools: []}"
+          . BS.unlines
+          . map
+            (\line -> if line == "    backend: acp:codex" then "    backend: deck:pane" else line)
+          . BS.lines
+          $ publicCatalogueYaml "127.0.0.1"
+  check failures "deck engines reject ACP session metadata" $
+    isLeftContaining "cannot declare ACP session metadata" (decodeRoutingUserV2 deckMetaYaml)
+  check failures "session metadata changes execution fingerprint but empty metadata does not" $
+    case (fingerprint userYaml, fingerprint sessionMetaYaml, fingerprint (withSessionMetadata "{}" userYaml)) of
+      (Right original, Right configured, Right empty) -> original /= configured && original == empty
+      _ -> False
 
   case decodeRoutingUserV2 sharedAcpYaml >>= (\config -> selectRoutingPersona config Nothing Nothing Nothing) of
     Left problem -> check failures ("same-backend engine instances decode: " <> problem) False

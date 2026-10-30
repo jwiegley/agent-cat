@@ -2622,6 +2622,32 @@ Non-blocking findings of the fess review of Phase B subtask B1 (report fess/b1-B
 4. doc/workflow-manager-handoff.md: the growth paragraph says "At L minus R" without defining L or R. Write "the configured ceiling minus the cancel reserve (L minus R)".
 5. runtime/src/Agentic/Runtime/Flow.hs:901-908: openFlowLog refusals changed to the typed FlowOpenRefusal, and runtime-contract-test was not run. Run it once at the next gate, or add a runtime FlowTests case for the oversized and undecodable refusals.
 
+* DOING [#C] Carry public ACP session metadata through routed engines
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-7h6k
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-10-29 Thu 12:34]
+:MODIFIED: [2026-10-29 Thu 18:38]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/Products/translate-tool-routing-20261023/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The approved sacred-text run23671 passed strict terminology brief validation, then the draft transport hit the oMLX prefill memory guard after an unnecessary tool continuation. The generated draft prompt is12228 UTF8 bytes. The installed Claude ACP adapter supports a real empty toolset in session/new _meta.claudeCode.options.tools, but native ACP currently sends only cwd and mcpServers. Add the smallest optional public session-meta object to physical ACP engine definitions and AcpConfig. Send it exactly on every fresh and preflight session. Empty defaults preserve existing request bytes, inspection and fingerprints. Nonempty metadata participates in execution fingerprints and sanitized inspection. Reject metadata for deck engines and invalid value shapes. Preserve strict model selection, secret refusal, native approval and all memory safety controls. Add decoder, fingerprint, CLI propagation and stub protocol tests. No custom ACP wrapper, model substitution, prompt truncation, memory-guard weakening or paid live gate is part of this implementation.
+
+** Notes
+
+The optional public metadata implementation is present in the native ACP engine, routed CLI configuration, execution fingerprint and sanitized inspection. Empty metadata preserves the old request shape and execution identity. Native and independent documentation decoders retain strict object validation and recursive credential-shaped string refusal.
+
+Verified source evidence includes the full warning-free Cabal build, routing configuration gate, all 24 ACP transport scenarios, all 10 Deck scenarios, all 10 example programs, both documentation gates, the native policy probe, Pi type checking, 248 Pi unit tests and 22 model-free Pi integration tests plus the remote-protocol check. The ACP scenario checks metadata on preflight and fresh sessions, exact inspection and changed approval fingerprints, while all legacy scenarios require omitted metadata. Registry-installed Pi dependencies were the wrong host setup and were replaced with the documented fork-linked dependencies and supported Node 22.23.3. The rejected registry copy and failed probes remain in private evidence.
+
+Verification remains incomplete. The complete policies script failed its isolated audit build deadline of 1200 seconds. The original child was joined and returned zero only during cleanup after TimeoutExpired, which remains a failure. A controlled isolated repeat with compiler parallelism four instead of eight also exceeded the unchanged deadline. Earlier aggregate-supervisor expiries are retained as separate failures. No deadline, assertion, optimization setting, memory safety control, strict JSON validator or model routing was weakened. Full policies are not green.
+
+This issue remains in progress. The source checkpoint is not a publication, deployment, paid model trial or proof that tools-empty sessions resolve the live oMLX guard. The approved translation run remains recovery-pending with one failed draft attempt and no completed translation. Scoped production tools metadata, coherent package pins and genuine file/pasted-text acceptance remain to be verified.
+
 * DONE [#E] Frag.meet: complete the grade lattice
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

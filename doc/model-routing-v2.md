@@ -106,6 +106,10 @@ engines:
     environment:
       ANTHROPIC_API_KEY:
         secret: anthropic-personal
+    session-meta:
+      claudeCode:
+        options:
+          tools: []
     catalogue:
       dialect: anthropic
       url: https://api.anthropic.com/v1/models
@@ -243,12 +247,19 @@ An engine instance has:
 
 - `backend`: the existing `acp:` or `deck:` grammar;
 - `provider`: non-secret identity used for preflight/provenance;
-- optional `environment` for `acp:` engines only: exact child environment bindings, each from a non-secret literal or a named secret; and
+- optional `environment` for `acp:` engines only: exact child environment bindings, each from a non-secret literal or a named secret
+- optional `session-meta` for `acp:` engines only: a public JSON object sent as `_meta` with each `session/new` request
 - optional `catalogue`: an informational model endpoint.
 
 Sensitive-looking environment names cannot take `value`; they must take `secret`. Unknown environment-binding fields are refused. Adapter arguments remain separate and retain the existing credential-bearing argv refusal.
 
-A `deck:` engine must omit `environment`: the selected Agent Deck session was created elsewhere, and its credentials and endpoint are external. Accepting bindings would claim to configure a child process which agent-cat never starts. Its reported provider/model/thinking metadata remain the verification surface. A catalogue may still be configured for display, but it does not reconfigure that session.
+A `deck:` engine must omit nonempty `environment` and `session-meta` objects. The selected Agent Deck session was created elsewhere, and its credentials and endpoint are external. Its reported provider/model/thinking metadata remain the verification surface. A catalogue may still be configured for display, but it does not reconfigure that session.
+
+Session metadata reaches both preflight and every fresh question session. An empty object is omitted from the wire and from inspection and preserves the existing execution fingerprint. Nonempty metadata contributes to the execution fingerprint and appears in inspection. It is public configuration, not a secret source. String fields whose paths look credential-bearing are refused, including nested objects and arrays.
+
+The adapter defines metadata's meaning. The user-file example sets `session-meta.claudeCode.options.tools` to `[]` for a Claude ACP adapter that supports SDK tool configuration, requesting an empty built-in toolset.
+
+The metadata path transmits this request unchanged. It does not establish that another adapter implements the same control, and it is not an operating-system sandbox.
 
 #### `catalogue`
 
@@ -432,7 +443,7 @@ Its JSON contains:
 
 - schema version, selected persona with selection source, and available persona/model-alias choices;
 - contributing config paths;
-- engine aliases, backend/provider, credential readiness as a boolean, catalogue status, and an opaque launch object;
+- engine aliases, backend/provider, credential readiness as a boolean, public nonempty session metadata, catalogue status, and an opaque launch object
 - concrete aliases and selected exact ids with selector/provenance;
 - symbolic profiles and ordered resolved rungs;
 - warnings: each catalogue failure once per engine, named by engine, with the remedy for `tls-not-supported` (remove the https catalogue or use a loopback http catalogue), and each static-unverified model alias once;
