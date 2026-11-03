@@ -17,7 +17,7 @@ export function configuredRunners(cwd: string, env: NodeJS.ProcessEnv = process.
   return parsed.map((value, index) => {
     if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`AGENT_CAT_RUNNERS[${index}] is not an object`);
     const entry = value as Record<string, unknown>;
-    if (Object.keys(entry).some((key) => !["id", "executable", "prefixArgs", "allowedCwds", "workflowPersonas"].includes(key))) throw new Error(`AGENT_CAT_RUNNERS[${index}] has an unknown field`);
+    if (Object.keys(entry).some((key) => !["id", "executable", "prefixArgs", "allowedCwds", "workflowPersonas", "workflowTimeoutMs"].includes(key))) throw new Error(`AGENT_CAT_RUNNERS[${index}] has an unknown field`);
     if (typeof entry.id !== "string" || !entry.id || ids.has(entry.id)) throw new Error(`AGENT_CAT_RUNNERS[${index}].id is empty or duplicated`);
     if (typeof entry.executable !== "string" || !isAbsolute(entry.executable)) throw new Error(`AGENT_CAT_RUNNERS[${index}].executable must be absolute`);
     const prefixArgs = optionalStrings(entry.prefixArgs, `AGENT_CAT_RUNNERS[${index}].prefixArgs`);
@@ -29,9 +29,16 @@ export function configuredRunners(cwd: string, env: NodeJS.ProcessEnv = process.
       || Object.entries(workflowPersonas).some(([workflow, persona]) => !workflow.trim() || /[\0\r\n]/.test(workflow)
         || typeof persona !== "string" || !persona.trim() || /[\0\r\n]/.test(persona))
     )) throw new Error(`AGENT_CAT_RUNNERS[${index}].workflowPersonas must map workflow names to persona names`);
+    const workflowTimeoutMs = entry.workflowTimeoutMs;
+    if (workflowTimeoutMs !== undefined && (
+      typeof workflowTimeoutMs !== "object" || workflowTimeoutMs === null || Array.isArray(workflowTimeoutMs)
+      || Object.entries(workflowTimeoutMs).some(([workflow, timeout]) => !workflow.trim() || /[\0\r\n]/.test(workflow)
+        || typeof timeout !== "number" || !Number.isSafeInteger(timeout) || timeout <= 0)
+    )) throw new Error(`AGENT_CAT_RUNNERS[${index}].workflowTimeoutMs must map workflow names to positive safe integer milliseconds`);
     ids.add(entry.id);
     return { id: entry.id, executable: entry.executable, prefixArgs, allowedCwds,
       ...(workflowPersonas === undefined ? {} : { workflowPersonas: { ...workflowPersonas as Record<string, string> } }),
+      ...(workflowTimeoutMs === undefined ? {} : { workflowTimeoutMs: { ...workflowTimeoutMs as Record<string, number> } }),
     };
   });
 }

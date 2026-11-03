@@ -13,9 +13,10 @@ export type NativeLaunch = { prepared: PreparedLaunch; review: string; discard: 
 /** Hold the native preparation through approval instead of resolving its target again. */
 export async function prepareRoutedLaunch(options: {
   runner: RunnerConfig; descriptor: WorkflowDescriptor; cwd: string; stateDir: string;
-  inputs: Record<string, string>; persona: string; signal?: AbortSignal;
+  inputs: Record<string, string>; persona: string; timeoutMs?: number; signal?: AbortSignal;
 }): Promise<NativeLaunch> {
-  const { runner, descriptor, inputs, persona, stateDir } = options;
+  const { runner, descriptor, inputs, persona, stateDir, timeoutMs } = options;
+  if (timeoutMs !== undefined && (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0)) throw new Error("workflow consultation timeout must be positive safe integer milliseconds");
   if (!supportsRoutingInspection(descriptor)) throw new Error("configured workflow persona requires version-2 routing inspection");
   const executable = await canonicalExecutable(runner.executable);
   const cwd = await allowedCwd(options.cwd, runner.allowedCwds);
@@ -25,6 +26,7 @@ export async function prepareRoutedLaunch(options: {
   options.signal?.throwIfAborted();
   if (!inspection || inspection.persona.name !== persona) throw new Error("configured workflow persona was not resolved");
   const targetArgs = [...inspection.launch.arguments, "--persona", persona, "--offline", "--expect-routing-fingerprint", inspection.launch.fingerprint];
+  if (timeoutMs !== undefined) targetArgs.push("--timeout", String(timeoutMs));
   assertNoCredentialArgs([...(runner.prefixArgs ?? []), ...targetArgs]);
   const invocation: FrontendInvocation = { version: 1, runnerAlias: runner.id, executable, prefixArgs: runner.prefixArgs ?? [] };
   const request = JSON.stringify({
@@ -70,6 +72,7 @@ export async function prepareRoutedLaunch(options: {
     const exactPolicy = isJsonObject(exact) ? jsonMember(exact, "policy") : undefined;
     if (exactPolicy === undefined) throw new Error("native prepared policy is missing");
     if (policy.persona !== persona) throw new Error("native preparation changed the selected persona");
+    if (timeoutMs !== undefined && policy.timeoutMs !== timeoutMs) throw new Error("native preparation changed the configured consultation timeout");
     const server = object(fields.server, "prepared server");
     if (server.runnerVersion !== descriptor.runnerVersion) throw new Error("runner version changed during preparation");
     if (!Array.isArray(fields.inputs) || fields.inputs.length !== descriptor.inputs.length) throw new Error("native preparation changed workflow inputs");

@@ -33,6 +33,8 @@ describe.runIf(Boolean(binary))("configured /wf native routing", () => {
     expect(held.review).toContain("stub-default");
     expect(held.review).toContain(JSON.stringify(held.prepared.manifest.targetArgs));
     expect(held.prepared.manifest.targetArgs).toContain("--scratch");
+    expect(held.prepared.manifest.targetArgs).not.toContain("--timeout");
+    expect(held.review).toContain('"timeoutMs":null');
     expect(held.review).not.toContain("PRIVATE SOURCE");
     expect(held.prepared.args).not.toContain("PRIVATE SOURCE");
     expect(held.prepared.frontend?.child.pid).toBeGreaterThan(0);
@@ -84,7 +86,7 @@ describe.runIf(Boolean(binary))("configured /wf native routing", () => {
     const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
     const events = new Map<string, Array<(event: unknown, ctx: unknown) => Promise<unknown>>>();
     vi.stubEnv("AGENT_CAT_RUNNER", "");
-    vi.stubEnv("AGENT_CAT_RUNNERS", JSON.stringify([{ ...test.runner, workflowPersonas: { "pinned-sources": "fixture" } }]));
+    vi.stubEnv("AGENT_CAT_RUNNERS", JSON.stringify([{ ...test.runner, workflowPersonas: { "pinned-sources": "fixture" }, workflowTimeoutMs: { "pinned-sources": 7_200_000 } }]));
     vi.stubEnv("AGENT_CAT_STATE_DIR", test.state);
     vi.stubEnv("AGENTDECK_INSTANCE_ID", "parent-deck-must-not-receive-source");
     extension({
@@ -124,6 +126,10 @@ describe.runIf(Boolean(binary))("configured /wf native routing", () => {
       const manifest = parseLaunchManifest(JSON.parse(await readFile(join(entries[0].storeDir, "supervisor-manifest.json"), "utf8")));
       expect(manifest.inputHashes).toEqual({ file: hash(file), text: hash(text) });
       expect(manifest.targetKind).toBe("routing");
+      const timeoutIndex = manifest.targetArgs.indexOf("--timeout");
+      expect(timeoutIndex).toBeGreaterThanOrEqual(0);
+      expect(manifest.targetArgs[timeoutIndex + 1]).toBe("7200000");
+      expect(confirmations[1]).toContain('"timeoutMs":7200000');
       expect(manifest.targetArgs).not.toContain("parent-deck-must-not-receive-source");
       expect(await readFile(join(entries[0].storeDir, "inputs", "0.txt"), "utf8")).toBe(file);
       expect(await readFile(join(entries[0].storeDir, "inputs", "1.txt"), "utf8")).toBe(text);
@@ -138,6 +144,7 @@ describe.runIf(Boolean(binary))("configured /wf native routing", () => {
       if (source === "text") {
         ctx.ui.confirm = async () => true;
         ctx.ui.editor = async (title: string) => title === "Input: text" ? text : file;
+        vi.stubEnv("AGENT_CAT_RUNNERS", JSON.stringify([{ ...test.runner, workflowPersonas: { "pinned-sources": "fixture" }, workflowTimeoutMs: { "pinned-sources": 1000 } }]));
         await commands.get("wf-resume")!.handler(manifest.runId, ctx);
         expect(notices.filter((message) => message.startsWith("Started ")), notices.join("\n")).toHaveLength(2);
         await until(() => entries.length === 2);
@@ -178,6 +185,13 @@ describe.runIf(Boolean(binary))("configured /wf native routing", () => {
     controller.abort();
     expect(() => held.prepared.frontend!.approve()).toThrow("native preparation is no longer available");
     await held.discard();
+    expect(await runNames(test.state)).toEqual([]);
+    expect(await adapterTranscript(test.adapterLog)).not.toContain("prompt matched");
+  }, 60_000);
+
+  it("refuses unbounded consultation timeouts before spawning the prepared worker", async () => {
+    const test = await setup();
+    await expect(prepareRoutedLaunch({ ...test, cwd: test.directory, stateDir: test.state, persona: "fixture", timeoutMs: 0, inputs: { file: "", text: "private" } })).rejects.toThrow("positive safe integer milliseconds");
     expect(await runNames(test.state)).toEqual([]);
     expect(await adapterTranscript(test.adapterLog)).not.toContain("prompt matched");
   }, 60_000);

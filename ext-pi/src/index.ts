@@ -246,11 +246,13 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
       if (!inputs) return;
       const personas = selected.runner.workflowPersonas;
       const persona = personas && Object.hasOwn(personas, selected.descriptor.name) ? personas[selected.descriptor.name] : undefined;
+      const timeouts = selected.runner.workflowTimeoutMs;
+      const timeoutMs = timeouts && Object.hasOwn(timeouts, selected.descriptor.name) ? timeouts[selected.descriptor.name] : undefined;
       if (persona !== undefined) {
         const controller = new AbortController();
         preparations.add(controller);
         try {
-          const held = await prepareRoutedLaunch({ ...selected, cwd: ctx.cwd, stateDir: stateDirectory(), inputs, persona, signal: controller.signal });
+          const held = await prepareRoutedLaunch({ ...selected, cwd: ctx.cwd, stateDir: stateDirectory(), inputs, persona, timeoutMs, signal: controller.signal });
           try {
             if (await ctx.ui.confirm("Launch prepared agent-cat workflow?", held.review)) {
               controller.signal.throwIfAborted();
@@ -265,7 +267,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
       const sourceSummary = Object.entries(supplied).map(([name, value]) => `${name}=${Buffer.byteLength(value)}B`).join(", ") || "none";
       if (!(await ctx.ui.confirm(
         "Launch agent-cat workflow?",
-        `workflow=${selected.runner.id}:${selected.descriptor.name}\nrunner=${selected.runner.executable}\ncwd=${ctx.cwd}\ntarget=current Agent Deck session (${sessionId}); external pane/workspace, not sandboxed\nprebound inputs=${sourceSummary}\neffects=${selected.descriptor.capabilities.effects ?? "unknown"}\nmay call a paid model; persistence=private full prompts/answers plus input hashes`,
+        `workflow=${selected.runner.id}:${selected.descriptor.name}\nrunner=${selected.runner.executable}\ncwd=${ctx.cwd}\ntarget=current Agent Deck session (${sessionId}); external pane/workspace, not sandboxed\nprebound inputs=${sourceSummary}\neffects=${selected.descriptor.capabilities.effects ?? "unknown"}${timeoutMs === undefined ? "" : `\nconsultation timeout=${timeoutMs}ms`}\nmay call a paid model; persistence=private full prompts/answers plus input hashes`,
       ))) return;
       const prepared = await prepareLaunch({
         runner: selected.runner,
@@ -274,7 +276,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
         stateDir: stateDirectory(),
         inputs,
         targetKind: "deck",
-        targetArgs: ["--session", sessionId],
+        targetArgs: ["--session", sessionId, ...(timeoutMs === undefined ? [] : ["--timeout", String(timeoutMs)])],
       });
       supervise(prepared, ctx, selected.descriptor.name);
     },

@@ -126,6 +126,24 @@ During Hera verification, manager/test/admission_audit.py reached its 1200-secon
 
 Implement approved source-aware input design: command-tail args, literal standard input, separate machine controls, multiline /wf binding, regressions, docs, and Nix integration evidence. Design approved 2026-09-02 in Pi goal mtkjiqtl-25777e.
 
+* DONE [#C] Configure scoped workflow consultation timeouts in Pi
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-0fr9
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-11-03 Tue 10:34]
+:MODIFIED: [2026-11-03 Tue 10:59]
+:CREATED_BY: johnw
+:FINISHED: [2026-11-03 Tue 10:59]
+:CLOSE_REASON: Implemented strict workflowTimeoutMs configuration and native --timeout/policy propagation without changing ACP/defaults. Typecheck,260 unit tests,23 native integration tests,remote-current and24 ACP scenarios passed with declared Node22.23.3. Runtime publication/deployment and real7200s translation acceptance remain tracked by the parent goal.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/Products/translate-tool-routing-20261023/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Operator confirmed7200s for translate-en consultations. Extend the existing workflow-specific runner policy to pass a positive millisecond timeout through native preparation and the existing CLI --timeout/ACP boundary. Preserve global900s defaults, exact model/low/routing/tools/guards, frozen approvals and lineage. Add strict configuration/default-isolation and native propagation regressions. No new runtime or UI surface.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PG3
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17

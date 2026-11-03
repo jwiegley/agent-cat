@@ -777,13 +777,21 @@ A runner may select native routing for individual workflows with
 and each value is a persona in the user-owned version-2 routing configuration:
 
 ```sh
-export AGENT_CAT_RUNNERS='[{"id":"wf","executable":"/opt/wf","workflowPersonas":{"translate-en":"sacred-text"}}]'
+export AGENT_CAT_RUNNERS='[{"id":"wf","executable":"/opt/wf","workflowPersonas":{"translate-en":"sacred-text"},"workflowTimeoutMs":{"translate-en":7200000}}]'
 ```
 
 `/wf` uses that persona only for the named workflow. An unconfigured workflow
 keeps the current Agent Deck target. Invalid configured routing is refused
 rather than replaced with that default. The section "Routing selection"
 describes preparation, approval, and availability checks.
+
+`workflowTimeoutMs` sets a per-consultation timeout for `/wf`. Its keys are exact
+workflow names within that runner and its values are positive safe integers in
+milliseconds. The timeout reaches the native runner through `--timeout` and is
+shown in the prepared routing policy. It bounds each model request rather than
+the complete workflow or a Pi wait. Unconfigured workflows retain their backend
+defaults, including 900000 milliseconds for ACP. Fresh launches use the configured
+value. Lineage operations retain the parent run's frozen target arguments.
 
 The extension runs in local mode unless a manager client profile is
 configured. Service mode is active only when one of these variables is set:

@@ -28,6 +28,7 @@ describe("Pi extension lifecycle", () => {
     delete process.env.AGENT_CAT_RUNNER;
     process.env.AGENT_CAT_RUNNERS = JSON.stringify(["agent-cat", "wf"].map((id) => ({
       id, executable: resolve("test/fixtures/runner.mjs"),
+      ...(id === "wf" ? { workflowTimeoutMs: { fixture: 7_200_000 } } : {}),
     })));
     process.env.AGENT_CAT_STATE_DIR = join(directory, "state");
     process.env.AGENTDECK_INSTANCE_ID = "current-deck-session";
@@ -84,6 +85,7 @@ describe("Pi extension lifecycle", () => {
       expect(inputCount).toBe(1);
       expect(confirmations).toHaveLength(1);
       expect(confirmations[0]).toContain("workflow=wf:fixture");
+      expect(confirmations[0]).toContain("consultation timeout=7200000ms");
       await expect(access(join(directory, "state", "runs"))).rejects.toMatchObject({ code: "ENOENT" });
 
       approve = true;
@@ -93,6 +95,7 @@ describe("Pi extension lifecycle", () => {
       await until(() => entries.length === 2);
       expect(workflowSelections).toBe(3);
       expect(confirmations[2]).toContain("workflow=agent-cat:fixture");
+      expect(confirmations[2]).not.toContain("consultation timeout=");
       for (const entry of entries) {
         expect(entry).toEqual({ type: "agent-cat-run", data: expect.objectContaining({ status: "succeeded", billFresh: "1", billMemo: "1", storeDir: expect.stringContaining("/runs/") }) });
       }
@@ -101,7 +104,7 @@ describe("Pi extension lifecycle", () => {
       const runnerIds: string[] = [];
       for (const runId of runIds) {
         const manifest = JSON.parse(await readFile(join(directory, "state", "runs", runId, "supervisor-manifest.json"), "utf8"));
-        expect(manifest).toMatchObject({ targetKind: "deck", targetArgs: ["--session", "current-deck-session"] });
+        expect(manifest).toMatchObject({ targetKind: "deck", targetArgs: ["--session", "current-deck-session", ...(manifest.runnerId === "wf" ? ["--timeout", "7200000"] : [])] });
         runnerIds.push(manifest.runnerId);
       }
       expect(runnerIds.sort()).toEqual(["agent-cat", "wf"]);

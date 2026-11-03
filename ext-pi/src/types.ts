@@ -4,6 +4,7 @@ export type RunnerConfig = {
   prefixArgs?: string[];
   allowedCwds: string[];
   workflowPersonas?: Record<string, string>;
+  workflowTimeoutMs?: Record<string, number>;
 };
 
 /**
