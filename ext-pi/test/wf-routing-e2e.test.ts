@@ -196,6 +196,28 @@ describe.runIf(Boolean(binary))("configured /wf native routing", () => {
     expect(await adapterTranscript(test.adapterLog)).not.toContain("prompt matched");
   }, 60_000);
 
+  it.each(["missing", "mismatched"])("refuses %s prepared consultation timeout and discards the held worker", async (fault) => {
+    const test = await setup();
+    const log = join(test.directory, "frontend.log");
+    const runner = {
+      ...test.runner,
+      prefixArgs: [...test.runner.prefixArgs!.slice(0, -1), process.execPath, resolve("test/fixtures/prepared-timeout.mjs"), binary!, fault, log],
+    };
+    await expect(prepareRoutedLaunch({
+      ...test, runner, cwd: test.directory, stateDir: test.state, persona: "fixture", timeoutMs: 7200000,
+      inputs: { file: "", text: "private" },
+    }).then((held) => { pending.push(held); return "unexpected native preparation"; })).rejects.toThrow("native preparation changed the configured consultation timeout");
+    const frames = (await readFile(log, "utf8")).trimEnd().split("\n").map((line) => JSON.parse(line));
+    const [prepared, discarded, closed] = frames;
+    expect(frames).toHaveLength(3);
+    expect(prepared).toMatchObject({ operation: "prepared" });
+    expect(discarded).toEqual({ version: 1, operation: "discard", approvalId: prepared.approvalId });
+    expect(closed).toEqual({ operation: "closed", code: 0, signal: null });
+    expect(await runNames(test.state)).toEqual([]);
+    await expect(stat(join(test.state, "runs", prepared.runId))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await adapterTranscript(test.adapterLog)).not.toContain("prompt matched");
+  }, 60_000);
+
   it("refuses oversized pasted text before spawning the prepared worker", async () => {
     const test = await setup();
     await expect(prepareRoutedLaunch({ ...test, cwd: test.directory, stateDir: test.state, persona: "fixture", inputs: { file: "", text: "x".repeat(2 * 1024 * 1024) } })).rejects.toThrow("native preparation request exceeds 2097152 bytes");

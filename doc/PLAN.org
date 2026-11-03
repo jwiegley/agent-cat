@@ -5590,6 +5590,24 @@ The refocus note says to add no new evidence tooling. The 2026-09-29 closeout us
 ]
 #+end_src
 
+* DONE [#C] Test timeout-policy refusal and held-worker cleanup
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-cn0b
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-11-03 Tue 13:22]
+:MODIFIED: [2026-11-03 Tue 13:42]
+:CREATED_BY: johnw
+:FINISHED: [2026-11-03 Tue 13:42]
+:CLOSE_REASON: Added both native prepared-reply timeout refusal and cleanup cases. Both pass on unchanged 0c production; deleting only the guard fails both, then byte-exact restoration verified. Typecheck,260 unit/45 optional skips and25 integration plus remote-current pass against fresh local native fixtures, no real model calls.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/Products/translate-tool-routing-20261023/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Cover the nonblocking Nix B17 review finding on runtime 0c43190. Add missing and 900000ms prepared-policy timeout variants while requesting 7200000ms. Assert exact refusal, no native run directory, matching discard and held-worker exit. Use the deterministic local fixture frontend, with no paid model or new SDK/cancellation policy. Prove the guard-deletion mutant fails, restore production bytes, and pass owning typecheck/unit/integration gates against fresh native fixtures. Publish a test-only followup without silently retargeting immutable B17 pins.
+
 * DONE [#C] The manager admission check fails as UnreadableConfiguration when its work directory path runs through a symlink
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
