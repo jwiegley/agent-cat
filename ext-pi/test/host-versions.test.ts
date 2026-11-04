@@ -180,8 +180,12 @@ describe("supported Pi host", () => {
   it("requires every host package at the release of pi-coding-agent", () => {
     expect(hostFindings({ ...supported, linked: { ...supported.linked, "@earendil-works/pi-tui": "1.4.0" } }))
       .toEqual(["linked package @earendil-works/pi-tui is 1.4.0, not the host release 1.5.0"]);
+    expect(hostFindings({ ...supported, linked: { ...supported.linked, "@earendil-works/pi-tui": "1.5.1" } }))
+      .toEqual(["linked package @earendil-works/pi-tui is 1.5.1, not the host release 1.5.0"]);
     expect(hostFindings({ ...supported, throughFork: { "@earendil-works/pi-agent-core": "1.4.0" } }))
       .toEqual(["fork package @earendil-works/pi-agent-core is 1.4.0, not the host release 1.5.0"]);
+    expect(hostFindings({ ...supported, throughFork: { "@earendil-works/pi-agent-core": "1.5.1" } }))
+      .toEqual(["fork package @earendil-works/pi-agent-core is 1.5.1, not the host release 1.5.0"]);
     expect(hostFindings({ ...supported, throughFork: {} }))
       .toEqual(["fork package @earendil-works/pi-agent-core is missing"]);
   });
