@@ -2569,10 +2569,13 @@ AGENT_CAT_E2E_RUNNER="$(cd .. && direnv exec . bash test/cabal.sh list-bin agent
 
 The packages under @file{ext-pi/node_modules/@@earendil-works} are symbolic links
 into the built Pi fork, and the section ``Supported host'' of
-@file{ext-pi/README.md} names the supported versions.  A registry install
-replaces those links, so the checks do not start with @command{npm ci}.
-@file{test/host-versions.test.ts} fails when a linked package reports a version
-outside that set or is not listed.
+@file{ext-pi/README.md} states the supported range of Pi releases,
+@code{>=1.4.0 <2.0.0}.  A registry install replaces those links, so the checks
+do not start with @command{npm ci}.  @file{test/host-versions.test.ts} reads the
+host release from the linked @code{pi-coding-agent}.  It fails when that release
+is a prerelease or lies outside the range, when another linked package or
+@code{pi-agent-core} reports another release, and when a linked package is
+missing or is not listed.
 
 The unit tests run against fixtures.  The integration tests require a freshly
 built @command{agentic-run} and the accompanying local Pi packages.  They

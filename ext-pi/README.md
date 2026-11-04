@@ -14,7 +14,8 @@ fork is the supported host, as the section "Supported host" states. They
 need these prerequisites:
 
 - Node 22 on `PATH`.
-- The built Pi fork at version 1.4.0: a checkout of the fork in which
+- The built Pi fork at a release in the supported range `>=1.4.0 <2.0.0`,
+  as the section "Supported host" states: a checkout of the fork in which
   `npm install --ignore-scripts` and `npm run build` ran, as the `README.md`
   of the fork states. The steps run `packages/coding-agent/dist/cli.js` of
   that checkout.
@@ -167,9 +168,14 @@ run references.
 
 ## Supported host
 
-The supported host is the built Pi fork at `~/src/fork/pi`, commit `7796fb2e1`.
-The directory `node_modules/@earendil-works` links the active Pi host packages
-into `~/src/fork/pi/packages`. These links are at version 1.4.0:
+The supported host is the built Pi fork, for example the checkout at
+`~/src/fork/pi`, at a host release in the range `>=1.4.0 <2.0.0`. The host
+release is the version in the `package.json` of the linked `pi-coding-agent`.
+It must be a plain release `x.y.z` from 1.4.0 up to, but not including,
+2.0.0, so a prerelease such as `1.5.0-rc.1` is outside the range. The
+directory `node_modules/@earendil-works` links the active Pi host packages
+into the `packages` directory of the fork, `~/src/fork/pi/packages` for that
+checkout:
 
 | Package | Fork directory |
 |---|---|
@@ -178,19 +184,28 @@ into `~/src/fork/pi/packages`. These links are at version 1.4.0:
 | `@earendil-works/pi-telemetry` | `packages/telemetry` |
 | `@earendil-works/pi-tui` | `packages/tui` |
 
-`@earendil-works/pi-agent-core` 1.4.0 is not linked. It resolves from
+Each linked package reports the host release. `@earendil-works/pi-agent-core`
+is not linked, and it reports the host release as well. It resolves from
 `pi-coding-agent` through the `node_modules` directory at the root of the fork,
-to `packages/agent`. The supported toolchain is Node 22.23.3, TypeScript 5.9.3,
-and vitest 4.1.9.
+to `packages/agent`, so the four links and `packages/agent` lie in one
+`packages` directory. The set of links is fixed: a link that the table does
+not list fails the check, and so does a listed package without its link. A
+fork release inside the range needs no change to this declaration, and the
+type check and the test suites of the extension decide whether the extension
+works on it. A release from 2.0.0 on needs a new declaration. The supported
+toolchain is Node 22.23.3 or 22.23.4, TypeScript 5.9.3, and vitest 4.1.9.
 
-Pi 1.4.0 ships no `pi-client`, `pi-server`, or `pi-protocol` package. The
-optional remote socket bridge retains their published 1.1.0 releases and Chord
-1.1.0 as extension-owned dependencies. The lock file of the extension records
-those registry packages alongside its Pi 1.4.0 development dependencies, and
-the managed build replaces only the active Pi host packages with links into
-the same fork revision. `test/host-versions.test.ts` checks both sets
-separately. A worktree copies the prepared `node_modules` as described above,
-and the host links in that copy remain absolute.
+Pi 1.4.0 and 1.5.0 ship no `pi-client`, `pi-server`, or `pi-protocol`
+package. Their own `chord` package reports the host release, and the
+extension does not link it. The optional remote socket bridge retains the
+published 1.1.0 releases of `pi-client`, `pi-server` and `pi-protocol` and
+Chord 1.1.0 as extension-owned dependencies at every host release. The lock
+file of the extension records those registry packages alongside its Pi 1.4.0
+development dependencies, and the managed build replaces only the active Pi
+host packages with links into the same fork revision.
+`test/host-versions.test.ts` checks both sets separately. A worktree copies
+the prepared `node_modules` as described above, and the host links in that
+copy remain absolute.
 
 agent-cat owns `ext-pi` and its manager client. The Pi owner owns the host. The
 fork is built for this extension and is not edited by agent-cat work.

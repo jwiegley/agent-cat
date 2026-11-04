@@ -257,24 +257,28 @@ network, deployment or platform acceptance, and it performs no OS containment.
 ## Client baseline policy
 
 The supported targets for the version 1 manager clients are GNU Emacs 30.2
-and the built Pi fork at 1.4.0. The Emacs client declares Emacs 29.1 in its
-`Package-Requires` header, and every check ran GNU Emacs 30.2, so the 29.1
-minimum stays open until a check runs on Emacs 29.1. The Pi extension supports
-only the fork at 1.4.0, which `ext-pi/test/host-versions.test.ts` enforces.
-This baseline does not narrow the native extension's existing
+and the built Pi fork at a plain release in the range `>=1.4.0 <2.0.0`. The
+Emacs client declares Emacs 29.1 in its `Package-Requires` header, and every
+check ran GNU Emacs 30.2, so the 29.1 minimum stays open until a check runs on
+Emacs 29.1. The Pi extension supports only a fork whose host packages all
+report one release in that range, which `ext-pi/test/host-versions.test.ts`
+enforces. This baseline does not narrow the native extension's existing
 peer-dependency declarations.
 
 These targets are support-policy decisions, not inferred compatibility limits.
 The [native frontend evidence](../doc/tui-release-evidence.md) records Emacs 30.2
-byte-compilation, checkdoc, and smoke execution. The Pi extension develops and
-runs against the built Pi fork 1.4.0. The `devDependencies` of
+byte-compilation, checkdoc, and smoke execution. The Pi range starts at 1.4.0,
+the host of the last port of the extension, and it ends before 2.0.0, the next
+major release. A fork release inside the range needs no change to agent-cat.
+The type check and the test suites of the extension, which run against the
+built fork, decide whether the extension works on it. The `devDependencies` of
 `ext-pi/package.json` name 1.4.0 for the Pi coding-agent and TUI packages, and
-`node_modules` links each active host package into the fork, which reports
-1.4.0, as the [extension README](../ext-pi/README.md#supported-host) states.
-These development pins are not coding-agent version floors. The
-current pinned development shell reports Node 22.23.3, which is a reproducible
-build-runtime observation rather than an independently established Node
-compatibility minimum. The
+`node_modules` links each active host package into the fork, as the
+[extension README](../ext-pi/README.md#supported-host) states. The range, and
+not these development pins, sets the supported coding-agent releases. The host
+test accepts Node 22.23.3 and 22.23.4, the patch releases that the real-host
+checks ran. They are reproducible build-runtime observations rather than an
+independently established Node compatibility minimum. The
 [version and compatibility matrix](../doc/api/README.md#version-and-compatibility-matrix)
 lists the client versions that the checks exercise.
 

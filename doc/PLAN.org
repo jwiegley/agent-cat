@@ -2428,6 +2428,29 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
 ]
 #+end_src
 
+* DONE [#C] Derive the ext-pi host release from the linked Pi packages and accept the range >=1.4.0 <2.0.0
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-6k0k
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-11-04 Wed 00:14]
+:MODIFIED: [2026-11-04 Wed 00:14]
+:CREATED_BY: johnw
+:FINISHED: [2026-11-04 Wed 00:14]
+:CLOSE_REASON: Implemented by the commit that records this issue. With Node 22.23.3 and ext-pi/node_modules linked as nix-config's agent-cat-pi-extension links it, npm run check, npm test (277 passed, 19 of them in host-versions.test.ts) and npm run test:integration (25 passed, then the remote check) pass against the built fork at 1.4.0 and at 1.5.0. Real-host controls: the unmodified 1.5.0 host passes, and a pi-tui link into the 1.4.0 fork, an extra pi-mcp link, and coherent fork copies at 2.0.0, 1.3.0 and 1.5.0-rc.1 each fail with the one expected finding. make -C doc check passes.
+:EXTERNAL_REF: nix-mp63
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /private/tmp/claude-501/-Users-johnw-src-sys-nix/39f84810-4d33-416e-a30d-3766b7d36938/scratchpad/upd/jobs/acatwiden/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+John decided on 2026-11-03 (nix-config issue nix-mp63, "Widen agent-cat's host check") that agent-cat declares a range of supported Pi fork releases, so that a fork bump inside the range needs no lockstep host port. Until now ext-pi/test/host-versions.test.ts named one exact release for the four linked host packages and for pi-agent-core. The Pi 1.4.0 bump therefore needed the agent-cat port ae2576e6, a matching move of the agent-cat that agent-workflows locks, and a joint move of the nix-config pins. For Pi 1.5.0, nix-config added packages/agent-cat-pi-1.5-host.patch, which rewrites only the version table of the test at build time.
+
+The check reads the host release from the package.json of the linked pi-coding-agent. Each other linked host package and pi-agent-core must report that release, and the release must be a plain x.y.z in SUPPORTED_PI_RELEASES = { from: "1.4.0", before: "2.0.0" }, which ext-pi/README.md states as `>=1.4.0 <2.0.0`. The four linked package names, the exact registry set, the single packages directory, the Node matrix (22.23.3 and 22.23.4) and the exact TypeScript and vitest versions stay as they are. A nix-config pin of this revision needs neither agent-cat-node-releases.patch nor agent-cat-pi-1.5-host.patch, and nix-mp63 tracks that adoption.
+
+Acceptance: the pure tests accept coherent hosts at 1.4.0, 1.5.0 and 1.99.0 and reject 1.3.0, 2.0.0, 1.5.0-rc.1, a mixed pi-tui, a mismatched pi-agent-core, an unlisted pi-mcp link, a missing pi-telemetry, a missing pi-coding-agent and a registry Chord at 1.5.0. The real-host test passes on the built fork at 1.4.0 and at 1.5.0, and real-host negative controls fail.
+
 * TODO [#D] Test key-outcome retention with the real App view value
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
