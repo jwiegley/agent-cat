@@ -84,6 +84,11 @@ personas:
           - model: stub-default
             thinking: medium
             max-output: unconstrained
+      triage:
+        chain:
+          - model: stub-default
+            thinking: medium
+            max-output: unconstrained
 
   claude:
     engines: [claude]
@@ -110,6 +115,11 @@ personas:
             thinking: high
             max-output: unconstrained
       coding:
+        chain:
+          - model: claude-default
+            thinking: medium
+            max-output: unconstrained
+      triage:
         chain:
           - model: claude-default
             thinking: medium
@@ -144,6 +154,11 @@ personas:
           - model: codex-default
             thinking: medium
             max-output: unconstrained
+      triage:
+        chain:
+          - model: codex-default
+            thinking: medium
+            max-output: unconstrained
 
   droid:
     engines: [droid]
@@ -170,6 +185,11 @@ personas:
             thinking: high
             max-output: unconstrained
       coding:
+        chain:
+          - model: droid-default
+            thinking: medium
+            max-output: unconstrained
+      triage:
         chain:
           - model: droid-default
             thinking: medium

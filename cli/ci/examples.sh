@@ -5,10 +5,11 @@
 #
 #     ./ci/examples.sh
 #
-# `Example.Harden.examples` is ten programs: the two walked ones the frozen
+# `Example.Harden.examples` is eleven programs: the two walked ones the frozen
 # corpus holds, `Example.Structured` as the representation-boundary pair
 # (`structured` and `structured-result`), `capital` as the example of tools
-# answered in process, and "Example.Isaac"'s five, which are
+# answered in process, `triage` as the example of decision questions, and
+# "Example.Isaac"'s five, which are
 # express and are deliberately **not** frozen (isaac-workflows §6, D10: "keep
 # them out of the frozen corpus, and pin their numbers anyway").
 # That decision leaves the five with numbers published in three places — each
@@ -23,8 +24,8 @@
 #   agentic-run run  <name> --scripted [input]   exit 0, billFresh, billMemo
 #
 # where `[input]` is the input flag a program that takes one needs (D8) —
-# `review-lite`, `plan-feature` and `ship-feature-lite` are the programs that
-# take one, and `inputsFor` below is where each input comes from.
+# `review-lite`, `plan-feature`, `ship-feature-lite` and `triage` are the
+# programs that take one, and `inputsFor` below is where each input comes from.
 #
 # and holds each field against the table below. Every pinned line cites where
 # the same number is also published; a mismatch here means one of those places
@@ -42,7 +43,7 @@
 # the two frozen corpus entries, so their static folds are already pinned twice
 # over (tier0 replays them, tier1 rebuilds them from the very values this script
 # runs); repeating them here is what makes this gate a statement about *the
-# registry* rather than about the eight unfrozen programs alone — another Isaac
+# registry* rather than about the nine unfrozen programs alone — another Isaac
 # program, or a change that moved any existing row, has to come through this table.
 #
 # The registry itself is read from the binary rather than transcribed: an
@@ -122,7 +123,7 @@ cat_run() {
 #   pin <name> <level> <size> <askNodes> <minFold> <maxFold> <paths> \
 #              <billFresh> <billMemo>
 #
-# `codes` is not pinned here: it is `null` on six of the ten (they branch);
+# `codes` is not pinned here: it is `null` on seven of the eleven (they branch);
 # `hello`, `structured`, `structured-result` and `capital` are straight lines
 # whose codes are exercised by their scripted runs.
 
@@ -171,6 +172,17 @@ pin structured-result batch        2    1    1    1     1     1    1
 # which a scripted run answers from its table. Also the haddock on
 # `Capital.capitalProgram`, and engine/acp/ci/acp.sh's `capital` for the bill.
 pin capital           pipeline     5    4    4    4     1     4    4
+
+# The decision example. Three `decide` questions put to the model `triage`,
+# four weighings that ask nobody, and five desks of which a run reaches one.
+# Every path puts the three decisions and one desk, so the two bounds
+# coincide at 4 over 5 paths. The scripted table in `Example.TriageInfo` makes
+# the ticket a billing ticket that asks for money back with probability 0.96,
+# so the run takes the `refund-desk` path and puts four distinct questions,
+# none of them twice. The design record states the same numbers in its
+# section 3, and engine/decisions/ci/triage.sh reaches the same path through
+# a decisions engine.
+pin triage            branch      17    8    4    4     5     4    4
 
 # The five Isaac programs. Each number below is published twice more: in the
 # program's own haddock in `example/Example/Isaac.hs`, and in
@@ -277,6 +289,11 @@ printf '%s\n' \
 printf '%s\n' 'Add a --dry-run flag to the exporter.' > "$work/plan-feature.request"
 printf '%s\n' 'Make the exporter atomic.' > "$work/ship-feature-lite.request"
 
+# `triage` reads its ticket from standard input when a run names it nowhere
+# else. The gate names it with a file instead, because every run here has
+# /dev/null on standard input.
+printf '%s\n' 'I was charged twice this month. Please refund the second charge.' > "$work/triage.ticket"
+
 # The flags are carried in an __array__ rather than echoed as a string, because
 # the value of `--input-file` is a path under $TMPDIR, and a $TMPDIR with a
 # space in it is one this gate must still work under. A string would have to be
@@ -290,6 +307,7 @@ inputsFor() {
   case "$1" in
     review-lite) ins=(--input-file "subject=$work/review-lite.subject") ;;
     plan-feature | ship-feature-lite) ins=(--input-file "request=$work/$1.request") ;;
+    triage) ins=(--input-file "ticket=$work/triage.ticket") ;;
     *) ins=() ;;
   esac
 }
@@ -371,6 +389,16 @@ grep -q '^    answer  *()' "$work/structured.run" \
 grep -q '^    answer  *()' "$work/structured-result.run" \
   && bad structured-result "final result" "not unit" "answer ()"
 
+# The triage row puts its three decision questions to the model `triage`, each
+# once and each at a structured code, and then the one desk that the scripted
+# answers choose. The desk is `refund-desk`, and no other desk is asked.
+decisions_put=$(grep -c '^  consult structured -> model triage: ' "$work/triage.run")
+[ "$decisions_put" = 3 ] || bad triage "decision questions put" 3 "$decisions_put"
+grep -q '^  effect ack -> model refund-desk: ' "$work/triage.run" \
+  || bad triage "the branch taken" "refund-desk" "absent"
+desks_put=$(grep -cE '^  [a-z]+ [a-z]+ -> model (billing-desk|support-desk|on-call|triage-desk):' "$work/triage.run")
+[ "$desks_put" = 0 ] || bad triage "the desks not taken" 0 "$desks_put"
+
 # ---------------------------------------------------------------------------
 # Every program's page
 # ---------------------------------------------------------------------------
@@ -382,9 +410,9 @@ grep -q '^    answer  *()' "$work/structured-result.run" \
 # if any of them moved, the work stops — and this block is the evidence that the
 # prose is true.
 #
-# The ten pages here are dispatched by `Text` in `Example.Harden.helpFor` and
+# The eleven pages here are dispatched by `Text` in `Example.Harden.helpFor` and
 # `Example.Isaac.isaacHelp`, neither of which is exhaustiveness-checked, so a
-# row added and not documented is a RUNTIME error. Running all ten is the only
+# row added and not documented is a RUNTIME error. Running all eleven is the only
 # thing that catches it.
 #
 # Resolve the same binary once for the repeated help checks below.
@@ -405,6 +433,9 @@ for n in $registered; do
       ;;
   esac
 done
+
+# An empty configuration directory, for the live-line check below.
+mkdir -p "$work/no-config"
 
 # A row name no registry holds, for the live-line check below.
 sentinel="ci-no-such-example-and-never-will-be"
@@ -479,7 +510,11 @@ for n in "${names[@]}"; do
       *';'* | *'|'* | *'&'* | *'`'* | *'$('* | *'>'* | *'<'*)
         bad "$n" "the page's live line" "a plain command line" "a shell metacharacter" ;;
       "agentic-run run $n "*)
-        out=$(eval "$(printf '%q' "$bin") run $(printf '%q' "$sentinel") ${live#agentic-run run $n }" \
+        # A line that routes by `routing.yaml` reads the operator's own file
+        # before the registry is consulted. The line is parsed against an
+        # empty configuration directory, so that what is under test is the
+        # flags on the page and not the operator's file.
+        out=$(eval "XDG_CONFIG_HOME=$(printf '%q' "$work/no-config") $(printf '%q' "$bin") run $(printf '%q' "$sentinel") ${live#agentic-run run $n }" \
                 < /dev/null 2>&1)
         code=$?
         if [ "$code" != 1 ]; then

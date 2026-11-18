@@ -319,6 +319,7 @@ library examples
     Example.IsaacInfo
     Example.Registry
     Example.StructuredInfo
+    Example.TriageInfo
   build-depends:   agentic
 
 library bisim-support
