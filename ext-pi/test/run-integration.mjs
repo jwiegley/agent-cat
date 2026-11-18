@@ -7,10 +7,14 @@ import "../src/pi-remote-runtime.mjs";
 const runner = process.env.AGENT_CAT_E2E_RUNNER;
 if (!runner) throw new Error("AGENT_CAT_E2E_RUNNER must name the built agentic-run executable");
 accessSync(runner, constants.X_OK);
+const routingRunner = process.env.AGENT_CAT_E2E_ROUTING_RUNNER;
+if (!routingRunner) throw new Error("AGENT_CAT_E2E_ROUTING_RUNNER must name the built routing-fixed-point-probe executable");
+accessSync(routingRunner, constants.X_OK);
 
 const root = new URL("..", import.meta.url);
 const tests = [
   "test/native-targets-e2e.test.ts",
+  "test/wf-routing-e2e.test.ts",
   "test/owned-child-e2e.test.ts",
   "test/current-bridge.test.ts",
   "test/pi-child-acp.test.ts",

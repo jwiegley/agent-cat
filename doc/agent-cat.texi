@@ -1085,6 +1085,14 @@ selected persona is never a workflow input or a @code{run.*} fact.  Exact or
 deterministically ordered-prefix selectors freeze one model identifier and its
 non-secret provenance before an engine starts.
 
+An ACP engine can declare a public @code{session-meta} object.  The runner
+sends it unchanged as @code{_meta} in both preflight and fresh
+@code{session/new} requests.  The adapter defines its meaning.  Empty metadata
+is omitted and preserves the previous execution fingerprint.  Nonempty metadata
+contributes to that fingerprint and appears in routing inspection.  String
+fields with credential-shaped paths are refused recursively.  Metadata does
+not resolve secrets or establish an operating-system sandbox.
+
 Fail-over occurs within the authored pin chain.  Routing can place different
 pins in different ACP adapters or agent-deck sessions.  One chain can therefore
 cross providers, and no backend identity enters the semantic question keys.
@@ -1964,7 +1972,9 @@ vendor APIs and the details that no primary source confirms.
 @code{revising subject (atMost n)} reviews a candidate and can amend it up to
 @code{n} times.  The bound lies between zero and sixty-four.  Each round has
 exactly two source clauses.  The first is a review that produces a verdict, and
-the second is an @code{amend} at the answer kind of the candidate.  Additional
+the second is an amendment at the answer kind of the candidate.  Use
+@code{amend} for a question or @code{amendWith} for a typed right-hand side,
+including a function call with several questions in its body.  Additional
 statements have no first-order place inside the round, and they are rejected.
 
 The flagship's complete review clause is a compiled example:
@@ -2888,10 +2898,13 @@ AGENT_CAT_E2E_RUNNER="$(cd .. && direnv exec . bash test/cabal.sh list-bin agent
 
 The packages under @file{ext-pi/node_modules/@@earendil-works} are symbolic links
 into the built Pi fork, and the section ``Supported host'' of
-@file{ext-pi/README.md} names the supported versions.  A registry install
-replaces those links, so the checks do not start with @command{npm ci}.
-@file{test/host-versions.test.ts} fails when a linked package reports a version
-outside that set or is not listed.
+@file{ext-pi/README.md} states the supported range of Pi releases,
+@code{>=1.4.0 <2.0.0}.  A registry install replaces those links, so the checks
+do not start with @command{npm ci}.  @file{test/host-versions.test.ts} reads the
+host release from the linked @code{pi-coding-agent}.  It fails when that release
+is a prerelease or lies outside the range, when another linked package or
+@code{pi-agent-core} reports another release, and when a linked package is
+missing or is not listed.
 
 The unit tests run against fixtures.  The integration tests require a freshly
 built @command{agentic-run} and the accompanying local Pi packages.  They
@@ -3595,7 +3608,7 @@ zero through sixty-four.
 @c COVER API Agentic.Workflow.revising author
 @item revising subject bound clauses
 Build a two-ending bounded revision.  The subject fixes the carrier code.  The
-clauses must bind one verdict review and end with one @code{amend}.  The
+clauses must bind one verdict review and end with one amendment.  The
 Haskell case that follows immediately must consume its bind.
 
 @c COVER API Agentic.Workflow.revisingOn author
@@ -3607,6 +3620,13 @@ objection.  Its represented tail grows @code{2n+1} times.
 @item amend question
 Finish a revision clause with a question at the candidate's kind, with the review
 verdict and candidate live in its prompt scope.
+
+@c COVER API Agentic.Workflow.amendWith author
+@item amendWith rhs
+Finish a revision clause with a typed right-hand side at the candidate's kind.
+A function call here executes its body within the amendment and passes its
+result to the next review.  The function does not acquire permission to branch
+or perform a nested revision.
 @end table
 
 @section Functions, calls, and chains

@@ -3,8 +3,8 @@
 `ext-pi` is a Pi extension that makes Pi the control plane for agent-cat
 workflows. agent-cat remains the only workflow interpreter. The extension reads
 the trusted runner executables that its configuration names, and it gathers
-inputs and launches the runner in machine mode. It reduces the event stream of
-the runner into a live monitor, delivers controls, and keeps durable references
+inputs and launches the runner through its machine or native frontend protocol.
+It reduces the event stream of the runner into a live monitor, delivers controls, and keeps durable references
 to runs. It never searches the file system or `PATH` for a runner.
 
 ## Install and start
@@ -14,7 +14,8 @@ fork is the supported host, as the section "Supported host" states. They
 need these prerequisites:
 
 - Node 22 on `PATH`.
-- The built Pi fork at version 1.3.0: a checkout of the fork in which
+- The built Pi fork at a release in the supported range `>=1.4.0 <2.0.0`,
+  as the section "Supported host" states: a checkout of the fork in which
   `npm install --ignore-scripts` and `npm run build` ran, as the `README.md`
   of the fork states. The steps run `packages/coding-agent/dist/cli.js` of
   that checkout.
@@ -100,7 +101,10 @@ These environment variables configure the extension. The section
 In Pi, type `/wf-launch hello`. Select `scripted (offline, no commands)` as
 the execution target, and select `Yes` in `Launch agent-cat workflow?`. Pi
 shows `Started hello as RUN_ID`, and then `agent-cat RUN_ID: succeeded
-hello`. `/wf-monitor RUN_ID` shows the occurrences of the run. The local
+hello`. Under that line the entry of a run that succeeds with a result
+shows the verified reference of the result and the result itself.
+`/wf-monitor RUN_ID` shows the occurrences of the run, and
+`/wf-result RUN_ID` shows the result again. The local
 `/wf` command runs only inside Agent Deck, and outside it the message names
 `/wf-launch`.
 
@@ -150,10 +154,11 @@ Pi loads `src/index.ts`, which registers the `/wf` command, the
 `/wf-...` commands, the `/wfm-...` commands of service mode, and the
 `agent_cat_workflow` tool. The extension
 imports no Haskell code and never interprets a `RawProgram` or a `Plan`. It
-speaks three versioned process protocols of `agentic-run`: the descriptor that
+speaks four versioned process protocols of `agentic-run`: the descriptor that
 `list --json` publishes (version 3, while versions 1 and 2 remain accepted), the
 machine event stream (protocol version 2 when advertised, with version 1 retained
-for older runners), and the correlated control channel. Descriptor v3 advertises
+for older runners), the correlated control channel, and native frontend session
+version 1 for configured `/wf` personas. Descriptor v3 advertises
 sanitized routing inspection and protocol negotiation; v2 completion carries a
 verified private result reference.
 In service mode only, the extension also communicates with the agent-cat
@@ -166,9 +171,14 @@ run references.
 
 ## Supported host
 
-The supported host is the built Pi fork at `~/src/fork/pi`, commit `bb5bf98f5`.
-The directory `node_modules/@earendil-works` links the active Pi host packages
-into `~/src/fork/pi/packages`. These links are at version 1.3.0:
+The supported host is the built Pi fork, for example the checkout at
+`~/src/fork/pi`, at a host release in the range `>=1.4.0 <2.0.0`. The host
+release is the version in the `package.json` of the linked `pi-coding-agent`.
+It must be a plain release `x.y.z` from 1.4.0 up to, but not including,
+2.0.0, so a prerelease such as `1.5.0-rc.1` is outside the range. The
+directory `node_modules/@earendil-works` links the active Pi host packages
+into the `packages` directory of the fork, `~/src/fork/pi/packages` for that
+checkout:
 
 | Package | Fork directory |
 |---|---|
@@ -177,19 +187,28 @@ into `~/src/fork/pi/packages`. These links are at version 1.3.0:
 | `@earendil-works/pi-telemetry` | `packages/telemetry` |
 | `@earendil-works/pi-tui` | `packages/tui` |
 
-`@earendil-works/pi-agent-core` 1.3.0 is not linked. It resolves from
+Each linked package reports the host release. `@earendil-works/pi-agent-core`
+is not linked, and it reports the host release as well. It resolves from
 `pi-coding-agent` through the `node_modules` directory at the root of the fork,
-to `packages/agent`. The supported toolchain is Node 22.23.3, TypeScript 5.9.3,
-and vitest 4.1.9.
+to `packages/agent`, so the four links and `packages/agent` lie in one
+`packages` directory. The set of links is fixed: a link that the table does
+not list fails the check, and so does a listed package without its link. A
+fork release inside the range needs no change to this declaration, and the
+type check and the test suites of the extension decide whether the extension
+works on it. A release from 2.0.0 on needs a new declaration. The supported
+toolchain is Node 22.23.3 or 22.23.4, TypeScript 5.9.3, and vitest 4.1.9.
 
-Pi 1.3.0 no longer ships `pi-client`, `pi-server`, or `pi-protocol`. The optional
-remote socket bridge retains their published 1.1.0 releases and Chord 1.1.0
-as extension-owned dependencies. The extension's lock file records those
-registry packages alongside its Pi 1.3.0 development dependencies; the
-managed build replaces only the active Pi host packages with links into the
-same fork revision. `test/host-versions.test.ts` checks both sets separately.
-In a worktree, copy the prepared `node_modules` as described above; the host
-links remain absolute.
+Pi 1.4.0 and 1.5.0 ship no `pi-client`, `pi-server`, or `pi-protocol`
+package. Their own `chord` package reports the host release, and the
+extension does not link it. The optional remote socket bridge retains the
+published 1.1.0 releases of `pi-client`, `pi-server` and `pi-protocol` and
+Chord 1.1.0 as extension-owned dependencies at every host release. The lock
+file of the extension records those registry packages alongside its Pi 1.4.0
+development dependencies, and the managed build replaces only the active Pi
+host packages with links into the same fork revision.
+`test/host-versions.test.ts` checks both sets separately. A worktree copies
+the prepared `node_modules` as described above, and the host links in that
+copy remain absolute.
 
 agent-cat owns `ext-pi` and its manager client. The Pi owner owns the host. The
 fork is built for this extension and is not edited by agent-cat work.
@@ -770,6 +789,27 @@ of `AGENT_CAT_RUNNER`:
 ```sh
 export AGENT_CAT_RUNNERS='[{"id":"stable","executable":"/opt/agentic-run","allowedCwds":["/work"]},{"id":"next","executable":"/opt/agentic-run-next"}]'
 ```
+
+A runner may select native routing for individual workflows with
+`workflowPersonas`. Each key is an exact workflow name within that runner,
+and each value is a persona in the user-owned version-2 routing configuration:
+
+```sh
+export AGENT_CAT_RUNNERS='[{"id":"wf","executable":"/opt/wf","workflowPersonas":{"translate-en":"sacred-text"},"workflowTimeoutMs":{"translate-en":7200000}}]'
+```
+
+`/wf` uses that persona only for the named workflow. An unconfigured workflow
+keeps the current Agent Deck target. Invalid configured routing is refused
+rather than replaced with that default. The section "Routing selection"
+describes preparation, approval, and availability checks.
+
+`workflowTimeoutMs` sets a per-consultation timeout for `/wf`. Its keys are exact
+workflow names within that runner and its values are positive safe integers in
+milliseconds. The timeout reaches the native runner through `--timeout` and is
+shown in the prepared routing policy. It bounds each model request rather than
+the complete workflow or a Pi wait. Unconfigured workflows retain their backend
+defaults, including 900000 milliseconds for ACP. Fresh launches use the configured
+value. Lineage operations retain the parent run's frozen target arguments.
 
 The extension runs in local mode unless a manager client profile is
 configured. Service mode is active only when one of these variables is set:
@@ -1440,12 +1480,13 @@ for the control descriptor.
 
 | Command | Purpose |
 |---|---|
-| `/wf [RUNNER:WORKFLOW]` | Launch in the current Agent Deck session. Omit the name to select from every configured runner. In the TUI, type to narrow by qualified name or description with case-insensitive fuzzy matching. Arrow keys move, Enter selects, and Escape cancels. Input collection and explicit launch approval follow selection. RPC clients retain the ordinary selection dialog. |
+| `/wf [RUNNER:WORKFLOW]` | Launch using the configured workflow persona, or the current Agent Deck session when none is configured. Omit the name to select from every configured runner. In the TUI, type to narrow by qualified name or description with case-insensitive fuzzy matching. Arrow keys move, Enter selects, and Escape cancels. Input collection and explicit launch approval follow selection. RPC clients retain the ordinary selection dialog. |
 | `/wf-help [RUNNER:WORKFLOW]` | Without a name, list every agent-cat command with its description. With a name, show the exact `help` output of the runner. |
 | `/wf-plan RUNNER:WORKFLOW` | Show `plan --json --raw` with the actual inputs. |
 | `/wf-launch RUNNER:WORKFLOW` | Launch wizard for alternate targets. |
 | `/wf-status` | Summaries of active and recent runs. |
 | `/wf-monitor [RUN_ID]` | Live monitor in authored order. The arrow keys or `j` and `k` move, Enter folds, and Escape closes. |
+| `/wf-result [RUN_ID [PATH]]` | Show the verified result of a succeeded local run, or save its exact text to a new file, as the section "Results of local runs" states. |
 | `/wf-steer [RUN_ID]` | Steer one exact attempt. |
 | `/wf-retry [RUN_ID]` | Retry an occurrence that waits after automatic recovery is spent. |
 | `/wf-recover [RUN_ID]` | Choose one runner-offered retry, fail-over, or abandon action. |
@@ -1602,9 +1643,35 @@ belong to `routing-fixed-point-probe` and not to `agentic-run`. That case of
 
 ## Routing selection
 
-`/wf` always uses the current Agent Deck session and does not inspect or load
-routing configuration. `/wf-launch` offers routing configuration as a distinct
-live target when a trusted descriptor-version-3 runner advertises inspection.
+Without a `workflowPersonas` entry for the selected workflow, `/wf` uses the
+current Agent Deck session and does not inspect or load routing configuration.
+An explicit entry instead requires version-2 routing inspection and the native
+frontend session protocol. Pi requests the configured persona and binds the
+returned routing fingerprint. The native frontend resolves the workflow's
+complete pin coverage and holds the prepared target through the approval.
+
+The approval shows the native run and approval identifiers, the exact configured
+invocation, server, working directory, state root, target arguments, public
+policy, and input byte counts and hashes. It includes selected models and
+inventory warnings without including the input text. Declining discards that
+preparation without creating a run or sending a model prompt. Approval starts
+the same held process rather than resolving the configuration again. The
+existing supervisor monitors its events, results, cancellation, and controls.
+Session shutdown also aborts preparations awaiting approval.
+
+Unknown personas, uncovered pins, unsupported protocols, and changed routing
+fingerprints refuse preparation. Static-unverified models remain labelled as
+such in the approval. Adapter availability and supported model settings are
+checked natively after approval and before model prompts. Failure produces a
+failed run without a Deck fallback or a substitute model. Native captured input
+files remain private run artifacts for lineage and normal retention.
+
+The serialized native preparation request is limited to 2 MiB, including JSON
+overhead. Larger pasted inputs are refused rather than truncated. Use a file
+input when the workflow declares one.
+
+`/wf-launch` offers routing configuration as a distinct live target when a
+trusted descriptor-version-3 runner advertises inspection.
 For that target, Pi invokes `agentic-run --routing --json`, offers the configured
 persona or another user-owned persona, and offers optional concrete model aliases
 for the workflow's managed profile axes. It passes the CLI-owned routing-only
@@ -1663,13 +1730,84 @@ remote live targets require an explicit confirmation of charge and ownership.
 The intent-based permission policy of agent-cat under ACP remains
 authoritative.
 
+## Results of local runs
+
+A local run that ends `succeeded` with a result shows that result in Pi
+without a further command. The extension reads `runtime/result.json` of the
+run store and verifies it against the result reference of the terminal
+event: the byte count, the SHA-256, the canonical compact form, the run
+identifier and the result code. It then appends the `agent-cat-run`
+transcript entry of the run, and the entry shows the result under its
+status lines:
+
+```text
+agent-cat RUN_ID: succeeded WORKFLOW
+bill fresh=N memo=N
+run store: STORE
+result: N bytes, SHA-256 DIGEST, code CODE
+
+RESULT
+```
+
+`RESULT` is the value itself when the value is a string, with its line
+breaks. For any other value it is the JSON of the value exactly as the
+artifact spells it, which is the canonical compact form, so no digit of a
+number is rounded. A result longer than 24000 characters is cut there, and a
+last line names `/wf-result RUN_ID PATH`. The result of an artifact that
+cannot be read or fails verification is never shown: in place of `RESULT`
+the entry has `The result could not be read and verified, and is not shown:
+REASON`.
+
+The entry stays in the transcript view, where a notification would be one
+status line that the next notification replaces. The session file holds
+only the reference of the result: its byte count, its SHA-256 and its code.
+It holds neither the value nor the preview of the terminal event, which can
+be most of a short value. The extension keeps the text it verified in
+memory, for at most the 100 most recent results, and the entry shows it
+from there, so showing the result sends nothing to the model. After Pi
+restarts, the entry of an earlier process shows the reference and
+`/wf-result RUN_ID shows the verified result`. `/wf-monitor` and the
+`inspect` action of the model-facing tool show the same reference for a
+succeeded run, without the preview. They do show the answers of the
+occurrences of the run, as before, and a result is often built from those
+answers.
+
+A Pi that is not the TUI renders no entry. There the extension still
+appends the entry, and it sends the result in one notification, which the
+RPC mode delivers and the print and JSON modes, which have no UI, do not
+show:
+
+```text
+agent-cat RUN_ID: result of WORKFLOW
+verified N bytes, SHA-256 DIGEST, code CODE
+
+RESULT
+```
+
+`/wf-result [RUN_ID [PATH]]` reads and verifies the result again from the
+run store, for a run of this Pi process or a run restored from the state
+directory after a restart. Without `RUN_ID`, an interactive Pi offers the
+succeeded runs that have a result. Without `PATH`, the TUI appends an
+`agent-cat-result` entry, which shows the two heading lines of the
+notification above and the result and holds only the reference, and any
+other Pi shows that notification. With `PATH`, resolved against the working
+directory, it saves the exact UTF-8 text of `RESULT`, uncut, as a new file
+with mode 0600, and reports the path and the byte count. It never
+overwrites: an existing path gives `a file already exists there`, and
+nothing is written. A run that is not `succeeded`, a succeeded run of a
+protocol version 1 runner, which names no result artifact, and an unknown
+run each give one notification that says so.
+
+The model-facing `agent_cat_workflow` tool has no local result action, so a
+result enters the transcript only when the operator puts it there.
+
 ## Persistence and recovery
 
 Supervisor state is private under `STATE/runs/<run-id>/`, and agent-cat's own
 store is the `runtime/` child of that directory. New runs use frontend manifest
 version 2, shared with the terminal frontend; legacy extension manifests remain
 readable. Pi transcript entries hold references and terminal status, never copied
-prompts or credentials. A mode-0600 owner heartbeat lets another Pi or TUI process
+prompts, credentials or result values. A mode-0600 owner heartbeat lets another Pi or TUI process
 attach read-only to a live run's event stream while controls stay with the original
 exclusive supervisor; a dead owner leaves the run `orphaned`. State sharing occurs
 only when those frontends are explicitly given the same `AGENT_CAT_STATE_DIR`.
@@ -1740,8 +1878,17 @@ keeps registry entries that no linked package uses.
 ```sh
 npm run check
 npm test
-AGENT_CAT_E2E_RUNNER="$(cd .. && direnv exec . bash test/cabal.sh list-bin agentic-run)" npm run test:integration
+AGENT_CAT_E2E_RUNNER="$(cd .. && direnv exec . bash test/cabal.sh list-bin agentic-run)" \
+AGENT_CAT_E2E_ROUTING_RUNNER="$(cd .. && direnv exec . bash test/cabal.sh list-bin routing-fixed-point-probe)" \
+  npm run test:integration
 ```
+
+Build both executables with
+`direnv exec . bash test/cabal.sh build agentic-run routing-fixed-point-probe`
+from the repository root before the integration gate. Its configured `/wf`
+cases use the native frontend and the local ACP fixture to check exact held
+approval, private file and multiline bindings, cancellation, restoration, and
+honest routing and model failures. They never use a paid provider.
 
 Ordinary tests clear inherited `AGENT_CAT_MANAGER_PROFILE` and
 `AGENT_CAT_MANAGER_PROFILES`, so they do not select the operator's live

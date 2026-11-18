@@ -1,13 +1,15 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type, type Static } from "typebox";
 import { discoverRunner, readHelp, readRouting, supportsRoutingInspection } from "./catalogue.ts";
 import { configuredManagerProfiles, configuredRemote, configuredRunners, retentionPolicy, stateDirectory, testHooksEnabled } from "./config.ts";
 import { CurrentSessionBridge } from "./current-bridge.ts";
+import { prepareRoutedLaunch } from "./frontend.ts";
 import { assertNoCredentialArgs, prepareLaunch, preflightLineage, previewPlan, type LineageEdit, type PreparedLaunch } from "./launch.ts";
-import { formatControl, formatMonitor } from "./monitor.ts";
+import { formatLocalResult, readLocalResult, resultHeading, saveLocalResult, shownResultText } from "./local-result.ts";
+import { formatControl, formatMonitor, resultSummary } from "./monitor.ts";
 import { WorkflowMonitorComponent } from "./monitor-ui.ts";
 import { pickWorkflow } from "./workflow-picker.ts";
 import { openRemotePi } from "./pi-remote-runtime.mjs";
@@ -26,6 +28,7 @@ export type ExtensionHooks = { readonly manager?: SessionOptions };
 
 export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHooks = {}): void {
   const supervisor = new RunSupervisor();
+  const preparations = new Set<AbortController>();
   let lastContext: ExtensionContext | undefined;
   let service: ServiceMode | undefined;
   const requests = new ManagerRequests(() => service);
@@ -41,6 +44,39 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     commandTable.push({ name, description: options.description ?? "" });
     pi.registerCommand(name, options);
   };
+  /**
+   * The results that this Pi process has read and verified, by run: the text
+   * to show, or the reason that there is none. A transcript entry holds only
+   * the reference of a result. Its renderer shows the text from this map, so
+   * the value stays on screen with the entry and is never written to the
+   * session file. Each text has at most LOCAL_RESULT_DISPLAY_LIMIT
+   * characters and one more line, and the map keeps the 100 most recent.
+   */
+  const localResults = new Map<string, { text: string } | { failure: string }>();
+  const rememberResult = (runId: string, loaded: { text: string } | { failure: string }) => {
+    localResults.delete(runId);
+    localResults.set(runId, loaded);
+    for (const oldest of localResults.keys()) {
+      if (localResults.size <= 100) break;
+      localResults.delete(oldest);
+    }
+  };
+  const loadLocalResult = async (storeDir: string, snapshot: RunSnapshot): Promise<void> => {
+    if (!snapshot.result) return;
+    try {
+      const result = await readLocalResult(storeDir, snapshot.runId, snapshot.result);
+      rememberResult(snapshot.runId, { text: shownResultText(snapshot.runId, result) });
+    } catch (error) {
+      rememberResult(snapshot.runId, { failure: error instanceof Error ? error.message : String(error) });
+    }
+  };
+  /** The lines that show the loaded result of a run under an entry of it. */
+  const loadedResultLines = (runId: string, theme: Theme): string[] => {
+    const loaded = localResults.get(runId);
+    if (loaded && "text" in loaded) return ["", loaded.text];
+    if (loaded) return [theme.fg("error", `The result could not be read and verified, and is not shown: ${loaded.failure}`)];
+    return [`/wf-result ${runId} shows the verified result`];
+  };
   const supervise = (prepared: PreparedLaunch, ctx: ExtensionContext, workflow: string) => {
     const run = supervisor.start(prepared);
     let recorded = false;
@@ -48,10 +84,33 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
       updateWidget(ctx, supervisor, service);
       if (!recorded && ["succeeded", "failed", "cancelled", "orphaned"].includes(snapshot.status)) {
         recorded = true;
-        pi.appendEntry("agent-cat-run", {
+        const reference = snapshot.status === "succeeded" ? snapshot.result : undefined;
+        const record = () => pi.appendEntry("agent-cat-run", {
           runId: snapshot.runId, status: snapshot.status, workflow: snapshot.workflow ?? workflow,
           billFresh: snapshot.billFresh, billMemo: snapshot.billMemo, failureClass: snapshot.failureClass, failure: snapshot.failure,
           storeDir: prepared.storeDir, parentRunId: prepared.manifest.parentRunId, lineage: prepared.manifest.lineage,
+          // The entry holds the reference of the result and nothing of its
+          // value, not even the preview of the terminal event.
+          ...(reference ? { result: { bytes: reference.bytes, sha256: reference.sha256, code: reference.code } } : {}),
+        });
+        if (!reference) return void record();
+        // A succeeded run shows its verified result with its entry. The
+        // result is read and verified before the entry is appended, so the
+        // first rendering of the entry already has it. Outside the TUI no
+        // entry is rendered, and one notification shows the result instead.
+        void loadLocalResult(prepared.storeDir, snapshot).then(() => {
+          record();
+          if (ctx.mode === "tui") return;
+          const loaded = localResults.get(snapshot.runId);
+          if (loaded && "text" in loaded) {
+            ctx.ui.notify([...resultHeading(snapshot.runId, snapshot.workflow ?? workflow, reference), "", loaded.text].join("\n"), "info");
+          } else if (loaded) {
+            ctx.ui.notify(`The result of run ${snapshot.runId} could not be read and verified, and is not shown: ${loaded.failure}`, "error");
+          }
+        }).catch(() => {
+          // Pi refuses the entry and the context of a session that was
+          // replaced while the result was read. The run and its result stay
+          // in the run store, and /wf-result shows the result.
         });
       }
     });
@@ -85,7 +144,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
       return refuse("Lineage operations require a terminal or orphaned parent run");
     }
     const selected = (await discover(ctx)).find(
-      ({ runner, descriptor }) => runner.id === parent.manifest.runnerId && descriptor.name === parent.manifest.workflow,
+      ({ runner, descriptor }) => runner.id === (parent.manifest.invocation?.runnerAlias ?? parent.manifest.runnerId) && descriptor.name === parent.manifest.workflow,
     );
     if (!selected) return refuse("The parent workflow runner is no longer configured");
     let inputs = model?.inputs;
@@ -137,7 +196,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
     return supervise(prepared, ctx, selected.descriptor.name);
   };
 
-  pi.registerEntryRenderer<{ runId: string; status: string; workflow?: string; billFresh?: string; billMemo?: string; failureClass?: string; failure?: string; storeDir?: string; parentRunId?: string; lineage?: string }>("agent-cat-run", (entry, _options, theme) => {
+  pi.registerEntryRenderer<{ runId: string; status: string; workflow?: string; billFresh?: string; billMemo?: string; failureClass?: string; failure?: string; storeDir?: string; parentRunId?: string; lineage?: string; result?: { bytes: string; sha256: string; code: unknown } }>("agent-cat-run", (entry, _options, theme) => {
     const data = entry.data;
     const lines = [
       theme.fg(data?.status === "succeeded" ? "success" : data?.status === "failed" ? "error" : "muted", `agent-cat ${data?.runId}: ${data?.status} ${data?.workflow ?? ""}`),
@@ -145,8 +204,19 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
       data?.failure ? `failure ${data.failureClass ?? "unknown"}: ${data.failure}` : undefined,
       data?.lineage ? `${data.lineage} of ${data.parentRunId}` : undefined,
       data?.storeDir ? `run store: ${data.storeDir}` : undefined,
+      data?.result ? resultSummary(data.result) : undefined,
     ].filter((line): line is string => Boolean(line));
+    // The value comes from the results this process verified, never from the
+    // entry. An entry of an earlier Pi process names the command instead.
+    if (data?.result) lines.push(...loadedResultLines(data.runId, theme));
     return new Text(lines.join("\n"), 0, 0);
+  });
+  // The entry that /wf-result appends in the TUI. Like the entry of a run it
+  // holds a reference only, and shows the value this process verified.
+  pi.registerEntryRenderer<{ runId: string; workflow?: string; result: { bytes: string; sha256: string; code: unknown } }>("agent-cat-result", (entry, _options, theme) => {
+    const data = entry.data;
+    if (!data?.result) return new Text("agent-cat: a result entry without a reference", 0, 0);
+    return new Text([...resultHeading(data.runId, data.workflow, data.result), ...loadedResultLines(data.runId, theme)].join("\n"), 0, 0);
   });
 
   pi.on("session_start", async (_event, ctx) => {
@@ -201,13 +271,14 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
   pi.on("session_shutdown", async () => {
     // Closing service mode closes the manager transport and sends no
     // command, so every manager run continues under manager supervision.
+    for (const preparation of preparations) preparation.abort();
     await service?.close();
     await supervisor.shutdown();
     await currentBridge.close();
   });
 
   registerCommand("wf", {
-    description: "Run an agent-cat workflow in the current Agent Deck session",
+    description: "Run an agent-cat workflow using its configured persona or the current Agent Deck session",
     getArgumentCompletions: async (prefix) => {
       if (!lastContext) return null;
       const catalogue = await discover(lastContext);
@@ -241,10 +312,30 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
       catch (error) { return ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"); }
       const inputs = await collectInputs(ctx, selected.descriptor, supplied);
       if (!inputs) return;
+      const personas = selected.runner.workflowPersonas;
+      const persona = personas && Object.hasOwn(personas, selected.descriptor.name) ? personas[selected.descriptor.name] : undefined;
+      const timeouts = selected.runner.workflowTimeoutMs;
+      const timeoutMs = timeouts && Object.hasOwn(timeouts, selected.descriptor.name) ? timeouts[selected.descriptor.name] : undefined;
+      if (persona !== undefined) {
+        const controller = new AbortController();
+        preparations.add(controller);
+        try {
+          const held = await prepareRoutedLaunch({ ...selected, cwd: ctx.cwd, stateDir: stateDirectory(), inputs, persona, timeoutMs, signal: controller.signal });
+          try {
+            if (await ctx.ui.confirm("Launch prepared agent-cat workflow?", held.review)) {
+              controller.signal.throwIfAborted();
+              supervise(held.prepared, ctx, selected.descriptor.name);
+            }
+          } finally { await held.discard(); }
+        } catch (error) {
+          ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        } finally { preparations.delete(controller); }
+        return;
+      }
       const sourceSummary = Object.entries(supplied).map(([name, value]) => `${name}=${Buffer.byteLength(value)}B`).join(", ") || "none";
       if (!(await ctx.ui.confirm(
         "Launch agent-cat workflow?",
-        `workflow=${selected.runner.id}:${selected.descriptor.name}\nrunner=${selected.runner.executable}\ncwd=${ctx.cwd}\ntarget=current Agent Deck session (${sessionId}); external pane/workspace, not sandboxed\nprebound inputs=${sourceSummary}\neffects=${selected.descriptor.capabilities.effects ?? "unknown"}\nmay call a paid model; persistence=private full prompts/answers plus input hashes`,
+        `workflow=${selected.runner.id}:${selected.descriptor.name}\nrunner=${selected.runner.executable}\ncwd=${ctx.cwd}\ntarget=current Agent Deck session (${sessionId}); external pane/workspace, not sandboxed\nprebound inputs=${sourceSummary}\neffects=${selected.descriptor.capabilities.effects ?? "unknown"}${timeoutMs === undefined ? "" : `\nconsultation timeout=${timeoutMs}ms`}\nmay call a paid model; persistence=private full prompts/answers plus input hashes`,
       ))) return;
       const prepared = await prepareLaunch({
         runner: selected.runner,
@@ -253,7 +344,7 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
         stateDir: stateDirectory(),
         inputs,
         targetKind: "deck",
-        targetArgs: ["--session", sessionId],
+        targetArgs: ["--session", sessionId, ...(timeoutMs === undefined ? [] : ["--timeout", String(timeoutMs)])],
       });
       supervise(prepared, ctx, selected.descriptor.name);
     },
@@ -584,6 +675,47 @@ export default function agentCatExtension(pi: ExtensionAPI, hooks: ExtensionHook
         unsubscribe = run.subscribe((snapshot) => component.update(snapshot));
         return component;
       });
+    },
+  });
+
+  registerCommand("wf-result", {
+    description: "Show the verified result of a succeeded local run, or save it to a new file",
+    handler: async (args, ctx) => {
+      const trimmed = args.trim();
+      let runId = trimmed.split(/\s+/, 1)[0] ?? "";
+      const named = trimmed.slice(runId.length).trim();
+      if (!runId) {
+        if (!ctx.hasUI) return ctx.ui.notify("Usage: /wf-result RUN_ID [PATH]", "warning");
+        const succeeded = supervisor.snapshots().filter((snapshot) => snapshot.status === "succeeded" && snapshot.result).reverse();
+        if (succeeded.length === 0) return ctx.ui.notify("No local run has a result", "info");
+        const selected = await ctx.ui.select("Run whose result to show", succeeded.map((snapshot) => `${snapshot.runId}  ${snapshot.workflow ?? "workflow"}  ${snapshot.result!.bytes} bytes`));
+        if (!selected) return;
+        runId = selected.split(/\s+/, 1)[0];
+      }
+      const run = supervisor.get(runId);
+      if (!run) return ctx.ui.notify(`Unknown run ${runId}`, "error");
+      const snapshot = run.snapshot;
+      if (snapshot.status !== "succeeded") return ctx.ui.notify(`Run ${runId} is ${snapshot.status} and has no result.`, "warning");
+      if (!snapshot.result) return ctx.ui.notify(`Run ${runId} succeeded without a result artifact: its runner speaks protocol version 1, which names none.`, "warning");
+      let result;
+      try {
+        result = await readLocalResult(run.storeDir, runId, snapshot.result);
+      } catch (error) {
+        return ctx.ui.notify(`The result of run ${runId} could not be read and verified, and is not shown: ${error instanceof Error ? error.message : String(error)}`, "error");
+      }
+      if (!named) {
+        // A notification in the TUI is one status line that the next one
+        // replaces, so the TUI gets an entry, which stays in the transcript.
+        if (ctx.mode !== "tui") return ctx.ui.notify(formatLocalResult({ runId, workflow: snapshot.workflow, reference: snapshot.result, result }), "info");
+        rememberResult(runId, { text: shownResultText(runId, result) });
+        pi.appendEntry("agent-cat-result", { runId, workflow: snapshot.workflow, result: { bytes: snapshot.result.bytes, sha256: snapshot.result.sha256, code: snapshot.result.code } });
+        return;
+      }
+      const path = resolve(ctx.cwd, named);
+      const saved = await saveLocalResult(path, result.text);
+      if (!saved.saved) return ctx.ui.notify(`The result of run ${runId} was not saved to ${path}: ${saved.reason}. Nothing was written there.`, "error");
+      const leftover = saved.leftover === null ? "" : ` The private file ${saved.leftover} could not be removed.`;
+      ctx.ui.notify(`Saved the verified result of run ${runId} to ${path}: ${saved.bytes} bytes of text. The artifact has ${snapshot.result.bytes} bytes, SHA-256 ${snapshot.result.sha256}.${leftover}`, "info");
     },
   });
 

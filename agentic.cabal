@@ -86,6 +86,7 @@ extra-source-files:
   manager/test/supervision/check.py
   manager/test/supervision/case.py
   manager/test/supervision/fixture.py
+  manager/test/supervision/orphan.py
   manager/test/worker_evidence.py
   manager/test/draft_contract.py
   manager/test/command_contract.py
@@ -376,7 +377,7 @@ executable policy-probe
   import:          settings
   hs-source-dirs:  cli/test
   main-is:         PolicyProbe.hs
-  other-modules:   SurfaceRefusals
+  other-modules:   SurfaceRefusals AmendmentProbe
   build-depends:
     , agentic
     , agentic:bisim-support

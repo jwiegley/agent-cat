@@ -32,6 +32,34 @@ describe("trusted extension configuration", () => {
     expect(() => configuredRunners("/work", { AGENT_CAT_RUNNER: "/one", AGENT_CAT_RUNNERS: "[]" })).toThrow("not both");
   });
 
+  it("selects native personas only for explicitly configured workflow names", () => {
+    const entry = { id: "wf", executable: "/trusted/wf", workflowPersonas: { "translate-en": "sacred-text" } };
+    const [runner] = configuredRunners("/work", { AGENT_CAT_RUNNERS: JSON.stringify([entry]) });
+    expect(runner.workflowPersonas).toEqual({ "translate-en": "sacred-text" });
+    expect(runner.workflowPersonas?.["translate-ar"]).toBeUndefined();
+    expect(configuredRunners("/work", { AGENT_CAT_RUNNER: "/trusted/wf" })[0].workflowPersonas).toBeUndefined();
+  });
+
+  it("sets consultation timeouts only for explicitly configured workflow names", () => {
+    const entry = { id: "wf", executable: "/trusted/wf", workflowTimeoutMs: { "translate-en": 7_200_000 } };
+    const [runner] = configuredRunners("/work", { AGENT_CAT_RUNNERS: JSON.stringify([entry]) });
+    expect(runner.workflowTimeoutMs).toEqual({ "translate-en": 7_200_000 });
+    expect(runner.workflowTimeoutMs?.["translate-ar"]).toBeUndefined();
+    expect(configuredRunners("/work", { AGENT_CAT_RUNNER: "/trusted/wf" })[0].workflowTimeoutMs).toBeUndefined();
+  });
+
+  it.each([[], null, "timeout", { workflow: 0 }, { workflow: -1 }, { workflow: 1.5 }, { workflow: "7200000" }, { workflow: true }, { workflow: 9007199254740992 }, { "": 1000 }, { "bad\nname": 1000 }].map((value) => ({ value })))(
+    "refuses malformed workflow timeout mappings $value", ({ value: workflowTimeoutMs }) => {
+      expect(() => configuredRunners("/work", { AGENT_CAT_RUNNERS: JSON.stringify([{ id: "wf", executable: "/trusted/wf", workflowTimeoutMs }]) })).toThrow("workflowTimeoutMs must map");
+    },
+  );
+
+  it.each([[], null, "persona", { workflow: "" }, { workflow: 3 }, { "": "persona" }, { "bad\nname": "persona" }, { workflow: "bad\rname" }].map((value) => ({ value })))(
+    "refuses malformed workflow persona mappings $value instead of using the Deck default", ({ value: workflowPersonas }) => {
+      expect(() => configuredRunners("/work", { AGENT_CAT_RUNNERS: JSON.stringify([{ id: "wf", executable: "/trusted/wf", workflowPersonas }]) })).toThrow("workflowPersonas must map");
+    },
+  );
+
   it("selects service mode only from explicit absolute manager profiles", () => {
     expect(configuredManagerProfiles({})).toEqual({ kind: "local" });
     expect(configuredManagerProfiles({ AGENT_CAT_RUNNER: "/trusted/runner", AGENT_CAT_PI_REMOTE_SOCKET: "/private/socket" })).toEqual({ kind: "local" });

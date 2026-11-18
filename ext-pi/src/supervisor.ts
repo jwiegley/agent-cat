@@ -267,11 +267,14 @@ export class OwnedRun {
   }
 
   start(): void {
-    this.#queueOwnerHeartbeat();
-    this.#leaseTimer = setInterval(() => this.#queueOwnerHeartbeat(), 2_000);
-    this.#leaseTimer.unref();
+    const frontend = this.#prepared.frontend;
+    if (!frontend) {
+      this.#queueOwnerHeartbeat();
+      this.#leaseTimer = setInterval(() => this.#queueOwnerHeartbeat(), 2_000);
+      this.#leaseTimer.unref();
+    }
     if (this.#child) throw new Error("run already started");
-    const spawned = spawn(this.#prepared.command, this.#prepared.args, {
+    const spawned = frontend?.child ?? spawn(this.#prepared.command, this.#prepared.args, {
       cwd: this.#prepared.manifest.cwd,
       env: this.#prepared.env,
       shell: false,
@@ -296,10 +299,25 @@ export class OwnedRun {
         source.pipe(child.stdin);
       } else child.stdin.end();
     }
+    if (frontend) {
+      child.stdout.once("data", () => {
+        this.#queueStderr(frontend.stderr);
+        this.#stderrQueue = this.#stderrQueue.then(() => { this.#stderrDropping = frontend.stderrDropping; });
+        child.stderr.resume();
+      });
+      child.once("exit", () => child.stderr.resume());
+    }
     child.stdout.on("data", (chunk: string) => this.#consume(chunk));
     child.stderr.on("data", (chunk: string) => this.#queueStderr(chunk));
     child.on("error", (error) => this.#fail(`spawn failed: ${error.message}`));
     child.on("close", (code, signal) => void this.#closed(code, signal));
+    if (frontend) {
+      try { frontend.approve(); child.stdout.resume(); }
+      catch (error) {
+        this.#fail(error instanceof Error ? error.message : String(error));
+        void this.#closed(child.exitCode, child.signalCode);
+      }
+    }
   }
 
   async cancel(reason = "cancelled by operator"): Promise<void> {
@@ -420,13 +438,13 @@ export class OwnedRun {
       await this.#stderrQueue;
       await this.#eventMirrorQueue;
       if (this.#snapshot.status === "succeeded" && this.#snapshot.result) {
-        await verifyResultArtifact(this.#prepared.storeDir, this.#snapshot.runId, this.#snapshot.result);
+        await readVerifiedResult(this.#prepared.storeDir, this.#snapshot.runId, this.#snapshot.result);
       }
       if (this.#leaseTimer) clearInterval(this.#leaseTimer);
       await this.#leaseQueue;
       await rm(join(this.#prepared.storeDir, "owner.json"), { force: true });
       await this.#persistSnapshot();
-      await rm(join(this.#prepared.storeDir, "inputs"), { recursive: true, force: true });
+      if (!this.#prepared.frontend) await rm(join(this.#prepared.storeDir, "inputs"), { recursive: true, force: true });
     } catch (error) {
       this.#snapshot = { ...this.#snapshot, status: "failed", failure: `persistence failure: ${error instanceof Error ? error.message : String(error)}` };
       this.#notify();
@@ -744,11 +762,12 @@ export function parseLaunchManifest(value: unknown): LaunchManifest {
   const object = record(value, "supervisor manifest");
   const versioned = object.frontendManifestVersion !== undefined;
   if (versioned) {
-    if (object.frontendManifestVersion !== 2) throw new Error("unsupported frontend manifest version");
+    if (object.frontendManifestVersion !== 2 && object.frontendManifestVersion !== 3) throw new Error("unsupported frontend manifest version");
     onlyKeys(object, [
       "frontendManifestVersion", "runId", "runnerId", "runnerExecutable", "runnerVersion", "workflow", "cwd",
       "targetKind", "targetArgs", "inputHashes", "programHash", "createdAt", "parentRunId", "lineage", "lineageEdits",
       "persona", "policyDigest", "personAnswering", "ownerId", "runtimeStore",
+      ...(object.frontendManifestVersion === 3 ? ["invocation"] : []),
     ], "frontend manifest");
   }
   const hashes = record(object.inputHashes, "inputHashes");
@@ -795,9 +814,22 @@ export function parseLaunchManifest(value: unknown): LaunchManifest {
   if (object.runtimeStore !== "runtime") throw new Error("runtimeStore is invalid");
   const persona = optionalText(object.persona, "persona");
   const policyDigest = optionalText(object.policyDigest, "policyDigest");
-  if (policyDigest !== undefined && !digest(policyDigest)) throw new Error("policyDigest is invalid");
+  if (policyDigest !== undefined && !/^(?:sha256:)?[0-9a-f]{64}$/.test(policyDigest)) throw new Error("policyDigest is invalid");
+  let invocation: LaunchManifest["invocation"];
+  if (object.frontendManifestVersion === 3) {
+    const entry = record(object.invocation, "frontend invocation");
+    onlyKeys(entry, ["version", "runnerAlias", "executable", "prefixArgs"], "frontend invocation");
+    const runnerAlias = string(entry.runnerAlias, "runnerAlias");
+    const executable = string(entry.executable, "invocation executable");
+    const prefixArgs = stringArray(entry.prefixArgs, "prefixArgs");
+    if (entry.version !== 1 || !runnerAlias.trim() || Buffer.byteLength(runnerAlias) > 256 || runnerAlias.includes("\0")
+      || !executable.trim() || Buffer.byteLength(executable) > 4096 || executable.includes("\0")
+      || prefixArgs.length > 4096 || prefixArgs.some((value) => value.includes("\0"))
+      || prefixArgs.reduce((bytes, value) => bytes + Buffer.byteLength(value), 0) > 65536) throw new Error("frontend invocation is invalid");
+    invocation = { version: 1, runnerAlias, executable, prefixArgs };
+  }
   return {
-    ...base, frontendManifestVersion: 2, runnerExecutable, runnerVersion: string(object.runnerVersion, "runnerVersion"),
+    ...base, frontendManifestVersion: object.frontendManifestVersion === 3 ? 3 : 2, invocation, runnerExecutable, runnerVersion: string(object.runnerVersion, "runnerVersion"),
     persona, policyDigest, personAnswering, ownerId: string(object.ownerId, "ownerId"), runtimeStore: "runtime",
   };
 }
@@ -920,7 +952,7 @@ async function readTextBounded(path: string, maximum: number): Promise<string> {
 }
 
 async function verifySnapshotResult(storeDir: string, runId: string, snapshot: RunSnapshot): Promise<void> {
-  if (snapshot.status === "succeeded" && snapshot.result) await verifyResultArtifact(storeDir, runId, snapshot.result);
+  if (snapshot.status === "succeeded" && snapshot.result) await readVerifiedResult(storeDir, runId, snapshot.result);
 }
 
 function jsonHasOuterWhitespace(value: string): boolean {
@@ -937,7 +969,14 @@ function jsonHasOuterWhitespace(value: string): boolean {
   return false;
 }
 
-async function verifyResultArtifact(storeDir: string, runId: string, reference: NonNullable<RunSnapshot["result"]>): Promise<void> {
+/**
+ * The result of a succeeded run, read from `runtime/result.json` of its run
+ * store and returned only when the artifact agrees with the reference of the
+ * terminal event: the byte count, the SHA-256, the canonical compact form,
+ * the run identifier and the result code. Any disagreement throws, so a
+ * caller never holds the result of an artifact that failed these checks.
+ */
+export async function readVerifiedResult(storeDir: string, runId: string, reference: NonNullable<RunSnapshot["result"]>): Promise<{ code: unknown; value: unknown; valueJson: string }> {
   const expectedBytes = BigInt(reference.bytes);
   const path = await confinedPath(storeDir, ["runtime", "result.json"]);
   const bytes = await readBytesBounded(path, MAX_SNAPSHOT_FILE);
@@ -956,6 +995,9 @@ async function verifyResultArtifact(storeDir: string, runId: string, reference: 
   const resultEntries = compactObjectEntries(entries[1][1]);
   if (JSON.stringify(resultEntries.map(([key]) => key)) !== JSON.stringify(["code", "value"])) throw new Error("result artifact payload has non-canonical, unknown, or missing fields");
   if (resultEntries[0][1] !== JSON.stringify(reference.code) || JSON.stringify(result.code) !== JSON.stringify(reference.code)) throw new Error("result artifact code does not canonically match its event");
+  // `valueJson` is the value exactly as the artifact spells it. `value` is
+  // its JSON.parse, which rounds a number outside the double range.
+  return { code: result.code, value: result.value, valueJson: resultEntries[1][1] };
 }
 
 function compactObjectEntries(value: string): Array<[string, string]> {

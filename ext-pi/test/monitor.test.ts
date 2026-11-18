@@ -41,6 +41,21 @@ function snapshot(): RunSnapshot {
 }
 
 describe("monitor model", () => {
+  it("names the verified result of a succeeded run and the command that shows it", () => {
+    const succeeded: RunSnapshot = {
+      ...snapshot(), status: "succeeded",
+      result: { artifactVersion: 1, path: "result.json", sha256: "ab".repeat(32), bytes: "652", code: "text", preview: "O people of the world!" },
+    };
+    const rendered = formatMonitor(succeeded).split("\n");
+    expect(rendered[1]).toBe(`result: 652 bytes, SHA-256 ${"ab".repeat(32)}, code "text"`);
+    expect(rendered[2]).toBe(`/wf-result ${succeeded.runId} shows the verified result`);
+    // The monitor text also answers the model-facing inspect action, so it
+    // carries nothing of the value, not even the preview.
+    expect(formatMonitor(succeeded)).not.toContain("O people");
+    expect(formatMonitor({ ...succeeded, status: "failed" })).not.toContain("/wf-result");
+    expect(formatMonitor(snapshot())).not.toContain("result:");
+  });
+
   it("shows the target and the stopped attempt of a live re-route", () => {
     const events = readFileSync(new URL("../../test/fixtures/runtime/protocol-v1/live-redirected.ndjson", import.meta.url), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line) as RuntimeEvent);

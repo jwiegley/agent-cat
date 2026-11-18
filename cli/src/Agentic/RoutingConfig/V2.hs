@@ -137,6 +137,7 @@ data EngineDefinition = EngineDefinition
   { engineBackend :: !Backend,
     engineProvider :: !Text,
     engineEnvironment :: !(Map Text EnvironmentBinding),
+    engineSessionMetadata :: !(Map Text Value),
     engineCatalogue :: !(Maybe Catalogue),
     -- | Present exactly when the backend is a decisions backend.
     engineEndpoint :: !(Maybe Endpoint)
@@ -212,6 +213,9 @@ data SelectedRoutingV2 = SelectedRoutingV2
   deriving (Eq, Show)
 
 maxCatalogueBytes, maxCatalogueUrlBytes, maxCatalogueQueryBytes, maxCatalogueQueryItems, maxCatalogueTimeoutMs, maxCatalogueHeaders, maxCatalogueHeaderValueBytes, maxCatalogueHeaderBytes, maxCataloguePages, maxCatalogueModels, maxModelIdBytes :: Int
+
+-- | The bounds on a decisions endpoint's @timeout-ms@ and @max-bytes@.
+maxEndpointTimeoutMs, maxEndpointBytes :: Int
 maxCatalogueBytes = 4 * 1024 * 1024
 maxCatalogueUrlBytes = 8192
 maxCatalogueQueryBytes = 4096
@@ -223,9 +227,6 @@ maxCatalogueHeaderBytes = 61440
 maxCataloguePages = 100
 maxCatalogueModels = 10000
 maxModelIdBytes = 512
-
--- | The bounds on a decisions endpoint's @timeout-ms@ and @max-bytes@.
-maxEndpointTimeoutMs, maxEndpointBytes :: Int
 maxEndpointTimeoutMs = 600000
 maxEndpointBytes = 4 * 1024 * 1024
 
@@ -309,14 +310,15 @@ instance FromJSON Endpoint where
 
 instance FromJSON EngineDefinition where
   parseJSON = withObject "engine" $ \o -> do
-    onlyKeys "engine" ["backend", "provider", "environment", "catalogue", "endpoint"] o
+    onlyKeys "engine" ["backend", "provider", "environment", "session-meta", "catalogue", "endpoint"] o
     backendText <- nonBlank "engine backend" =<< o .: "backend"
     backend <- either (fail . T.unpack) pure (parseConfiguredBackend backendText)
     provider <- nonBlank "engine provider" =<< o .: "provider"
     environment <- fromMaybe Map.empty <$> o .:? "environment"
+    sessionMetadata <- maybe (pure Map.empty) parseJSON (KeyMap.lookup "session-meta" o)
     catalogue <- o .:? "catalogue"
     endpoint <- o .:? "endpoint"
-    pure (EngineDefinition backend provider environment catalogue endpoint)
+    pure (EngineDefinition backend provider environment sessionMetadata catalogue endpoint)
 
 instance FromJSON ModelOrder where
   parseJSON value = do
@@ -449,7 +451,9 @@ validateRoutingV2 config@RoutingConfigV2 {..} = do
 validateEngine :: Map Text SecretReference -> Text -> EngineDefinition -> Either Text ()
 validateEngine secrets name EngineDefinition {..} = do
   case engineBackend of
-    BackendDeck _ -> unless (Map.null engineEnvironment) (Left ("deck engine '" <> name <> "' cannot declare child environment bindings"))
+    BackendDeck _ -> do
+      unless (Map.null engineEnvironment) (Left ("deck engine '" <> name <> "' cannot declare child environment bindings"))
+      unless (Map.null engineSessionMetadata) (Left ("deck engine '" <> name <> "' cannot declare ACP session metadata"))
     _ -> pure ()
   case engineBackend of
     BackendDecisions _ -> do
@@ -469,10 +473,18 @@ validateEngine secrets name EngineDefinition {..} = do
         unless (secret `Map.member` secrets) (Left ("engine '" <> name <> "' names unknown secret '" <> secret <> "'"))
       EnvironmentValue _ ->
         when (sensitiveName variable) (Left ("engine '" <> name <> "' environment variable '" <> variable <> "' must use a secret reference"))
+  forM_ (Map.toList engineSessionMetadata) (uncurry publicMetadata)
   forM_ engineCatalogue $ \catalogue ->
     forM_ (catalogueAuth catalogue) $ \auth ->
       unless (catalogueAuthSecret auth `Map.member` secrets) $
         Left ("engine '" <> name <> "' catalogue names unknown secret '" <> catalogueAuthSecret auth <> "'")
+  where
+    publicMetadata path (String _) =
+      when (sensitiveName path) (Left ("engine '" <> name <> "' session-meta field '" <> path <> "' may carry a secret"))
+    publicMetadata path (Object fields) =
+      forM_ (KeyMap.toList fields) $ \(key, value) -> publicMetadata (path <> "." <> Key.toText key) value
+    publicMetadata path (Array values) = mapM_ (publicMetadata path) values
+    publicMetadata _ _ = pure ()
 
 
 validateConcreteModel :: Map Text EngineDefinition -> Text -> ConcreteModel -> Either Text ()

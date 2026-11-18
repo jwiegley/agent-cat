@@ -72,6 +72,42 @@ Acceptance: the unused functions and derived instances are removed, and the Werr
 
 Found by the live run on 2026-08-14 (workflow w5sz6gul7, live stage). SYMPTOM: in the REFUSING run (owner answered no, transcript has six turns and no 'tool apply' line, bill 6) the scratch parse.c was nevertheless replaced with the hardened 823-byte version (seed is 323 bytes, md5 f18314ef... -> 8e856c16...). Timestamps place the write inside the AUTHOR's draft turn (dir birth 12:03:34, file birth 12:04:08, author turn spans ~12:03:49-12:04:23), and it is a birth not a modification: write-and-rename, the signature of an editing tool. CAUSE: Agentic/Core/Acp.lean:271 'permission : Permission := .grant' is a single connection-wide policy that nothing sets; pickAllow answers allow_once to every session/request_permission regardless of the question's Code. To the permission layer, 'ask text model author' and 'act tool apply' are the same thing, so the program's ask/act distinction and the case ok { no -> done } consent branch are unenforceable against a live agent. Harden.no_ack_of_refused still holds — it is about acknowledgements, not bytes — which is exactly the point: there is no theorem and no runtime check saying 'a refused run leaves the workspace as it found it'. FIX (two parts): (1) make the permission decision a function of the QUESTION, not of the connection: grant only for the act (.ack), deny for every ask, and document the known consequence of denial (the turn completes with prose in place of an act, ~97k tokens, no protocol signal); thread the current question through Exec into Acp; log each decision in the transcript. (2) Add the empirical counterpart of the consent theorem: fingerprint the workspace before and after a run, report changes, and fail the run when no act was performed and the workspace changed. Cover both with stub tests. ALSO from the same run, separate issues: the adapter substituted claude-opus-4-8 (not in its advertised catalogue) after claude-fable-5 declined on policy grounds, reporting it only as prose inside the answer — so Conn.configValues is not a complete account of what may answer; and all three reviewers approved a draft that was a policy-refusal banner plus prose plus a fenced diff rather than 'a unified diff only'.
 
+* DONE [#C] Retain ownership of Cabal setup descendants after audit build timeout
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-0bgh
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-10-27 Tue 13:31]
+:MODIFIED: [2026-10-30 Fri 13:15]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-30 Fri 13:15]
+:CLOSE_REASON: Private-session/WNOWAIT cleanup before original reap; real orphan regression red/green, original assertions preserved, four supervision cases and package boundary pass. Fresh audit still times out1200s but records group signal before reap and no matching compiler in follow-up. Full policy gate remains failed; no release waiver.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/Products/translate-tool-routing-20261023/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+During Hera verification, manager/test/admission_audit.py reached its 1200-second compilation deadline, sent SIGINT to its original Cabal child and recorded original-child-joined with returncode -2. The Cabal act-as-setup descendant and its GHC child continued under PPID 1. Exact audit working-directory/build-directory arguments and compiler parent metadata proved ownership; the verifier terminated only those owned descendants and confirmed absence. No production workflow cancellation defect was observed. Keep this a separate CI-harness ownership issue; do not relax behavioral assertions or deadlines. A regression should exercise original-child exit while a setup descendant remains and prove complete owned cleanup or an explicit unproven outcome.
+
+2026-10-30: John explicitly approved the audit-only cleanup/regression scope. Each audit command starts a private session; original cooperative SIGINT and unbounded cleanup join remain. WNOWAIT reserves original PID until one remaining-group signal is attempted before the original handle is reaped; delivery failure or an already-reaped original is explicitly unproven. The original successful/timeout/repeated-interruption behavioral assertions are all preserved. The real exiting-driver/live-worker regression fails on the old helper with descendant survived driver cleanup, releases its own negative-control worker through a lifetime pipe, and passes with the fix. Final supervision4/4 and positive Cabal package boundary passed. Fresh approval-live-mutant.ehonspvw still exceeded unchanged1200s before N1/N8 assertions; its failed result honestly records original-child-joined/-2, owned-group-signalled-before-reap and no signal/wait failure. Follow-up found no matching recognized compiler for that case. This closes the cleanup defect, not the remaining build-performance/aggregate gate gap. macOS refusal on a zombie-only group remains unproven, never fabricated success. No production runtime, model policy, deadline, mutation assertion or source-capture requirement changed.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-0bgh",
+    "depends_on_id": "acat-zz72",
+    "type": "discovered-from",
+    "created_at": "2026-10-27T20:31:03.359168Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#C] Add source-aware args and stdin workflow inputs
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -89,6 +125,24 @@ Found by the live run on 2026-08-14 (workflow w5sz6gul7, live stage). SYMPTOM: i
 :END:
 
 Implement approved source-aware input design: command-tail args, literal standard input, separate machine controls, multiline /wf binding, regressions, docs, and Nix integration evidence. Design approved 2026-09-02 in Pi goal mtkjiqtl-25777e.
+
+* DONE [#C] Configure scoped workflow consultation timeouts in Pi
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-0fr9
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-11-03 Tue 10:34]
+:MODIFIED: [2026-11-03 Tue 10:59]
+:CREATED_BY: johnw
+:FINISHED: [2026-11-03 Tue 10:59]
+:CLOSE_REASON: Implemented strict workflowTimeoutMs configuration and native --timeout/policy propagation without changing ACP/defaults. Typecheck,260 unit tests,23 native integration tests,remote-current and24 ACP scenarios passed with declared Node22.23.3. Runtime publication/deployment and real7200s translation acceptance remain tracked by the parent goal.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/Products/translate-tool-routing-20261023/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Operator confirmed7200s for translate-en consultations. Extend the existing workflow-specific runner policy to pass a positive millisecond timeout through native preparation and the existing CLI --timeout/ACP boundary. Preserve global900s defaults, exact model/low/routing/tools/guards, frozen approvals and lineage. Add strict configuration/default-isolation and native propagation regressions. No new runtime or UI surface.
 
 * TODO [#D] Resolve the non-blocking fess findings of subtask PG3
 :PROPERTIES:
@@ -2374,6 +2428,33 @@ Source: fess audit /Users/johnw/Products/agent-cat-workflow-manager/implementati
 ]
 #+end_src
 
+* DONE [#C] Derive the ext-pi host release from the linked Pi packages and accept the range >=1.4.0 <2.0.0
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-6k0k
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-11-04 Wed 00:14]
+:MODIFIED: [2026-11-04 Wed 11:15]
+:CREATED_BY: johnw
+:FINISHED: [2026-11-04 Wed 00:14]
+:CLOSE_REASON: Implemented by the commit that records this issue. With Node 22.23.3 and ext-pi/node_modules linked as nix-config's agent-cat-pi-extension links it, npm run check, npm test (277 passed, 19 of them in host-versions.test.ts) and npm run test:integration (25 passed, then the remote check) pass against the built fork at 1.4.0 and at 1.5.0. Real-host controls: the unmodified 1.5.0 host passes, and a pi-tui link into the 1.4.0 fork, an extra pi-mcp link, and coherent fork copies at 2.0.0, 1.3.0 and 1.5.0-rc.1 each fail with the one expected finding. make -C doc check passes.
+:EXTERNAL_REF: nix-mp63
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /private/tmp/claude-501/-Users-johnw-src-sys-nix/39f84810-4d33-416e-a30d-3766b7d36938/scratchpad/upd/jobs/acatwiden/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+John decided on 2026-11-03 (nix-config issue nix-mp63, "Widen agent-cat's host check") that agent-cat declares a range of supported Pi fork releases, so that a fork bump inside the range needs no lockstep host port. Until now ext-pi/test/host-versions.test.ts named one exact release for the four linked host packages and for pi-agent-core. The Pi 1.4.0 bump therefore needed the agent-cat port ae2576e6, a matching move of the agent-cat that agent-workflows locks, and a joint move of the nix-config pins. For Pi 1.5.0, nix-config added packages/agent-cat-pi-1.5-host.patch, which rewrites only the version table of the test at build time.
+
+The check reads the host release from the package.json of the linked pi-coding-agent. Each other linked host package and pi-agent-core must report that release, and the release must be a plain x.y.z in SUPPORTED_PI_RELEASES = { from: "1.4.0", before: "2.0.0" }, which ext-pi/README.md states as `>=1.4.0 <2.0.0`. The four linked package names, the exact registry set, the single packages directory, the Node matrix (22.23.3 and 22.23.4) and the exact TypeScript and vitest versions stay as they are. A nix-config pin of this revision needs neither agent-cat-node-releases.patch nor agent-cat-pi-1.5-host.patch, and nix-mp63 tracks that adoption.
+
+Acceptance: the pure tests accept coherent hosts at 1.4.0, 1.5.0 and 1.99.0 and reject 1.3.0, 2.0.0, 1.5.0-rc.1, a mixed pi-tui, a mismatched pi-agent-core, a pi-tui or a pi-agent-core at 1.5.1 under pi-coding-agent 1.5.0, an unlisted pi-mcp link, a missing pi-telemetry, a missing pi-coding-agent and a registry Chord at 1.5.0. The real-host test passes on the built fork at 1.4.0 and at 1.5.0, and real-host negative controls fail.
+
+** Notes
+
+Review follow-up to a8d84a8b, the commit that recorded this issue. Every mismatch case of host-versions.test.ts differed from the host release at the minor version, so a check that compared only the major and minor numbers would have passed all 19 host tests and accepted a pi-tui or a pi-agent-core at 1.5.1 under pi-coding-agent 1.5.0. The next commit changes only that test and this record. It adds those two cases, each with its one exact finding, to the test that requires every host package at the release of pi-coding-agent, and the unchanged check passes them. A copy of the check that compares only major and minor passes the test file of a8d84a8b and fails the new one in that test alone, at pi-tui 1.5.1. Copies that weaken only the linked packages or only the fork package fail it at pi-tui 1.5.1 and at pi-agent-core 1.5.1 respectively, and both pass the old file. With Node 22.23.3, npm run check, npm test (277 passed, 19 of them in host-versions.test.ts) and npm run test:integration (25 passed, then the remote check) pass against the built fork at 1.4.0 and at 1.5.0, and they also pass with Node 22.23.4 on the 1.5.0 host. The real-host negative controls fail with their expected findings, and make -C doc check passes.
+
 * TODO [#D] Test key-outcome retention with the real App view value
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -2605,6 +2686,32 @@ Non-blocking findings of the fess review of Phase B subtask B1 (report fess/b1-B
 3. manager/test/CommandCheck.hs flowLatencyChecks: the synchronized-append series re-appends the recorded bodies to a separate writer outside the Store. State this in the STORAGE.md latency paragraph, and say that the admission series includes the in-path append.
 4. doc/workflow-manager-handoff.md: the growth paragraph says "At L minus R" without defining L or R. Write "the configured ceiling minus the cancel reserve (L minus R)".
 5. runtime/src/Agentic/Runtime/Flow.hs:901-908: openFlowLog refusals changed to the typed FlowOpenRefusal, and runtime-contract-test was not run. Run it once at the next gate, or add a runtime FlowTests case for the oversized and undecodable refusals.
+
+* DOING [#C] Carry public ACP session metadata through routed engines
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-7h6k
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-10-29 Thu 12:34]
+:MODIFIED: [2026-10-29 Thu 18:38]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/Products/translate-tool-routing-20261023/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The approved sacred-text run23671 passed strict terminology brief validation, then the draft transport hit the oMLX prefill memory guard after an unnecessary tool continuation. The generated draft prompt is12228 UTF8 bytes. The installed Claude ACP adapter supports a real empty toolset in session/new _meta.claudeCode.options.tools, but native ACP currently sends only cwd and mcpServers. Add the smallest optional public session-meta object to physical ACP engine definitions and AcpConfig. Send it exactly on every fresh and preflight session. Empty defaults preserve existing request bytes, inspection and fingerprints. Nonempty metadata participates in execution fingerprints and sanitized inspection. Reject metadata for deck engines and invalid value shapes. Preserve strict model selection, secret refusal, native approval and all memory safety controls. Add decoder, fingerprint, CLI propagation and stub protocol tests. No custom ACP wrapper, model substitution, prompt truncation, memory-guard weakening or paid live gate is part of this implementation.
+
+** Notes
+
+The optional public metadata implementation is present in the native ACP engine, routed CLI configuration, execution fingerprint and sanitized inspection. Empty metadata preserves the old request shape and execution identity. Native and independent documentation decoders retain strict object validation and recursive credential-shaped string refusal.
+
+Verified source evidence includes the full warning-free Cabal build, routing configuration gate, all 24 ACP transport scenarios, all 10 Deck scenarios, all 10 example programs, both documentation gates, the native policy probe, Pi type checking, 248 Pi unit tests and 22 model-free Pi integration tests plus the remote-protocol check. The ACP scenario checks metadata on preflight and fresh sessions, exact inspection and changed approval fingerprints, while all legacy scenarios require omitted metadata. Registry-installed Pi dependencies were the wrong host setup and were replaced with the documented fork-linked dependencies and supported Node 22.23.3. The rejected registry copy and failed probes remain in private evidence.
+
+Verification remains incomplete. The complete policies script failed its isolated audit build deadline of 1200 seconds. The original child was joined and returned zero only during cleanup after TimeoutExpired, which remains a failure. A controlled isolated repeat with compiler parallelism four instead of eight also exceeded the unchanged deadline. Earlier aggregate-supervisor expiries are retained as separate failures. No deadline, assertion, optimization setting, memory safety control, strict JSON validator or model routing was weakened. Full policies are not green.
+
+This issue remains in progress. The source checkpoint is not a publication, deployment, paid model trial or proof that tools-empty sessions resolve the live oMLX guard. The approved translation run remains recovery-pending with one failed draft attempt and no completed translation. Scoped production tools metadata, coherent package pins and genuine file/pasted-text acceptance remain to be verified.
 
 * DONE [#E] Frag.meet: complete the grade lattice
 :PROPERTIES:
@@ -5544,6 +5651,24 @@ The refocus note says to add no new evidence tooling. The 2026-09-29 closeout us
 ]
 #+end_src
 
+* DONE [#C] Test timeout-policy refusal and held-worker cleanup
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-cn0b
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-11-03 Tue 13:22]
+:MODIFIED: [2026-11-03 Tue 13:42]
+:CREATED_BY: johnw
+:FINISHED: [2026-11-03 Tue 13:42]
+:CLOSE_REASON: Added both native prepared-reply timeout refusal and cleanup cases. Both pass on unchanged 0c production; deleting only the guard fails both, then byte-exact restoration verified. Typecheck,260 unit/45 optional skips and25 integration plus remote-current pass against fresh local native fixtures, no real model calls.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/Products/translate-tool-routing-20261023/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Cover the nonblocking Nix B17 review finding on runtime 0c43190. Add missing and 900000ms prepared-policy timeout variants while requesting 7200000ms. Assert exact refusal, no native run directory, matching discard and held-worker exit. Use the deterministic local fixture frontend, with no paid model or new SDK/cancellation policy. Prove the guard-deletion mutant fails, restore production bytes, and pass owning typecheck/unit/integration gates against fresh native fixtures. Publish a test-only followup without silently retargeting immutable B17 pins.
+
 * DONE [#C] The manager admission check fails as UnreadableConfiguration when its work directory path runs through a symlink
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -8051,6 +8176,24 @@ Full failure/capacity evidence, operational procedures, reproducible packages, r
 ]
 #+end_src
 
+* DONE [#C] Assert documented local-admin notices without weakening JSON or credential checks
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-g5km
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-22 Thu 18:50]
+:MODIFIED: [2026-10-22 Thu 19:53]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-22 Thu 19:53]
+:CLOSE_REASON: Exact documented notices asserted; manager/ci/commands.sh passed N1/N8, frozen response/credential checks, opacity checks, and authorization audit.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/work/translation/translate-tool/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+credential_cli.py still required empty stderr although OPERATIONS.md and Cli.LocalAdmin deliberately emit exact actionable operator notices. Keep frozen stdout/exit checks and assert only the documented exact notices at the affected refusals. No production CLI changes.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PG5
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -8293,6 +8436,37 @@ cli/test/PolicyProbe.hs:2701 requires parseCommand collidingRegistry ["--tui", "
     "depends_on_id": "acat-yu5u",
     "type": "discovered-from",
     "created_at": "2026-10-07T00:00:12.856787Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
+* TODO [#C] ext-pi shows result and answer text in the TUI without removing terminal escape sequences
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-h055
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-11-17 Tue 23:26]
+:MODIFIED: [2026-11-17 Tue 23:26]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+Found by the audit of the fix for acat-pwqe. The agent-cat-run and agent-cat-result entry renderers in ext-pi/src/index.ts put the verified result text raw into a pi-tui Text, which keeps ANSI codes; the monitor already shows occurrence answers the same way. A model-written result can carry escape sequences, OSC included. Not verified: whether pi-tui strips OSC before the terminal. Wanted: decide one sanitising rule for model-written text shown by the extension and test it.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-h055",
+    "depends_on_id": "acat-pwqe",
+    "type": "discovered-from",
+    "created_at": "2026-11-18T07:26:43.137936Z",
     "created_by": "johnw",
     "metadata": "{}",
     "thread_id": ""
@@ -10166,6 +10340,37 @@ The readiness audit found that ext-pi ordinary tests inherit the live manager pr
 ]
 #+end_src
 
+* TODO [#C] ext-pi integration tests do not check the shown local result, and ran against a runner built from 5ead6b89
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ksfv
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-11-17 Tue 23:26]
+:MODIFIED: [2026-11-17 Tue 23:26]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+Found by the audit of the fix for acat-pwqe. test/wf-routing-e2e.test.ts registers a no-op entry renderer and checks only status, so the result display is tested only against the JS fixture, which writes result.json before it emits the terminal event. The Haskell order was read (writeResultArtifact returns the reference of the bytes it wrote), not tested. Also untested: the refusal for a protocol version 1 run, and the entry line and RPC notification when the automatic read fails. Wanted: an integration assertion on the rendered result with a freshly built agentic-run, as ext-pi/AGENTS.md requires, and unit tests for the two refusals.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-ksfv",
+    "depends_on_id": "acat-pwqe",
+    "type": "discovered-from",
+    "created_at": "2026-11-18T07:26:43.643085Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * TODO [#C] Resolve PC4 fess findings in orphaned-ask replies and lost-run pruning    :review:
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -11212,6 +11417,24 @@ validated pass (P1, attribution corrected by the pass itself). example/harden.wf
   }
 ]
 #+end_src
+
+* DONE [#C] Keep captured audit builds inside their standalone Cabal package
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ni7g
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-10-22 Thu 17:36]
+:MODIFIED: [2026-10-22 Thu 19:53]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-22 Thu 19:53]
+:CLOSE_REASON: Captured standalone Cabal project verified by real restore-interruption N1/N8 and the subsequent policy run progressing past store audits.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/work/translation/translate-tool/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The restore-interruption audit inherited the enclosing checkout cabal.project and compiled uninstrumented original modules. Evidence: dist-newstyle/audit-restore-interruption.ny_rfqvd/build.log and N1.log. Give the captured package an explicit local project and verify the real interruption rendezvous at N1/N8. No manager production behavior change.
 
 * DONE [#D] msSmul semimodule laws, so panels compose with gating
 :PROPERTIES:
@@ -15916,6 +16139,37 @@ A2 fess finding (low). tui/src/Agentic/Tui/ServiceLane.hs lines 6-8 and 69-70 sa
   }
 ]
 #+end_src
+
+* DONE [#B] Pi shows nothing of a succeeded local /wf run's result
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pwqe
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-11-17 Tue 22:57]
+:MODIFIED: [2026-11-17 Tue 23:18]
+:CREATED_BY: johnw
+:FINISHED: [2026-11-17 Tue 23:18]
+:CLOSE_REASON: Fixed in ext-pi: a succeeded local run shows its verified result with its transcript entry (value from memory, reference only in the session file), /wf-result shows or saves it; npm run check, npm test (285 pass, the one failure is the pre-existing host-versions test) and npm run test:integration (25 pass).
+:SOURCE_REPO: agent-cat-pi-result
+:SOURCE_REPO_PATH: /Users/johnw/Products/agent-cat-pi-result
+:ORIGINAL_SIZE: 0
+:END:
+
+A local `/wf` run that succeeds shows the operator nothing of its result.
+
+Observed 2026-11-17 on Hera with the deployed extension (agent-cat 5ead6b89, ext-pi): `/wf wf:translate-en` with pasted text ran natively under the `sacred-text` persona, run `native-72577-1160832893792000`, 55 consultations, and ended `succeeded`. The session received one `agent-cat-run` entry (`agent-cat RUN_ID: succeeded translate-en`, the bill, `run store: DIR`) and nothing else. The verified result — the translation and its quality notes — was in `DIR/runtime/result.json` the whole time, and the operator concluded the run had produced nothing.
+
+Cause, read in `ext-pi/src`: `supervise` in `index.ts` appends the status entry on a terminal snapshot and never reads the result; `formatMonitor`/`MonitorModel` in `monitor.ts` render no result line; the only result command, `/wfm-result`, is service mode's and reads the manager, not a local run store. `verifyResultArtifact` in `supervisor.ts` already verifies the artifact against the terminal event (bytes, SHA-256, canonical form, run id, code) and discards what it parsed.
+
+Wanted:
+1. When a local run succeeds with a result, the operator sees it in the session without a further command: the verified result text (bounded, with the rest named), headed by the run and workflow. It is shown through the UI, not sent to the model.
+2. `/wf-result [RUN_ID [PATH]]`: show the verified result of a succeeded local run, live or restored after a Pi restart; with PATH, save its exact value to a new file with mode 0600, refusing an existing path, as `/wfm-result` does for service runs.
+3. The `agent-cat-run` entry and the monitor name the result (code, bytes, SHA-256, preview) and the command that shows it. The entry keeps a reference, never the payload.
+4. A result whose artifact fails verification is never shown; the refusal says why.
+5. `ext-pi/README.md` documents the behaviour and the command; the bare `/wf-help` table lists it.
+
+Not in scope: the model-facing `agent_cat_workflow` tool (a local `result` action would put result bytes in the transcript; service mode's `manager-result` deliberately saves to a path instead), and a `--scratch` for `/wf` runs.
 
 * TODO [#D] Address fess findings of C3 manager-log pruning
 :PROPERTIES:
@@ -28117,6 +28371,24 @@ is ready, not that an operator has deployed it.
 ]
 #+end_src
 
+* DONE [#C] Expose typed RHS amendments on the workflow authoring surface
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-wnxm
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-22 Thu 15:10]
+:MODIFIED: [2026-10-23 Fri 12:16]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-23 Fri 12:16]
+:CLOSE_REASON: Full cli/ci/policies.sh completed with exit 0 in policy-v5 after focused artifact/history N1/N8 checks; amendment, mutation, schema, control, lineage, and frontend checks passed. No production manager change.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/work/translation/translate-tool/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+The builder and raw grammar already accept a function call as a bounded revision amendment. Expose that existing composition without changing semantics. Verify multi-question function execution, settlement and exhaustion, then run owning gates.
+
 * DONE [#C] An effect can run before an earlier read of what it changes
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -28544,6 +28816,24 @@ Update manual and generated indexes together; make -C doc check and make -C doc 
 ]
 #+end_src
 
+* DONE [#C] Refresh audit mutations for shared decision checks and tagged Store boundaries
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ym69
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-10-22 Thu 21:42]
+:MODIFIED: [2026-10-23 Fri 12:16]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-23 Fri 12:16]
+:CLOSE_REASON: Full cli/ci/policies.sh completed with exit 0 in policy-v5 after focused artifact/history N1/N8 checks; amendment, mutation, schema, control, lineage, and frontend checks passed. No production manager change.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/work/translation/translate-tool/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Anchor-only preflight found five stale modes after existing refactors: FIFO and reservation checks moved into decisionHeadRefusal, tickets now retain outsideRequest store, and ingestion uses a tagged refuseBusyTransaction. Update only test mutations, preserve intended defects and failure markers, and compile/run all affected modes plus policy gate. No production changes.
+
 * TODO [#D] Resolve the non-blocking fess findings of subtask PD21
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -28802,4 +29092,43 @@ HIGH (validated, machine-checked): at Cost with mA=d=fin 0, mB=fin 3, all of fin
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
 :END:
+
+* DONE [#C] Support workflow-specific native routing in Pi /wf
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-zz72
+:LABELS:   []
+:ISSUE_TYPE: feature
+:CREATED:  [2026-10-26 Mon 09:29]
+:MODIFIED: [2026-10-27 Tue 13:31]
+:CREATED_BY: johnw
+:FINISHED: [2026-10-27 Tue 13:31]
+:CLOSE_REASON: Implemented and verified workflow-specific held native preparation in Pi /wf; unchanged Deck defaults, exact approval/binding, honest failures, cancellation and native-parent lineage covered; owning component gates and direct fess complete.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/Products/translate-tool-routing-20261023/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Add explicit runner workflow-to-persona selection while preserving unconfigured current Agent Deck execution. Reuse native routing and live frontend preparation for exact approval and frozen targets. Keep private file/multiline binding, failure/cancel visibility, source-hidden ACP back-translation, and existing controls. Deterministic extension/native integration tests and docs are required; no paid model in extension tests.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 816,
+    "issue_id": "acat-zz72",
+    "author": "johnw",
+    "text": "Hera implementation is complete in the Products clone: workflowPersonas selects native held preparation and preserves unconfigured Deck launches. Type check, 248 unit tests, all 22 native integration cases, then all 13 strengthened native routing cases (including actual cancel event and native-parent resume) passed. Original CLI: 7 non-live tests passed; helper: 36 passed; authoritative assets match. Documentation, 10 examples, routing-config, 23 ACP and 10 Deck scenarios passed. Complete policy first refused the caller because CABAL_BUILDDIR was absent; no test assertion was changed. A configured-root policy-only retry is active. Issue remains in progress until that gate and final fess closure. No publication/deployment or paid translation yet.",
+    "created_at": "2026-10-26T18:48:55Z"
+  },
+  {
+    "id": 817,
+    "issue_id": "acat-zz72",
+    "author": "johnw",
+    "text": "Final direct fess and abstraction review found no unresolved routing implementation defect. Type check, 248 unit tests, 22 native integrations, remote transport, and 13 strengthened native routing cases passed. Docs, 10 examples, routing configuration, 23 ACP and 10 Deck scenarios passed. Complete policy coverage is assembled from source-identical component runs: all 684 captured files match; every one of 13 control modes passed at N1/N8; the unchanged remaining policy suffix exits 0, including artifact/history, schema, lineage, controls, frontend IO/session/export/codecs and refusal probes. Original invocation and cold-build timeout failures remain recorded. A standard per-run Cabal -j8 compiler configuration resolved cold compilation limits without changing -Werror, optimization, source capture, or test/build deadlines. Separate audit descendant-cleanup limitation recorded as discovered work. No paid translation or deployment claimed.",
+    "created_at": "2026-10-27T20:31:04Z"
+  }
+]
+#+end_src
 

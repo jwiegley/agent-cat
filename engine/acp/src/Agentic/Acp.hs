@@ -438,6 +438,8 @@ data AcpConfig = AcpConfig
     -- @session\/new@ is told, and therefore the only place an act is authorized
     -- to write.
     acpCwd :: !FilePath,
+    -- | Public adapter extension metadata sent with every @session\/new@.
+    acpSessionMetadata :: !(Map Text Value),
     -- | Milliseconds one request may take in total, after which the child is
     -- killed and 'AcpTimedOut' names the question. @0@ or less is unbounded.
     acpTurnTimeoutMs :: !Int,
@@ -466,6 +468,7 @@ defaultAcpConfig argv =
       acpFallbackProgram = Nothing,
       acpLiteralArguments = False,
       acpCwd = ".",
+      acpSessionMetadata = Map.empty,
       acpTurnTimeoutMs = 900000,
       acpFreshPerQuestion = True,
       acpChildEnvironment = inheritChildEnvironment,
@@ -1460,12 +1463,16 @@ handshake acp = do
 newSession :: Acp -> IO Text
 newSession acp = do
   dir <- canonicalizePath (acpCwd (acpConfig acp))
+  let metadata = acpSessionMetadata (acpConfig acp)
   res <-
     request
       acp
       "a new session"
       "session/new"
-      (object ["cwd" .= dir, "mcpServers" .= ([] :: [Value])])
+      ( object $
+          ["cwd" .= dir, "mcpServers" .= ([] :: [Value])]
+            <> ["_meta" .= metadata | not (Map.null metadata)]
+      )
       (const (pure ()))
       False
   case field "sessionId" res >>= textOf of

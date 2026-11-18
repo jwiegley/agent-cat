@@ -169,6 +169,8 @@ APOLOGY = (
 )
 
 ARGV = sys.argv[1:]
+EXPECTED_SESSION_META = next((json.loads(arg.split("=", 1)[1]) for arg in ARGV
+                              if arg.startswith("--expect-session-meta=")), None)
 # Test-owned rendezvous at a real prompt request, before its real response.
 PROMPT_BARRIER = next((Path(arg.split("=", 1)[1]) for arg in ARGV
                        if arg.startswith("--prompt-barrier=")), None)
@@ -789,6 +791,12 @@ def main():
             })
         elif method == "session/new":
             note("cwd " + str(params.get("cwd")))
+            if ((EXPECTED_SESSION_META is None and "_meta" in params)
+                    or params.get("_meta") != EXPECTED_SESSION_META):
+                error(rid, -32602, "session metadata does not match the fixture")
+                continue
+            if EXPECTED_SESSION_META is not None:
+                note("session-meta matched")
             if DELAYED_PERMISSION_ID is not None:
                 reply = read_message()
                 outcome = ((reply or {}).get("result") or {}).get("outcome") or {}

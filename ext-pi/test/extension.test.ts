@@ -28,6 +28,7 @@ describe("Pi extension lifecycle", () => {
     delete process.env.AGENT_CAT_RUNNER;
     process.env.AGENT_CAT_RUNNERS = JSON.stringify(["agent-cat", "wf"].map((id) => ({
       id, executable: resolve("test/fixtures/runner.mjs"),
+      ...(id === "wf" ? { workflowTimeoutMs: { fixture: 7_200_000 } } : {}),
     })));
     process.env.AGENT_CAT_STATE_DIR = join(directory, "state");
     process.env.AGENTDECK_INSTANCE_ID = "current-deck-session";
@@ -36,8 +37,11 @@ describe("Pi extension lifecycle", () => {
       const events = new Map<string, Array<(event: unknown, ctx: unknown) => Promise<unknown>>>();
       const entries: Array<{ type: string; data: unknown }> = [];
       const widgets: unknown[] = [];
+      const notices: string[] = [];
+      const renderers = new Map<string, (entry: { data: unknown }, options: unknown, theme: unknown) => Component>();
+      const rendered = (entry: { type: string; data: unknown }) => renderers.get(entry.type)!(entry, {}, { fg: (_color: string, value: string) => value }).render(400).map((line) => line.trimEnd());
       const pi = {
-        registerEntryRenderer: () => {},
+        registerEntryRenderer: (type: string, renderer: never) => renderers.set(type, renderer),
         registerCommand: (name: string, command: unknown) => commands.set(name, command as never),
         registerTool: () => {},
         on: (name: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => events.set(name, [...(events.get(name) ?? []), handler]),
@@ -54,7 +58,7 @@ describe("Pi extension lifecycle", () => {
         select: () => { throw new Error("TUI workflow selection must be searchable"); },
         editor: async () => { inputCount += 1; return "subject"; },
         confirm: async (_title: string, message: string) => { confirmations.push(message); return approve; },
-        notify: () => {},
+        notify: (message: string) => { notices.push(message); },
         setWidget: (_id: string, value: unknown) => widgets.push(value),
         setStatus: () => {},
         custom: async <T>(factory: (tui: unknown, theme: unknown, bindings: unknown, done: (value: T) => void) => unknown) => {
@@ -84,6 +88,7 @@ describe("Pi extension lifecycle", () => {
       expect(inputCount).toBe(1);
       expect(confirmations).toHaveLength(1);
       expect(confirmations[0]).toContain("workflow=wf:fixture");
+      expect(confirmations[0]).toContain("consultation timeout=7200000ms");
       await expect(access(join(directory, "state", "runs"))).rejects.toMatchObject({ code: "ENOENT" });
 
       approve = true;
@@ -93,6 +98,7 @@ describe("Pi extension lifecycle", () => {
       await until(() => entries.length === 2);
       expect(workflowSelections).toBe(3);
       expect(confirmations[2]).toContain("workflow=agent-cat:fixture");
+      expect(confirmations[2]).not.toContain("consultation timeout=");
       for (const entry of entries) {
         expect(entry).toEqual({ type: "agent-cat-run", data: expect.objectContaining({ status: "succeeded", billFresh: "1", billMemo: "1", storeDir: expect.stringContaining("/runs/") }) });
       }
@@ -101,10 +107,48 @@ describe("Pi extension lifecycle", () => {
       const runnerIds: string[] = [];
       for (const runId of runIds) {
         const manifest = JSON.parse(await readFile(join(directory, "state", "runs", runId, "supervisor-manifest.json"), "utf8"));
-        expect(manifest).toMatchObject({ targetKind: "deck", targetArgs: ["--session", "current-deck-session"] });
+        expect(manifest).toMatchObject({ targetKind: "deck", targetArgs: ["--session", "current-deck-session", ...(manifest.runnerId === "wf" ? ["--timeout", "7200000"] : [])] });
         runnerIds.push(manifest.runnerId);
       }
       expect(runnerIds.sort()).toEqual(["agent-cat", "wf"]);
+      // A succeeded run names its verified result in the session entry by
+      // reference only. The entry of the run shows the result in the TUI,
+      // where a notification would be replaced by the next one.
+      for (const entry of entries) {
+        const data = entry.data as { runId: string; result: Record<string, unknown> };
+        expect(data.result).toEqual({ bytes: expect.stringMatching(/^[0-9]+$/), sha256: expect.stringMatching(/^[0-9a-f]{64}$/), code: "receipt" });
+        const lines = rendered(entry);
+        expect(lines[0]).toBe(`agent-cat ${data.runId}: succeeded fixture`);
+        expect(lines.slice(-3)).toEqual([expect.stringMatching(/^result: [0-9]+ bytes, SHA-256 [0-9a-f]{64}, code "receipt"$/), "", "done"]);
+      }
+      expect(notices.filter((notice) => notice.includes("result of"))).toEqual([]);
+      // /wf-result shows the same verified result again in an entry of its
+      // own, and saves it exactly.
+      const before = notices.length;
+      await commands.get("wf-result")!.handler(runIds[0], ctx);
+      expect(notices.slice(before)).toEqual([]);
+      expect(entries).toHaveLength(3);
+      expect(entries[2]).toEqual({ type: "agent-cat-result", data: { runId: runIds[0], workflow: "fixture", result: { bytes: expect.any(String), sha256: expect.any(String), code: "receipt" } } });
+      expect(rendered(entries[2])).toEqual([`agent-cat ${runIds[0]}: result of fixture`, expect.stringMatching(/^verified [0-9]+ bytes, SHA-256 [0-9a-f]{64}, code "receipt"$/), "", "done"]);
+      const saved = join(directory, "saved-result.txt");
+      await commands.get("wf-result")!.handler(`${runIds[0]} ${saved}`, ctx);
+      expect(await readFile(saved, "utf8")).toBe("done");
+      expect((await stat(saved)).mode & 0o777).toBe(0o600);
+      expect(notices.at(-1)).toMatch(new RegExp(`^Saved the verified result of run ${runIds[0]} to ${saved}: 4 bytes of text\\. The artifact has [0-9]+ bytes, SHA-256 [0-9a-f]{64}\\.$`));
+      await commands.get("wf-result")!.handler(`${runIds[0]} ${saved}`, ctx);
+      expect(notices.at(-1)).toBe(`The result of run ${runIds[0]} was not saved to ${saved}: a file already exists there. Nothing was written there.`);
+      expect(await readFile(saved, "utf8")).toBe("done");
+      // A relative path is resolved against the working directory of Pi.
+      await commands.get("wf-result")!.handler(`${runIds[0]} relative-result.txt`, ctx);
+      expect(await readFile(join(directory, "relative-result.txt"), "utf8")).toBe("done");
+      await commands.get("wf-result")!.handler("no-such-run", ctx);
+      expect(notices.at(-1)).toBe("Unknown run no-such-run");
+      // A result whose artifact no longer verifies is refused, never shown.
+      await writeFile(join(directory, "state", "runs", runIds[1], "runtime", "result.json"), "tampered\n");
+      await commands.get("wf-result")!.handler(runIds[1], ctx);
+      expect(notices.at(-1)).toMatch(new RegExp(`^The result of run ${runIds[1]} could not be read and verified, and is not shown: `));
+      expect(notices.at(-1)).not.toContain("tampered");
+      expect(entries).toHaveLength(3);
       expect(widgets.some((value) => typeof value === "function")).toBe(true);
       await until(() => widgets.at(-1) === undefined);
       for (const handler of events.get("session_shutdown") ?? []) await handler({ type: "session_shutdown" }, ctx);
@@ -321,7 +365,7 @@ describe("Pi extension lifecycle", () => {
       const ctx = { hasUI: false, cwd: process.cwd(), mode, ui: { notify: (message: string) => notices.push(message) } };
       expect([...commands.keys()].sort()).toEqual([
         "wf", "wf-cancel", "wf-diff", "wf-fork", "wf-help", "wf-launch", "wf-monitor",
-        "wf-plan", "wf-recover", "wf-redirect", "wf-restart", "wf-resume", "wf-retry", "wf-status", "wf-steer",
+        "wf-plan", "wf-recover", "wf-redirect", "wf-restart", "wf-result", "wf-resume", "wf-retry", "wf-status", "wf-steer",
         "wfm", "wfm-answer", "wfm-cancel", "wfm-discard", "wfm-endpoints", "wfm-export", "wfm-fork", "wfm-history", "wfm-monitor",
         "wfm-redirect", "wfm-restart", "wfm-result", "wfm-resume", "wfm-review", "wfm-status", "wfm-steer", "wfm-withdraw",
       ]);
@@ -515,6 +559,119 @@ describe("Pi extension lifecycle", () => {
       if (previousRunner === undefined) delete process.env.AGENT_CAT_RUNNER; else process.env.AGENT_CAT_RUNNER = previousRunner;
       if (previousRunners === undefined) delete process.env.AGENT_CAT_RUNNERS; else process.env.AGENT_CAT_RUNNERS = previousRunners;
       if (previousState === undefined) delete process.env.AGENT_CAT_STATE_DIR; else process.env.AGENT_CAT_STATE_DIR = previousState;
+    }
+  });
+
+  it("shows a local result once outside the TUI, exactly, and keeps its value out of the transcript", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "agent-cat-extension-result-"));
+    created.push(directory);
+    const saved = Object.fromEntries(["AGENT_CAT_RUNNER", "AGENT_CAT_STATE_DIR", "FIXTURE_LARGE_INTEGER_RESULT", "FIXTURE_HANG"].map((name) => [name, process.env[name]]));
+    process.env.AGENT_CAT_RUNNER = resolve("test/fixtures/runner.mjs");
+    process.env.AGENT_CAT_STATE_DIR = join(directory, "state");
+    // The value is an integer that JSON.parse rounds, and the preview of the
+    // fixture is "done", so the value and the preview are told apart.
+    process.env.FIXTURE_LARGE_INTEGER_RESULT = "1";
+    delete process.env.FIXTURE_HANG;
+    const value = "9007199254740993";
+    type Entry = { type: string; data: any };
+    const instance = (mode: string) => {
+      const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
+      const events = new Map<string, Array<(event: unknown, ctx: unknown) => Promise<unknown>>>();
+      const renderers = new Map<string, (entry: { data: unknown }, options: unknown, theme: unknown) => Component>();
+      const entries: Entry[] = [];
+      const atAppend: string[][] = [];
+      const notices: string[] = [];
+      const offered: string[][] = [];
+      extension({
+        registerEntryRenderer: (type: string, renderer: never) => renderers.set(type, renderer),
+        registerCommand: (name: string, command: unknown) => commands.set(name, command as never),
+        registerTool: () => {}, sendUserMessage: () => {},
+        // Pi renders an entry when it is appended, so each is rendered here.
+        appendEntry: (type: string, data: unknown) => { entries.push({ type, data }); atAppend.push(rendered({ type, data })); },
+        on: (name: string, handler: (event: unknown, ctx: unknown) => Promise<unknown>) => events.set(name, [...(events.get(name) ?? []), handler]),
+        getCommands: () => [...commands.keys()].map((name) => ({ name })),
+      } as never);
+      const ui = {
+        select: async (title: string, options: string[]) => {
+          if (title === "Execution target") return "scripted (offline, no commands)";
+          offered.push(options);
+          return options[0];
+        },
+        editor: async () => "x", confirm: async () => true,
+        notify: (message: string) => notices.push(message), setWidget: () => {}, setStatus: () => {},
+      };
+      const ctx = { cwd: directory, mode, hasUI: true, isProjectTrusted: () => true, ui, isIdle: () => true, abort: () => {}, sessionManager: { getBranch: () => [] } };
+      const rendered = (entry: Entry) => renderers.get(entry.type)!(entry, {}, { fg: (_color: string, text: string) => text }).render(400).map((line) => line.trimEnd());
+      const run = (name: string, args: string) => commands.get(name)!.handler(args, ctx);
+      const each = async (name: string) => { for (const handler of events.get(name) ?? []) await handler({}, ctx); };
+      return { entries, atAppend, notices, offered, rendered, run, each };
+    };
+    const resultNotices = (notices: string[]) => notices.filter((notice) => /: result of /.test(notice));
+    try {
+      const first = instance("rpc");
+      await first.each("session_start");
+      await first.run("wf-launch", "agent-cat:fixture");
+      await until(() => first.entries.length === 1 && resultNotices(first.notices).length === 1);
+      const entry = first.entries[0];
+      const runId: string = entry.data.runId;
+      expect(entry.type).toBe("agent-cat-run");
+      expect(entry.data.result).toEqual({ bytes: expect.stringMatching(/^[0-9]+$/), sha256: expect.stringMatching(/^[0-9a-f]{64}$/), code: "receipt" });
+      expect(JSON.stringify(entry.data)).not.toContain(value);
+      expect(JSON.stringify(entry.data)).not.toContain("preview");
+      expect(resultNotices(first.notices)[0].split("\n")).toEqual([
+        `agent-cat ${runId}: result of fixture`,
+        expect.stringMatching(/^verified [0-9]+ bytes, SHA-256 [0-9a-f]{64}, code "receipt"$/),
+        "", value,
+      ]);
+      // The entry shows the result at the moment it is appended.
+      expect(first.atAppend[0].slice(-2)).toEqual(["", value]);
+      // /wf-result outside the TUI is one notification and no entry.
+      await first.run("wf-result", runId);
+      expect(resultNotices(first.notices)).toHaveLength(2);
+      expect(resultNotices(first.notices)[1]).toBe(resultNotices(first.notices)[0]);
+      expect(first.entries).toHaveLength(1);
+
+      // A run that does not succeed has no result: no notification, a plain
+      // entry, and a refusal from /wf-result.
+      process.env.FIXTURE_HANG = "1";
+      await first.run("wf-launch", "agent-cat:fixture");
+      const hangingRunId = first.notices.findLast((notice) => notice.startsWith("Started "))!.split(" ").at(-1)!;
+      expect(hangingRunId).not.toBe(runId);
+      await first.run("wf-result", hangingRunId);
+      expect(first.notices.at(-1)).toMatch(new RegExp(`^Run ${hangingRunId} is [a-z]+ and has no result\\.$`));
+      await first.run("wf-cancel", hangingRunId);
+      await until(() => first.entries.length === 2);
+      delete process.env.FIXTURE_HANG;
+      expect(first.entries[1].data).toMatchObject({ runId: hangingRunId, status: "cancelled" });
+      expect(first.entries[1].data.result).toBeUndefined();
+      expect(first.rendered(first.entries[1]).join("\n")).not.toMatch(/result:|\/wf-result/);
+      await first.run("wf-result", hangingRunId);
+      expect(first.notices.at(-1)).toBe(`Run ${hangingRunId} is cancelled and has no result.`);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 100));
+      expect(resultNotices(first.notices)).toHaveLength(2);
+      await first.each("session_shutdown");
+
+      // A later Pi process restores the run. Its entry holds no value, so it
+      // names the command, and /wf-result reads the store again. In the TUI
+      // the result is shown in an entry of its own and in no notification.
+      const second = instance("tui");
+      await second.each("session_start");
+      expect(second.rendered(entry).slice(-2)).toEqual([expect.stringMatching(/^result: /), `/wf-result ${runId} shows the verified result`]);
+      expect(second.rendered(entry).join("\n")).not.toContain(value);
+      await second.run("wf-result", "");
+      expect(second.offered).toEqual([[expect.stringMatching(new RegExp(`^${runId}  fixture  [0-9]+ bytes$`))]]);
+      expect(resultNotices(second.notices)).toEqual([]);
+      expect(second.entries).toEqual([{ type: "agent-cat-result", data: { runId, workflow: "fixture", result: entry.data.result } }]);
+      expect(second.atAppend[0].slice(-2)).toEqual(["", value]);
+      expect(second.rendered(entry).slice(-2)).toEqual(["", value]);
+      const path = join(directory, "count.json");
+      await second.run("wf-result", `${runId} ${path}`);
+      expect(await readFile(path, "utf8")).toBe(value);
+      await second.each("session_shutdown");
+    } finally {
+      for (const [name, previous] of Object.entries(saved)) {
+        if (previous === undefined) delete process.env[name]; else process.env[name] = previous;
+      }
     }
   });
 

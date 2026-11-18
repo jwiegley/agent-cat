@@ -96,6 +96,11 @@ describe("catalogue and launch", () => {
     await expect(readRouting({ ...config, prefixArgs: ["--descriptor-v3-unsafe-url"] }, directory)).rejects.toThrow("forbidden field endpointUrl");
   });
 
+  it("honors cancellation of routing inspection", async () => {
+    const { directory, config } = await setup();
+    await expect(readRouting({ ...config, prefixArgs: ["--descriptor-v3"] }, directory, { signal: AbortSignal.abort() })).rejects.toMatchObject({ code: "ABORT_ERR" });
+  });
+
   it.each([
     ["--descriptor-bad-source", "unknown source guessed"],
     ["--descriptor-duplicate", "input subject was listed twice"],

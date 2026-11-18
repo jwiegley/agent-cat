@@ -107,16 +107,19 @@ engineExecutionFingerprint :: RoutingConfigV2 -> Text -> EngineDefinition -> Tex
 engineExecutionFingerprint config alias engine =
   "sha256:" <> T.pack (show (hash bytes :: Digest SHA256))
   where
-    bytes = BL.toStrict . encode . object $
-        [ "engine" .= alias,
-          "backend" .= backendSpelling (engineBackend engine),
-          "provider" .= engineProvider engine,
-          "environment" .=
-            [ object ["name" .= name, "binding" .= bindingValue binding]
-              | (name, binding) <- Map.toAscList (engineEnvironment engine)
-            ]
-        ]
-          <> maybe [] (\endpoint -> ["endpoint" .= endpointValue endpoint]) (engineEndpoint engine)
+    bytes =
+      BL.toStrict . encode $
+        object $
+          [ "engine" .= alias,
+            "backend" .= backendSpelling (engineBackend engine),
+            "provider" .= engineProvider engine,
+            "environment"
+              .= [ object ["name" .= name, "binding" .= bindingValue binding]
+                 | (name, binding) <- Map.toAscList (engineEnvironment engine)
+                 ]
+          ]
+            <> ["session-meta" .= engineSessionMetadata engine | not (Map.null (engineSessionMetadata engine))]
+            <> maybe [] (\endpoint -> ["endpoint" .= endpointValue endpoint]) (engineEndpoint engine)
     -- Every non-secret field of a decisions endpoint, and the secret by name
     -- and source, so that a changed endpoint changes the fingerprint.
     endpointValue :: Endpoint -> Value

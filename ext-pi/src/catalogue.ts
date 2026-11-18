@@ -66,13 +66,13 @@ export function negotiateProtocolVersion(descriptor: WorkflowDescriptor, support
 }
 
 export async function readRouting(
-  config: RunnerConfig, cwd: string, options: { persona?: string; mode?: "offline" | "refresh" } = {},
+  config: RunnerConfig, cwd: string, options: { persona?: string; mode?: "offline" | "refresh"; signal?: AbortSignal } = {},
 ): Promise<RoutingInspection | undefined> {
   const args = ["--routing", "--json"];
   if (options.persona !== undefined) { assertName(options.persona, "persona"); args.push("--persona", options.persona); }
   if (options.mode === "offline") args.push("--offline");
   if (options.mode === "refresh") args.push("--refresh-models");
-  return parseRoutingInspection(config.id, JSON.parse(await invoke(config, args, cwd, 70_000)));
+  return parseRoutingInspection(config.id, JSON.parse(await invoke(config, args, cwd, 70_000, options.signal)));
 }
 
 export async function checkLineage(
@@ -99,10 +99,11 @@ export function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-async function invoke(config: RunnerConfig, args: string[], cwd: string, timeout = TIMEOUT_MS): Promise<string> {
+async function invoke(config: RunnerConfig, args: string[], cwd: string, timeout = TIMEOUT_MS, signal?: AbortSignal): Promise<string> {
   const { stdout } = await execFileAsync(config.executable, [...(config.prefixArgs ?? []), ...args], {
     cwd,
     timeout,
+    signal,
     maxBuffer: MAX_OUTPUT,
     encoding: "utf8",
   });

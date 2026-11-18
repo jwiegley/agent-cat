@@ -71,6 +71,7 @@ play() {
   scenario="$1"; shift
   state="$work/$scenario"
   mkdir -p "$state/config/agent-cat"
+  local executable=agentic-run
   if [ "$scenario" = configured-options ]; then
     cat > "$state/config/agent-cat/routing.yaml" <<'EOF'
 version: 1
@@ -88,11 +89,31 @@ profiles:
         options:
           temperature: 0.25
 EOF
+  elif [ "$scenario" = session-metadata ]; then
+    executable=routing-fixed-point-probe
+    cat > "$state/config/agent-cat/routing.yaml" <<'EOF'
+version: 2
+default-persona: fixture
+engines:
+  fixture:
+    backend: acp:stub
+    provider: fixture
+    session-meta: {claudeCode: {options: {tools: []}}}
+models:
+  fixture-model: {engine: fixture, select: [{exact: stub-default}]}
+personas:
+  fixture:
+    engines: [fixture]
+    models: [fixture-model]
+    profiles:
+      deep:
+        chain: [{model: fixture-model, thinking: high, max-output: unconstrained}]
+EOF
   fi
   out="$state/out"
   stdout="$state/stdout"
   stderr="$state/stderr"
-  XDG_CONFIG_HOME="$state/config" "$shell" test/cabal.sh run -v0 agentic-run -- "$@" --scratch "$state" +RTS -N8 -RTS \
+  XDG_CONFIG_HOME="$state/config" "$shell" test/cabal.sh run -v0 "$executable" -- "$@" --scratch "$state" +RTS -N8 -RTS \
     < /dev/null > "$stdout" 2> "$stderr"
   code=$?
   # Keep process stdout and stderr distinct while they are written. Redirecting
@@ -706,9 +727,53 @@ else
   bad "no permission record from the adapter with the granted answer; stderr was:$(printf '\n  %s' "$(cat "$state/stderr" "$state/flow-stderr" 2>/dev/null)")"
 fi
 
+# ---------------------------------------------------------------------------
+# 24. Public engine metadata reaches both preflight and fresh ACP sessions.
+# ---------------------------------------------------------------------------
+play session-metadata run in-process --routing --offline --persona fixture \
+  --adapter-arg '--expect-session-meta={"claudeCode":{"options":{"tools":[]}}}' --timeout 60000
+want_code 0
+want_bills 2 2
+want_file record.txt
+[ "$(cat "$state/record.txt")" = Paris ] || bad "metadata run did not retain the real stub answer"
+[ "$(grep -c 'session-meta matched' "$out")" -ge 2 ] \
+  || bad "session metadata did not reach both preflight and fresh prompt sessions"
+if python3 - "$state/config/agent-cat/routing.yaml" "$runner" <<'PY'
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+config = Path(sys.argv[1])
+env = dict(os.environ, XDG_CONFIG_HOME=str(config.parent.parent))
+
+
+def inspect():
+    result = subprocess.run([sys.argv[2], "--routing", "--json", "--offline", "--persona", "fixture"],
+                            env=env, capture_output=True, text=True, check=True)
+    return json.loads(result.stdout)
+
+
+configured = inspect()
+assert configured["engines"][0]["session-meta"] == {"claudeCode": {"options": {"tools": []}}}
+original = config.read_text()
+field = 'session-meta: {claudeCode: {options: {tools: []}}}'
+assert field in original
+config.write_text(original.replace(field, 'session-meta: {}'))
+empty = inspect()
+assert "session-meta" not in empty["engines"][0]
+assert configured["launch"]["fingerprint"] != empty["launch"]["fingerprint"]
+PY
+then
+  note "session-metadata: wire, inspection and approval fingerprint verified; legacy metadata omitted"
+else
+  bad "session metadata inspection or launch fingerprint did not preserve its contract"
+fi
+
 scenario=summary
 if [ "$failures" = 0 ]; then
-  echo "ci/acp: 23 scenarios passed, 0 failed"
+  echo "ci/acp: 24 scenarios passed, 0 failed"
 else
   echo "ci/acp: $failures scenario assertion(s) failed" >&2
 fi

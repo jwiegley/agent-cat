@@ -1,3 +1,4 @@
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
@@ -14,6 +15,7 @@ export type PreparedLaunch = {
   command: string;
   args: string[];
   env: NodeJS.ProcessEnv;
+  frontend?: { child: ChildProcessWithoutNullStreams; approve: () => void; stderr: string; stderrDropping: boolean };
 };
 
 export type LineageEdit =
@@ -210,7 +212,7 @@ async function writeForkEdits(directory: string, edits: LineageEdit[]): Promise<
   return args;
 }
 
-function assertExactInputs(expected: string[], actual: Record<string, string>): void {
+export function assertExactInputs(expected: string[], actual: Record<string, string>): void {
   const wanted = [...expected].sort();
   const got = Object.keys(actual).sort();
   if (wanted.length !== got.length || wanted.some((name, index) => name !== got[index])) {
@@ -218,12 +220,12 @@ function assertExactInputs(expected: string[], actual: Record<string, string>): 
   }
 }
 
-async function canonicalExecutable(path: string): Promise<string> {
+export async function canonicalExecutable(path: string): Promise<string> {
   if (!isAbsolute(path)) throw new Error("runner executable must be absolute");
   return realpath(path);
 }
 
-async function allowedCwd(path: string, roots: string[]): Promise<string> {
+export async function allowedCwd(path: string, roots: string[]): Promise<string> {
   const cwd = await realpath(path);
   const allowed = await Promise.all(roots.map((root) => realpath(root)));
   if (!allowed.some((root) => inside(root, cwd))) throw new Error(`cwd is outside configured roots: ${cwd}`);
