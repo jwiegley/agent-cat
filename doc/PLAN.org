@@ -8673,6 +8673,38 @@ Owner question (2026-08-16): the round-17/18 surface converges on Haskell. What 
 
 Found by the connection-research attack pass (acat-lean-haskell-connection-lhi): heardMatchesReplay is decide (r.trace = rep.transcript) where r.trace = r.heard.map (.event) — deliver appends one Heard per SURFACED question and Dlg.resume walks past questions the table already answers, so arrivals are memo-deduped — while rep.transcript = Plan.trace (worldOf table) p Env.nil replays EVERY event including repeats. On a run with any repeated question (billMemo < billFresh), the check is an assertion of falsehood. Repair options: compare heard against the dedup of the replay (respecting Lean dedup keeping the LAST occurrence), or record the intended invariant differently. Add an McpSmoke case with a repeated question to pin whichever is chosen.
 
+* TODO [#C] decide: an unpinned decision cannot reach a decisions engine, and routing-file runs refuse person desks
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-hqnd
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-11-17 Tue 21:23]
+:MODIFIED: [2026-11-17 Tue 21:23]
+:CREATED_BY: johnw
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+A plain `decide (model "x") q evidence` can never reach a decisions engine through a routing file. A question gets a model axis only from `servedBy` (runtime/src/Agentic/Exec.hs near 1546, runtime/src/Agentic/Runtime/Route.hs near 72), and a decisions backend cannot be the default route. A run routed by a routing file alone also refuses person questions (cli/src/Agentic/RequirePinned.hs:106-124). workflow/example/Triage.hs therefore pins its three decisions with `servedBy "triage"` and uses model desks where the design had the persons `on-call` and `triage-desk`. Under the root AGENTS.md rule that a definition an example forces on its author is a library gap, decide what the library should supply: for example a decide form that carries its profile, or routing-file runs that admit person questions. Found by the final fess audit of the decide work (finding L5).
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-hqnd",
+    "depends_on_id": "acat-kj59",
+    "type": "discovered-from",
+    "created_at": "2026-11-18T05:23:38.872797Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#B] Runnable example: corpus-pinned harden in Haskell, IO runner, agent-deck adapter, live run
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -9944,6 +9976,115 @@ Non-blocking findings of fess audit fess/pc-PC27-r1.md (2026-10-01) on subtask P
 7. (low) doc/workflow-manager-handoff.md near line 1035: the handoff still lists "no history, lineage or export" and also denies cancel and steer. Fix: refresh that current-state paragraph when it is next touched.
 
 Disclosed limitations of the implementer: e is offered only when the snapshot shows a verified result; the TUI keeps the outcome of the latest export only and does not list the existing exports of a run; tui/ci/tui.sh, ALLBUILD and the N=1 journey were not run.
+
+* DONE [#B] Wiggum run: decide verb for decision models
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-kj59
+:LABELS:   []
+:ISSUE_TYPE: epic
+:CREATED:  [2026-11-17 Tue 13:14]
+:MODIFIED: [2026-11-17 Tue 21:40]
+:CREATED_BY: johnw
+:FINISHED: [2026-11-17 Tue 21:40]
+:CLOSE_REASON: Completed: 14 commits on ac-decide over e6d0cad; coordinator gate sweeps gates-final.log (15/15 PASS incl. full policies.sh at 5370c10), gates-close.log (16/16 at 62f05ad), gates-last.log (7/7 on the final tree); four independent fess audits with no critical or high finding and every medium fixed; agent-workflows 6429e65. See the final handoff comment.
+:SOURCE_REPO: agent-cat
+:SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
+:ORIGINAL_SIZE: 0
+:END:
+
+Frozen plan for the Wiggum run on branch `ac-decide` (worktree `.worktrees/ac-decide`), started 2026-11-17.
+
+User request, verbatim: "Study Jev as described in https://openrouter.ai/blog/insights/what-is-jev/, and also search the Web for more details on its API, and then I want you to create a workflow and build support for a `decide` verb in agent-cat that allows for return values of the types support by jev: probability vector in a vector space whose basis is a set of input tags; yes/no probabilities; scoring. See the API docs for more details and do some research to find the best Haskell types to use, and the best way to add this into the Haskell DSL."
+
+User addition, verbatim: "Note that Jev isn't the only model that support this kind of "decisions" API. Drex Max, a local model, can support something similar, and also the Decisions API at OpenAI, and others. Search the Web and do your research to find out what is available and how agent-cat can best support it."
+
+Definition of Done:
+1. A research record under `doc/research/` states what the decision APIs are (Jev/TypeSafe, OpenRouter Decisions, OpenAI, Drex and other local models, the rest), with sources, and marks every detail not confirmed from a primary source.
+2. Haskell result types exist for the three result kinds: a probability vector over a caller-supplied tag basis, a yes/no probability, and an ordinal score. Each states its denotation and laws, and the laws are tested.
+3. A `decide` verb exists in the Haskell DSL authoring surface, with an example workflow that contains exactly what a user writes.
+4. A backend-neutral execution path exists: the plan and runtime carry a decision request, the engine API can answer it, a concrete engine speaks the shared `{model,state,questions} -> {answers}` contract, and a deterministic scripted path serves the gates without a paid backend.
+5. The Lean model and the frozen corpus are treated honestly: no theorem is weakened, and any specification change is stated as one and left for John's review.
+6. The manual documents the verb, and `make -C doc check` and `make -C doc check-haskell` report PASS.
+7. `test/cabal.sh build all` and every deterministic gate that owns a changed layer report PASS.
+Child issues are created from the synthesized design when the research-and-design workflow returns.
+
+** Comments
+
+#+begin_src json
+[
+  {
+    "id": 818,
+    "issue_id": "acat-kj59",
+    "author": "johnw",
+    "text": "Handoff 20261117T2115Z. Done: nothing committed. Running: Workflow run wf_4c027f7d-011 (research + codebase map + 3 designs + 3 critiques + synthesis), script at ~/.config/claude/positron/projects/-Users-johnw-src-agent-cat--worktrees-ac-decide/77ac498f-047c-44f4-9ec3-2012f9b98aaf/workflows/scripts/decide-verb-research-design-wf_4c027f7d-011.js; its journal.jsonl is in the sibling subagents/workflows/wf_4c027f7d-011 directory. Next step: read the synthesized design, create child issues, implement. Resume: branch ac-decide, worktree /Users/johnw/src/agent-cat/.worktrees/ac-decide. Wiggum base directory: /Users/johnw/.config/claude/positron/skills/wiggum. Attempt counts: none. Refocus checkpoint: checked 20261117T2115Z; goal as in the description; no scope correction; next step is to wait for the design workflow; next deadline 20261117T2215Z. Sentinel probe: not yet run. Audit range: none yet. Mailbox name ac-decide, store path /nix/store/6wpwhpaqpss4vdqjcij1jrnmngmn28w1-agent-mail-2.4.1/bin/agent-mail. No partner reviewer. No journal. No open questions.\n",
+    "created_at": "2026-11-17T21:14:45Z"
+  },
+  {
+    "id": 819,
+    "issue_id": "acat-kj59",
+    "author": "johnw",
+    "text": "Handoff 20261117T2205Z. Done: workflow wf_4c027f7d-011 finished; its synthesized design is at ~/Products/ac-decide/final.md, the research and codebase dossier at ~/Products/ac-decide/dossier.md, the critiques at ~/Products/ac-decide/critiques.md. Nothing committed. The worktree now has an untracked .envrc and .envrc.cache from `de` (CABAL_BUILDDIR=~/Products/agent-cat/.worktrees/ac-decide/dist). Running: baseline `direnv exec . test/cabal.sh build all`, log ~/Products/ac-decide/baseline-build.log, last line `exit=N`. Next step: after the baseline passes, launch the wave-1 implementation workflow for units A (dsl decision core) and C (engine API) of final.md section 7, then B, D, E, then I and J, K, L. Open questions put to John (do not guess): D1, whether to add the Lean `weigh` constructor, `Region.lean` and 12 additive corpus vectors now; D2, whether the new verb takes the name `decide` and the existing text-scan export becomes `matches`; D4, TLS trust for hosted endpoints. Until answered: Stage 1 units only, no Lean or corpus change. Resume: branch ac-decide, worktree /Users/johnw/src/agent-cat/.worktrees/ac-decide. Wiggum base directory: /Users/johnw/.config/claude/positron/skills/wiggum. Attempt counts: none. Refocus checkpoint: checked 20261117T2205Z; goal unchanged; no scope correction (design is larger than a first version needs: batching, box, images are out of scope); next step is the baseline build then wave 1; next deadline 20261117T2305Z. Sentinel probe: not yet run. Audit range: none yet. PAL: no PAL MCP tools are present in this session, so the design consensus and adversarial rounds are SKIPPED. Mailbox name ac-decide, store path /nix/store/6wpwhpaqpss4vdqjcij1jrnmngmn28w1-agent-mail-2.4.1/bin/agent-mail. No partner reviewer. No journal.\n",
+    "created_at": "2026-11-17T22:00:01Z"
+  },
+  {
+    "id": 820,
+    "issue_id": "acat-kj59",
+    "author": "johnw",
+    "text": "Plan addition by John, 20261117T2250Z, verbatim: \"Since we're changing the verb `decide`, we'll need to update ~/src/agent-workflows also, and any other clients who knew about the old meaning of `decide`.\"\nJohn's answers to the three design questions, 20261117T2240Z: D1 \"Add it now (Recommended)\" (Lean weigh, Region.lean, additive corpus vectors); D2 \"New verb takes decide (Recommended)\" (old surface text scan becomes `matches`); D4 \"Library default (Recommended)\" (http-client-tls newTlsManager).\nAdded done-criterion 8: every client of the old surface `decide` is updated to `matches`: ~/src/agent-workflows (sources and current-state documentation) and any other client found by search. Pushing and pin bumps stay John's steps.\n",
+    "created_at": "2026-11-17T22:44:57Z"
+  },
+  {
+    "id": 821,
+    "issue_id": "acat-kj59",
+    "author": "johnw",
+    "text": "Handoff 20261118T0010Z. Done and committed on ac-decide: 58617e8 (units A+B: Agentic.Decision, Agentic.DSL.Decision, Agentic.Plan.Decision, decision-probe in policies gate), a98aad5 (unit C: EngineDecision and the version-aware request codec), 0b2a4e6 (unit F: Lean Region.lean, RawRhs.weigh, conformance codec). Agent-reported gates: build all PASS; decision-probe PASS (109 properties); source boundaries PASS; tier0 PASS (193); engine-api-test, runtime-contract-test, acp.sh, deck.sh PASS; lake build model PASS 7:01; bisim oracle build PASS; corpus-gen 193 byte-identical. cli/ci/policies.sh full run INCOMPLETE (ENFILE on Hera at the time, then over 50 minutes under contention; its probe tail PASS): rerun it when the tree is quiet, attempt count 2. Remaining units of ~/Products/ac-decide/final.md section 7: G, H, I, E, D (wave 2), J, K, L (wave 3), then done-criterion 8 (agent-workflows and other clients: `decide` text scan becomes `matches`). Awaiting fess audit: 58617e8, a98aad5, 0b2a4e6. obr note: this worktree has no .obr of its own and uses the main checkout's shared database, whose auto-flush writes the main checkout's doc/PLAN.org; this branch's PLAN.org still needs this run's issue (do not `obr sync --merge`; carry only this run's records). Untracked, ignored setup files: .envrc, .envrc.cache, model/.envrc, bisim/.envrc. Resume: branch ac-decide, worktree /Users/johnw/src/agent-cat/.worktrees/ac-decide. Wiggum base directory: /Users/johnw/.config/claude/positron/skills/wiggum. Refocus checkpoint: checked 20261118T0010Z (65 minutes late: the wave-1 workflow ran across the 2305Z deadline); goal unchanged plus criterion 8; no scope creep found; next step is wave 2 and the first fess audit; next deadline 20261118T0110Z. PAL: no PAL tools in this session, rounds SKIPPED. Mail doorbell died with status 143 and was not restarted; mail is read at each turn start. Mailbox name ac-decide, store path /nix/store/6wpwhpaqpss4vdqjcij1jrnmngmn28w1-agent-mail-2.4.1/bin/agent-mail. No partner reviewer. No journal. No open questions.\n",
+    "created_at": "2026-11-18T00:05:27Z"
+  },
+  {
+    "id": 822,
+    "issue_id": "acat-kj59",
+    "author": "johnw",
+    "text": "fess audit 1 (20261118T0030Z), range e6d0cad..0b2a4e6 (58617e8, a98aad5, 0b2a4e6), independent dispatch (sentinel probe PASS: Claude Code Agent, fess-auditor type, fresh dispatch). No critical or high finding. To fix after wave 2 returns (the tree is being edited now), in one fix commit, not re-audited:\n1. Medium: cli/test/DecisionProbe.hs \"L12 canonicity on arbitrary text\" cannot fail (alphabet can never form a header). Replace with a generator that can parse, and add cover to the mutant property.\n2. Low: Haskell Halfspace decoder accepts 1.0 / 10e-1 as integers where Lean getInt? refuses. Make Haskell refuse non-integer spellings, and add fixed refusal checks (non-reduced, zero and negative denominator, extra key, decimal spelling).\n3. Low: runtime/BROKER.md:112 says version-1 engine codecs for requests. Update.\n4. Low: engine/api/test/Main.hs:130-132 checks conflate version and unknown-field refusal; README claims \"every version\" while tests try 2 and 3 only. Add a version-only refusal check.\n5. Low: Region.lean:239-242 docstring says \"exactly where\" but only one direction is proved. Reword the docstring to what is proved (no Lean rebuild beyond the module needed... a docstring edit forces a rebuild of dependents, so batch it with the next Lean change if any, otherwise do it once at the end).\n6. Low, deferred as cosmetic: import order in Engine.hs; weak-by-construction probe properties (L3 restates guard, header prefix).\nUnverified by the auditor (needs runs): all gate PASS claims. The coordinator reruns the full gates after integration.\n",
+    "created_at": "2026-11-18T00:12:37Z"
+  },
+  {
+    "id": 823,
+    "issue_id": "acat-kj59",
+    "author": "johnw",
+    "text": "Handoff 20261118T0050Z. Committed on ac-decide (7 commits over e6d0cad): 58617e8 A+B, a98aad5 C, 0b2a4e6 F, a2d1ff8 G+H (weigh in Raw/Builder, mirrors, corpus 193 -> 205), c5976d8 I (surface decide, readings, matches rename, Triage.hs), d9050d3 E (runtime decisionOf), 5d7c5f1 D (engine/decisions). Coordinator-run gates on the integrated tree at 5d7c5f1, log ~/Products/ac-decide/gates-wave2.log, all PASS: build all; engine-decisions-test, runtime-contract-test, engine-api-test; decision-probe; source boundaries; tier0 (205); engine/decisions/ci/decisions.sh; cli/ci/examples.sh; cli/ci/citations.sh; acp.sh (23); deck.sh (10). Not yet run by the coordinator: full cli/ci/policies.sh (attempt count 2, INCOMPLETE earlier for ENFILE and time), tier1 live bisim (agent-run PASS seed 1 n=500), lake build (agent-run PASS), doc gates. fess audit 1 covered 58617e8..0b2a4e6 (fixes pending, see earlier comment). Awaiting fess audit: a2d1ff8, c5976d8, d9050d3, 5d7c5f1. Remaining: fess-1 fixes; unit J (CLI routing), K (example registry, stub, triage.sh), L (manual, doc/research record, counts 205/102/59/44 at doc/agent-cat.texi:234,1246 and README.md:209-210, old decide at texi :1599 :2907 :2908 :5990, check-manual-coverage.py:46); root AGENTS.md gate list; criterion 8 clients. Client search of ~/src found only agent-workflows. For it: worktree ~/Products/ac-decide/agent-workflows on new branch decide-matches from origin/main bee7b61, building against the detached snapshot worktree ~/Products/ac-decide/agent-cat at 5d7c5f1 through its cabal.project `../agent-cat`. Namespaces to remove at the end after integration: ~/src/agent-cat/.claude/worktrees/wf_4de36c87-613-2 and -613-3 (units D and E, already lifted as patches), ~/Products/ac-decide/agent-cat. obr: shared database, this branch's PLAN.org still to carry the run's records. Resume: branch ac-decide, worktree /Users/johnw/src/agent-cat/.worktrees/ac-decide. Wiggum base directory: /Users/johnw/.config/claude/positron/skills/wiggum. Refocus checkpoint: checked 20261118T0050Z; goal unchanged; no scope correction; next step wave 3 (fixes, J, K, L serial in the main tree; clients in parallel) and fess audit 2; next deadline 20261118T0150Z. Sentinel probe: PASS at 20261118T0012Z (Claude Code Agent tool, fess-auditor type, fresh dispatch, model inherited). PAL: not available, rounds SKIPPED. Mail doorbell dead (status 143), mail read each turn. Mailbox name ac-decide, store path /nix/store/6wpwhpaqpss4vdqjcij1jrnmngmn28w1-agent-mail-2.4.1/bin/agent-mail. No partner reviewer. No journal. No open questions.\n",
+    "created_at": "2026-11-18T00:46:34Z"
+  },
+  {
+    "id": 824,
+    "issue_id": "acat-kj59",
+    "author": "johnw",
+    "text": "fess audit 2, range 0b2a4e6..5d7c5f1 (a2d1ff8, c5976d8, d9050d3, 5d7c5f1), independent dispatch under the same passing probe. No critical or high finding. Weigh semantics agree at every layer by the auditor's hand recomputation of all 12 new corpus replies. To fix after wave 3 returns, in one fix commit, not re-audited separately:\n1. Medium: engine/decisions Wire.hs:541,552-556 and Decisions.hs:206-207 copy vendor error text into failure text without redacting endpointSecrets; EngineTests.hs:294-296 cannot fail because the stub never echoes the credential. Redact, and add a stub route that echoes the credential.\n2. Medium: engine/decisions/README.md does not say the fixtures are constructed from documented shapes, not live captures. Say so.\n3. Medium: Workflow.hs:1025 equation `levelAtLeast l x == expectedLevel x atLeast rank l` holds only under naming law L2; expectedLevel uses field order, levelAtLeast uses rank; a handle built by `annotated` with a hand-written Enum bypasses decide's L2 check. Make both readings use one order and state the condition, and run the probe's laws on the swapped Enum route.\n4. Medium: docs stale (README.md:209-210 counts; texi counts and old decide): unit L is doing this now. Verify after L.\n5. Low: Wire.hs:92-94 U1 comment names a configured default that does not exist; U1, U9, U16 markers sit on the Dialect type. Correct the comment.\n6. Low: runtime/test/DecisionRequestTests.hs:40-42 compares enginePrompt with its own definition. Assert instead that the prompt contains the instructions and every option name.\n7. Low: engine/decisions/test/EngineTests.hs imports Agentic.Decision and Agentic.Schema.Json against engine/decisions/AGENTS.md \"Never import the DSL\". Move the L13 check to cli/test/DecisionProbe.hs, which may import both.\n8. Low: credentials over plain HTTP to any host in the engine: the routing URL rule of unit J is the guard. Verify after J.\n9. Low, deferred with a note: expectedLevel and isDistribution accept any non-empty number record (DecisionRecord), broader than the design's Options t signature. This is the recorded deviation that makes Triage.hs typecheck.\nUnverified by the auditor: tier1 37 cases and live bisim (agent-run only), draw frequencies, doc gates, full policies.sh. The coordinator runs these at the end.\n",
+    "created_at": "2026-11-18T00:57:21Z"
+  },
+  {
+    "id": 825,
+    "issue_id": "acat-kj59",
+    "author": "johnw",
+    "text": "Handoff 20261118T0150Z. Committed on ac-decide (11 commits over e6d0cad): 58617e8 A+B, a98aad5 C, 0b2a4e6 F, a2d1ff8 G+H, c5976d8 I, d9050d3 E, 5d7c5f1 D, de9dd7f fess-1 fixes (includes Lean recordAt_map_names; agent-run lake build PASS, corpus 205 byte-identical), 765bd13 J (CLI routing for decisions engines), 7537935 K (Triage registry row, stub, engine/decisions/ci/triage.sh, route-live.sh operator only; Triage.hs changed: decisions pinned with servedBy \"triage\", the two person desks became models because routing-file-only runs refuse person questions), bc9ef40 L (manual, doc/research/decision-models.md, counts). Agent-run gates for wave 3 all PASS including make -C doc check and check-haskell. agent-workflows: commit 6429e65 on branch decide-matches in worktree ~/Products/ac-decide/agent-workflows (26 Haskell and 14 doc uses renamed; build, tests, ci/workflows.sh, ci/cookbook.sh, ci/emacs.sh PASS against the snapshot; ci/taskmaster.sh SKIPPED, it needs nix develop and ACP adapters; flake pin not bumped; John's active branch work/skills-alignment there was not touched and will need the same rename when it meets this change). Running: background Agent (haskell-pro) applying fess-2 fixes 1,2,3,5,6,7 in the main tree, uncommitted until it returns. Next: commit its fixes; run the full gate sweep by the coordinator (build all; all cabal tests; cli/ci/policies.sh in background; bisim tier0 and tier1; routing-config; examples; acp; deck; decisions; triage; citations; make -C doc check and check-haskell; lake build is already agent-run at de9dd7f and no Lean file changed since); final fess audit over 5d7c5f1..HEAD; bring branch current with origin/main; PLAN.org records; remove namespaces (~/src/agent-cat/.claude/worktrees/wf_4de36c87-613-2, -613-3, ~/Products/ac-decide/agent-cat); final report. Awaiting fess audit: de9dd7f is a fix commit (no separate audit); 765bd13, 7537935, bc9ef40 and the fess-2 fix commit go in the final audit. policies.sh attempt count 2. Resume: branch ac-decide, worktree /Users/johnw/src/agent-cat/.worktrees/ac-decide. Wiggum base directory: /Users/johnw/.config/claude/positron/skills/wiggum. Refocus checkpoint: checked 20261118T0150Z; goal unchanged; no scope correction; next step as above; next deadline 20261118T0250Z. Sentinel probe PASS at 0012Z, same dispatch configuration since. PAL not available, rounds SKIPPED. Mail doorbell dead, mail read each turn. Mailbox ac-decide, store path /nix/store/6wpwhpaqpss4vdqjcij1jrnmngmn28w1-agent-mail-2.4.1/bin/agent-mail. No partner reviewer, no journal, no open questions.\n",
+    "created_at": "2026-11-18T01:42:46Z"
+  },
+  {
+    "id": 826,
+    "issue_id": "acat-kj59",
+    "author": "johnw",
+    "text": "Handoff 20261118T0530Z. HEAD 5370c10 (12 commits over origin/main e6d0cad, which has not moved: `git merge-base --is-ancestor origin/main HEAD` succeeded at 0155Z, no restack needed). Coordinator's full gate sweep at 5370c10, log ~/Products/ac-decide/gates-final.log, all 15 PASS: build all; cabal test all; decision-probe; tier0; tier1 N=500 SEED=1; examples; routing-config; citations; acp; deck; decisions; triage; make -C doc check; make -C doc check-haskell; cli/ci/policies.sh (PASS, but it ran 3h21m, 0201Z to 0522Z, on a loaded host; attempt count reset). Lean: agent-run lake build PASS at de9dd7f, no Lean file changed since. Final fess audit over 5d7c5f1..5370c10 (de9dd7f, 765bd13, 7537935, bc9ef40, 5370c10), independent dispatch: every earlier fix confirmed; no critical or high; medium M1 (--realize moves a settings-less decisions rung onto a generative model), M2 (manual says \"person\" where Triage uses model desks), M3 (--route unknown-backend text advertises decisions: which --route refuses); low L1 (thinking/max-output strictness lost for unselected personas), L2 (two stale manual passages), L3 (mixed-chain scenario only shows a failure crossing engines: accepted, documented in triage.sh), L4 (docstring overclaim), L5 (library gap, recorded as a new issue discovered-from this run), L6 (axiom footprints in the manual were checked once by the documentation agent with a scratch #print axioms and are not checked by a gate: deferred with this note). Running: background Agent (haskell-pro) applying M1, M2, M3, L1, L2, L4 in the main tree, uncommitted until it returns. Next: commit its fixes (a fix commit, not separately re-audited, but the Definition of Done wants the final audit range to cover later fix commits: run one short closing audit over 5370c10..HEAD); rerun affected gates (not the 3-hour policies.sh in full: its probe section only, and say so); carry the run's records into this branch's doc/PLAN.org; remove namespaces (~/src/agent-cat/.claude/worktrees/wf_4de36c87-613-2 and -613-3, ~/Products/ac-decide/agent-cat); final report with hand-off (push of ac-decide and of agent-workflows decide-matches 6429e65, flake pin bump, work/skills-alignment rename, D5 and other deferred owner decisions). Resume: branch ac-decide, worktree /Users/johnw/src/agent-cat/.worktrees/ac-decide. Wiggum base directory: /Users/johnw/.config/claude/positron/skills/wiggum. Refocus checkpoint: checked 20261118T0530Z (2h40m late: the session was idle waiting on the policies gate, which reports its own exit); goal unchanged; no scope correction; next step as above; next deadline 20261118T0630Z. Sentinel probe PASS at 0012Z, same dispatch configuration since, no compaction. PAL not available, rounds SKIPPED. Mail doorbell dead, mail read each turn (only +nix-config posts, none for this run). Mailbox ac-decide, store path /nix/store/6wpwhpaqpss4vdqjcij1jrnmngmn28w1-agent-mail-2.4.1/bin/agent-mail. No partner reviewer, no journal, no open questions.\n",
+    "created_at": "2026-11-18T05:23:39Z"
+  },
+  {
+    "id": 827,
+    "issue_id": "acat-kj59",
+    "author": "johnw",
+    "text": "Final handoff 20261118T0550Z. HEAD of ac-decide is the commit \"Keep --route and project-file refusals exact\" (14 commits over origin/main e6d0cad; origin/main has not moved, ancestry check passed, no restack was needed). Evidence per done-criterion: (1) doc/research/decision-models.md, bc9ef40. (2) Agentic.Decision with laws L1-L13 in decision-probe, \"118 properties over 38800 cases and 33 fixed checks passed\". (3) Agentic.Workflow decide with workflow/example/Triage.hs, c5976d8 and 7537935. (4) EngineDecision a98aad5, runtime d9050d3, engine/decisions 5d7c5f1, routing 765bd13, scripted and stub paths in cli/ci/examples.sh and engine/decisions/ci/triage.sh. (5) Lean weigh and Region.lean 0b2a4e6 and de9dd7f, approved by John 20261117; lake build PASS (agent-run), corpus 205 with the earlier 193 byte-identical, no theorem statement changed. (6) make -C doc check and check-haskell PASS at the final tree. (7) Coordinator sweeps: ~/Products/ac-decide/gates-final.log at 5370c10, 15 of 15 PASS including the full cli/ci/policies.sh (3h21m); gates-close.log at 62f05ad, 16 of 16 PASS (policy-probe only from policies.sh); gates-last.log on the final tree: build all, routing-config, policy-probe, examples, triage, both doc gates PASS. The full policies.sh was not rerun after 5370c10. (8) agent-workflows 6429e65 on branch decide-matches, worktree ~/Products/ac-decide/agent-workflows; no other client found under ~/src. Audits, all independent dispatches under a passing sentinel probe: e6d0cad..0b2a4e6, 0b2a4e6..5d7c5f1, 5d7c5f1..5370c10 (final), 5370c10..62f05ad (closing); no critical or high finding in any; every medium finding fixed; deferred low findings: expectedLevel and isDistribution accept any number record (DecisionRecord); mixed-chain triage scenario shows only a failure crossing engines; manual axiom footprints not gate-checked; selectRoutingPersona validates the project layer twice on the CLI path; doc/model-routing-v2.md:78 says \"the selected persona's model allowlist\" where the code uses the persona the project names (pre-existing). The last commit fixes the closing audit's findings and is not separately audited. PAL rounds SKIPPED (no PAL tools in the session). Discovered work: acat-hqnd. For John: push ac-decide; push agent-workflows decide-matches and bump its agent-cat pin; apply the same rename on agent-workflows work/skills-alignment; the main checkout's doc/PLAN.org carries this run's records uncommitted from the shared obr database (identical to what this branch commits).\n",
+    "created_at": "2026-11-18T05:40:29Z"
+  }
+]
+#+end_src
 
 * DONE [#D] Account for decreasing TUI notice key numbers in A4
 :PROPERTIES:
