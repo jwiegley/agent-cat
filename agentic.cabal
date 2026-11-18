@@ -486,6 +486,7 @@ test-suite runtime-contract-test
     BucketEvidence
     CaptureTests
     CarriageTests
+    DecisionRequestTests
     FlowCodecTests
     FlowReaderTests
     FlowTests
