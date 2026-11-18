@@ -8,6 +8,7 @@ import Agentic.Runtime
 import BrokerTests (brokerTests)
 import CaptureTests (captureTests)
 import CarriageTests (carriageTests)
+import DecisionRequestTests (decisionRequestTests)
 import FlowCodecTests (flowCodecTests)
 import FlowReaderTests (flowReaderTests)
 import FlowTests (flowTests)
@@ -73,6 +74,7 @@ contractTests = do
   flowTests
   flowReaderTests
   carriageTests
+  decisionRequestTests
   brokerTests
   frontendProtocolTests
   snapshotCheckpointTests "."

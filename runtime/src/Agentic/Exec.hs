@@ -185,6 +185,7 @@ import Agentic.Engine
     newTurnLaneIO,
   )
 import qualified Agentic.Engine as Engine
+import qualified Agentic.Engine.Decision as ED
 import Agentic.Plan
   ( AnswerSource (AnswerAsked, AnswerReused),
     El,
@@ -209,6 +210,7 @@ import Agentic.Plan
     requestShapeOf,
     withRequestPrompt,
   )
+import qualified Agentic.Plan.Decision as Decision
 import Agentic.Runtime.Broker (DataBroker (..), inProcessBroker, PersistenceHooks (..), nullPersistenceHooks)
 import Agentic.Runtime.Flow (Actor (Model, ToolActor), FlowScope (flowScopeAnswerSource), FlowWriter, RunFlow (..), Start (startPersonAnswering, startRun, startTarget), ToolKind (FixtureTool, ProgramCommand, RegistryTool), newFlowScope)
 import Agentic.Runtime.Control
@@ -270,6 +272,7 @@ import Agentic.Planning
     answerJson,
     questionJson,
   )
+import Agentic.Schema (demoteSchema)
 import Control.Concurrent (ThreadId, forkFinally, forkIOWithUnmask, killThread, myThreadId, throwTo)
 import Control.Concurrent.MVar (readMVar, takeMVar)
 import Data.Aeson (Value)
@@ -308,7 +311,8 @@ import Control.Exception
     try,
     uninterruptibleMask_,
   )
-import Control.Monad (filterM, forM_, unless, void, when)
+import Control.Monad (filterM, forM_, guard, unless, void, when)
+import Data.Either (isRight)
 import Data.Foldable (traverse_)
 import Data.IORef (writeIORef)
 import Data.IntSet (IntSet)
@@ -507,10 +511,59 @@ engineRequest code request =
         SStructured _ -> Engine.StructuredAnswer,
       enginePrompt = renderRequest code request,
       engineRequiresCompletedTurn = requiresCompletedTurn request,
-      engineDecision = Nothing
+      engineDecision = decisionOf code request
     }
   where
     question = reqQuestion request
+
+-- | The decision question that a request carries, in neutral form. It is
+-- 'Just' exactly for a model question whose prompt parses as a valid decision
+-- prompt and whose answer schema is that decision's record:
+--
+-- > decisionOf (SStructured s) r == Just (toEngineDecision q e)
+-- >   ⇔  qAddressee (reqQuestion r) is a model
+-- >      ∧ parseDecisionPrompt (qPrompt (reqQuestion r)) == Just (q, e)
+-- >      ∧ validDecisionQuestion q == Right ()
+-- >      ∧ decisionSchemaRep q == demoteSchema s
+--
+-- Every other request, including every request at another code, gives
+-- 'Nothing'. By the canonicity of the prompt codec (law L12), a 'Just'
+-- decision restates the authored prompt exactly:
+-- @renderDecisionPrompt q e == qPrompt (reqQuestion r)@.
+decisionOf :: SCode c -> Request c -> Maybe ED.EngineDecision
+decisionOf (SStructured schema) request = do
+  AddrModel _ <- pure (qAddressee (reqQuestion request))
+  (question, evidence) <- Decision.parseDecisionPrompt (qPrompt (reqQuestion request))
+  guard (isRight (Decision.validDecisionQuestion question))
+  guard (Decision.decisionSchemaRep question == demoteSchema schema)
+  pure (toEngineDecision question evidence)
+decisionOf _ _ = Nothing
+
+-- | The neutral form of a decision question and its evidence. It maps each
+-- form to the engine form of the same name, keeps the options in option
+-- order, and reads an empty description as no description:
+--
+-- > map engineOptionName (toList (engineDecisionOptions (toEngineDecision q e)))
+-- >   == map fst (toList (dqOptions q))
+--
+-- For a valid question the result is a valid engine decision, so
+-- @decodeEngineDecision (encodeEngineDecision (toEngineDecision q e))@ is
+-- @Right (toEngineDecision q e)@.
+toEngineDecision :: Decision.DecisionQuestion -> Text -> ED.EngineDecision
+toEngineDecision question evidence =
+  ED.EngineDecision
+    { ED.engineDecisionForm = case Decision.dqForm question of
+        Decision.ChoiceForm -> ED.EngineChoice
+        Decision.YesNoForm -> ED.EngineYesNo
+        Decision.ScaleForm -> ED.EngineScale,
+      ED.engineDecisionInstructions = Decision.dqInstructions question,
+      ED.engineDecisionOptions = fmap option (Decision.dqOptions question),
+      ED.engineDecisionEvidence = evidence
+    }
+  where
+    option (name, description)
+      | T.null description = ED.EngineOption name Nothing
+      | otherwise = ED.EngineOption name (Just description)
 
 -- | The authored prompt, followed only by any missing decoding instruction.
 -- Bookkeeping remains in the request and trace rather than in conversation text.
