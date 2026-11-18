@@ -9,21 +9,30 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
--- | The decision law probe: laws L1 to L12 of the decision design, each a
--- QuickCheck property over three option sets (a four-way choice, a five-level
--- scale and Bool). The records include zero and negative ones, and the prompt
--- generators include newlines, leading spaces, empty descriptions and header
--- look-alikes inside the evidence. Law L11 runs through the authoring surface
--- itself: each reading is built with "Agentic.Workflow", and the probe reads
--- back both the region the surface prints and the plan it elaborates to. The
--- probe exits non-zero when any property fails.
+-- | The decision law probe: laws L1 to L13 of the decision design. Laws L1 to
+-- L12 are QuickCheck properties over three option sets (a four-way choice, a
+-- five-level scale and Bool). The records include zero and negative ones, and
+-- the prompt generators include newlines, leading spaces, empty descriptions
+-- and header look-alikes inside the evidence. Law L11 runs through the
+-- authoring surface itself: each reading is built with "Agentic.Workflow", and
+-- the probe reads back both the region the surface prints and the plan it
+-- elaborates to. The scale readings also run on a type whose hand-written
+-- 'Enum' breaks the naming law L2, through a handle that 'decide' did not
+-- make. Law L13 reads every vendor answer that "Agentic.Decisions.Wire"
+-- accepts at the decision's schema, for the response fixtures in
+-- @engine/decisions/test/fixtures@, which the probe reads relative to the
+-- repository root, and for generated answers in both dialects. The probe
+-- exits non-zero when any check fails.
 module Main (main) where
 
 import Agentic.Builder (Rhs (..), V (..))
 import Agentic.DSL (Env (..), Plan (PRet), RawRhs (RhsWeigh), Var (VHere), evalExpr)
 import Agentic.Decision
+import Agentic.Decisions.Wire (Dialect (..), WireAnswer (..), decodeResponse, dialectWord)
+import Agentic.Engine.Decision (EngineDecision (..), EngineDecisionForm (..), EngineOption (..))
 import Agentic.Plan.Decision
 import Agentic.Schema
+import Agentic.Schema.Json (decodeAs)
 import Agentic.Workflow
   ( Decision,
     DecisionRecord,
@@ -38,15 +47,19 @@ import Agentic.Workflow
   )
 import Control.Exception (ErrorCall, evaluate, try)
 import qualified Data.Aeson as A
-import Data.List (intercalate, nub, sort)
+import qualified Data.Aeson.Key as Key
+import qualified Data.ByteString as BS
+import Data.List (elemIndex, intercalate, nub, sort)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Ratio ((%))
+import Data.Scientific (Scientific, scientific)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Vector as V
 import GHC.Generics (Generic)
 import System.Exit (exitFailure)
 import Test.QuickCheck
@@ -165,17 +178,21 @@ subject = V "x" VHere
 -- the surface refuses the test, and otherwise the verdict of the region it
 -- prints and the verdict of the plan it elaborates to.
 surface :: forall t. Options t => Rhs (Here t) 'CodeFlag -> Weights t -> IO (Maybe (Bool, Bool))
-surface rhs w = do
+surface rhs w = surfaceAt @t rhs (toSchemaEl w)
+
+-- | 'surface' on a record element, which need not come from a 'Weights'.
+surfaceAt :: forall t. Options t => Rhs (Here t) 'CodeFlag -> SchemaEl (DecisionSchema t) -> IO (Maybe (Bool, Bool))
+surfaceAt rhs el = do
   forced <- try (evaluate rhs)
   pure $ case forced of
     Left (_ :: ErrorCall) -> Nothing
     Right built -> Just (printed built, planned built)
   where
     printed built = case rhsRaw built of
-      RhsWeigh "x" [] region _ -> maybe False (holdsRegion region) (record w)
+      RhsWeigh "x" [] region _ -> maybe False (holdsRegion region) (numberRecordAt (schemaWitness @(DecisionSchema t)) [] el)
       _ -> error "the surface printed something other than a weighing of x at the empty path"
     planned built = case rhsPlan built of
-      PRet e -> evalExpr e (ECons (toSchemaEl w) ENil)
+      PRet e -> evalExpr e (ECons el ENil)
       _ -> error "the surface elaborated to something other than a ret"
 
 -- | Whether a test of Δ(T) is constant on it. Every test checked this way is
@@ -213,6 +230,110 @@ agrees meaning w (printed, planned) = printed == expected && planned == expected
 
 dot :: Options t => [(Text, Rational)] -> Dist t -> Rational
 dot ws d = sum [c * probabilityOf d [t | t <- options, optionName t == n] | (n, c) <- ws]
+
+-- ---------------------------------------------------------------------------
+-- Scale readings by field position
+-- ---------------------------------------------------------------------------
+
+-- | The field names of the decision record of T, in field order.
+fieldNames :: forall t. Options t => [Text]
+fieldNames = fromMaybe [] (numberFieldNames (demoteSchema (schemaWitness @(DecisionSchema t))))
+
+-- | The rank ι(l) of a level: the position of its option name in the field
+-- list of the decision record.
+fieldRank :: forall t. Options t => t -> Rational
+fieldRank l = maybe (error "fieldRank: the option is not a field") fromIntegral (elemIndex (optionName l) (fieldNames @t))
+
+-- | Records of ℚ^n in field order: zero records, records on the cone, and
+-- records of arbitrary sign.
+genRecord :: Int -> Gen [Rational]
+genRecord n =
+  frequency
+    [ (1, pure (replicate n 0)),
+      (6, vectorOf n genNonNegative),
+      (2, vectorOf n genRational)
+    ]
+
+-- | The expected field position Σ i·vᵢ / Σ vᵢ of a record in field order, on
+-- the cone, and 'Nothing' off it.
+meanPosition :: [Rational] -> Maybe Rational
+meanPosition xs
+  | any (< 0) xs || sum xs == 0 = Nothing
+  | otherwise = Just (sum (zipWith (*) [0 ..] xs) / sum xs)
+
+-- | A threshold that often equals the expected position or the position of a
+-- vertex.
+genPositionThreshold :: Int -> [Rational] -> Gen Rational
+genPositionThreshold n xs =
+  frequency [(3, genThreshold (meanPosition xs)), (1, elements (map fromIntegral [0 .. n - 1]))]
+
+-- | Law L11 for a test of the expected field position on a record given in
+-- field order: the surface refuses the test exactly when it is constant on
+-- the vertices, whose positions are 0 to n − 1, and otherwise the printed
+-- region and the elaborated plan both read the record as the test reads its
+-- expected position.
+positionLaw :: forall t. Options t => Rhs (Here t) 'CodeFlag -> (Rational -> Bool) -> [Rational] -> Property
+positionLaw rhs test xs = ioProperty $ do
+  got <- surfaceAt @t rhs (recordFromList @(OptionNames t) xs)
+  pure $ case got of
+    Nothing -> counterexample "the surface refused a test that is not constant" constant
+    Just verdicts@(printed, planned) ->
+      counterexample ("the surface accepted a constant test, or read " <> show verdicts) $
+        not constant && printed == expected && planned == expected
+  where
+    vertices = map (test . fromIntegral) [0 .. length (fieldNames @t) - 1]
+    constant = all (== and vertices) vertices
+    expected = maybe False test (meanPosition xs)
+
+-- | The equation @levelAtLeast l x == expectedLevel x \`atLeast\` ι(l)@ for
+-- the handle @x@ of 'subject', which 'decide' did not make: both sides are
+-- refused, or both print the same weighing and both plans read the record
+-- alike.
+levelEquation :: forall t. (Options t, DecisionRecord (DecisionSchema t)) => t -> [Rational] -> Property
+levelEquation l xs = ioProperty $ do
+  left <- built (levelAtLeast l (subject @t))
+  right <- built (expectedLevel (subject @t) `atLeast` fieldRank l)
+  pure . counterexample ("levelAtLeast built " <> show (fst <$> left) <> ", and expectedLevel atLeast built " <> show (fst <$> right)) $
+    case (left, right) of
+      (Nothing, Nothing) -> True
+      (Just (rawLeft, planLeft), Just (rawRight, planRight)) -> rawLeft == rawRight && planLeft == planRight
+      _ -> False
+  where
+    el = recordFromList @(OptionNames t) xs
+    built :: Rhs (Here t) 'CodeFlag -> IO (Maybe (RawRhs, Bool))
+    built rhs = do
+      forced <- try (evaluate rhs)
+      pure $ case forced of
+        Left (_ :: ErrorCall) -> Nothing
+        Right b -> Just (rhsRaw b, planned b)
+    planned b = case rhsPlan b of
+      PRet e -> evalExpr e (ECons el ENil)
+      _ -> error "the surface elaborated to something other than a ret"
+
+-- | The scale readings L9 and L11 on @Swapped@, whose hand-written 'Enum'
+-- breaks the naming law L2, through the handle of 'subject'. A level's rank is
+-- its field position, so the readings agree with the expected field position,
+-- and 'levelAtLeast' agrees with 'expectedLevel'.
+swappedLaws :: [(String, Property)]
+swappedLaws =
+  [ ( "Swapped: L9 L11 expected level at least reads the field position",
+      forAll (genRecord n) $ \xs -> forAll (genPositionThreshold n xs) $ \theta ->
+        positionLaw @Swapped (expectedLevel (subject @Swapped) `atLeast` theta) (>= theta) xs
+    ),
+    ( "Swapped: L9 L11 expected level no more than reads the field position",
+      forAll (genRecord n) $ \xs -> forAll (genPositionThreshold n xs) $ \theta ->
+        positionLaw @Swapped (expectedLevel (subject @Swapped) `noMoreThan` theta) (<= theta) xs
+    ),
+    ( "Swapped: L11 level at least l reads the field position",
+      forAll (genRecord n) $ \xs -> forAll (elements (options @Swapped)) $ \l ->
+        positionLaw @Swapped (levelAtLeast l (subject @Swapped)) (>= fieldRank l) xs
+    ),
+    ( "Swapped: L11 levelAtLeast l x == expectedLevel x `atLeast` fieldRank l",
+      forAll (genRecord n) $ \xs -> forAll (elements (options @Swapped)) $ \l -> levelEquation @Swapped l xs
+    )
+  ]
+  where
+    n = length (fieldNames @Swapped)
 
 -- | A threshold that often equals the reading exactly, so that the boundary
 -- of every half-space is exercised.
@@ -338,6 +459,9 @@ lawsFor setName =
     named "L11 level at least l" $
       forAll (genWeights @t) $ \w -> forAll (elements ts) $ \l ->
         halfspaceLaw (levelAtLeast l (subject @t)) (\d -> meanLevel d >= rank l) w,
+    named "L11 levelAtLeast l x == expectedLevel x `atLeast` rank l" $
+      forAll (genRecord n) $ \xs -> forAll (elements ts) $ \l ->
+        fieldRank l == rank l .&&. levelEquation @t l xs,
     named "L11 most likely t" $
       forAll (genWeights @t) $ \w -> forAll (elements ts) $ \t ->
         totalLaw (mostLikely t (subject @t)) ((t `elem`) . modes) w,
@@ -672,19 +796,165 @@ nonCanonical =
       [] -> False
 
 -- ---------------------------------------------------------------------------
+-- L13: every accepted vendor answer decodes at the decision schema
+-- ---------------------------------------------------------------------------
+
+-- | The options of 'choiceDecision', in its order.
+data Team = Billing | Technical | Other
+  deriving (Eq, Ord, Show, Enum, Bounded, Generic)
+
+-- | The levels of 'scaleDecision', in its order.
+data Urgency = Routine | Soon | Urgent
+  deriving (Eq, Ord, Show, Enum, Bounded, Generic)
+
+-- | A choice over 'Team', the last named only.
+choiceDecision :: EngineDecision
+choiceDecision =
+  EngineDecision
+    EngineChoice
+    "Which team should handle this ticket?"
+    (EngineOption "Billing" (Just "Payments, charges, and refunds") :| [EngineOption "Technical" (Just "Bugs and outages"), EngineOption "Other" Nothing])
+    "I was charged twice for the same order."
+
+-- | A scale over 'Urgency', the middle level described.
+scaleDecision :: EngineDecision
+scaleDecision =
+  EngineDecision
+    EngineScale
+    "How urgent is this ticket?"
+    (EngineOption "Routine" Nothing :| [EngineOption "Soon" (Just "Within a day"), EngineOption "Urgent" Nothing])
+    "The site is down for every customer."
+
+-- | A yes/no question with a meaning for True only.
+yesNoDecision :: EngineDecision
+yesNoDecision =
+  EngineDecision
+    EngineYesNo
+    "Does the customer ask for a refund?"
+    (EngineOption "False" Nothing :| [EngineOption "True" (Just "The message asks for money back")])
+    "Please refund the extra payment."
+
+-- | The record of an answer at the schema of the option type @t@, as the
+-- runtime decodes it, read back as one weight per option.
+weightsAt :: forall t. Options t => Text -> Maybe [Rational]
+weightsAt json = (\answer -> map (weight answer) (options @t)) <$> decodeAs @(Weights t) json
+
+-- | The response fixtures of the decisions engine, read relative to the
+-- repository root, with the decision each answers, its reading, and the
+-- weights it must decode to.
+lawFixtures :: [(FilePath, Dialect, EngineDecision, Text -> Maybe [Rational], [Rational])]
+lawFixtures =
+  [ ("jev-choice.json", SystemOne, choiceDecision, weightsAt @Team, [88 % 100, 11 % 100, 1 % 100]),
+    ("jev-score.json", SystemOne, scaleDecision, weightsAt @Urgency, [0, 79 % 100, 21 % 100]),
+    ("jev-noul.json", SystemOne, yesNoDecision, weightsAt @Bool, [2 % 100, 98 % 100]),
+    ("drex-v1.5-score-array-legend.json", SystemOne, scaleDecision, weightsAt @Urgency, [2489 % 10000, 166 % 1000, 5851 % 10000]),
+    ("drex-max-score-object-legend.json", SystemOne, scaleDecision, weightsAt @Urgency, [1 % 10, 3 % 10, 6 % 10]),
+    ("kev-score-object-legend.json", SystemOne, scaleDecision, weightsAt @Urgency, [0, 56 % 100, 44 % 100]),
+    ("openai-choice.json", OpenAIDecisions, choiceDecision, weightsAt @Team, [9 % 10, 6 % 100, 4 % 100]),
+    ("openai-score.json", OpenAIDecisions, scaleDecision, weightsAt @Urgency, [1 % 10, 7 % 10, 2 % 10]),
+    ("openai-predicate.json", OpenAIDecisions, yesNoDecision, weightsAt @Bool, [3 % 4, 1 % 4])
+  ]
+
+-- | L13 on one fixture: the answer is accepted, and its record decodes at the
+-- decision's schema to the expected weights.
+fixtureLaw :: (FilePath, Dialect, EngineDecision, Text -> Maybe [Rational], [Rational]) -> IO (String, Bool)
+fixtureLaw (name, dialect, decision, decode, expected) = do
+  bytes <- BS.readFile ("engine/decisions/test/fixtures/" <> name)
+  let heading = "L13 " <> name <> " as " <> T.unpack (dialectWord dialect) <> " decodes at the decision schema"
+  pure $ case A.decodeStrict bytes of
+    Nothing -> (heading <> ": the fixture is not JSON", False)
+    Just value -> case decodeResponse dialect decision value of
+      Left failure -> (heading <> ": it was refused: " <> show failure, False)
+      Right answer
+        | decode (wireAnswerJson answer) == Just expected -> (heading, True)
+        | otherwise -> (heading <> ": it decodes to " <> show (decode (wireAnswerJson answer)) <> ", expected " <> show expected, False)
+
+-- | A vendor answer: its form, one probability per option with 'Nothing' for
+-- an option that the vendor leaves out, and the order in which the vendor
+-- lists them.
+data Vendor = Vendor !EngineDecisionForm ![Maybe Scientific] ![Int]
+  deriving (Show)
+
+-- | A decimal in [0,1] with at most four digits after the point.
+decimal :: Gen Scientific
+decimal = do
+  digits <- choose (0, 4)
+  numerator' <- choose (0, 10 ^ digits)
+  pure (scientific numerator' (negate digits))
+
+vendor :: Gen Vendor
+vendor = do
+  form <- elements [minBound .. maxBound]
+  probabilities <- case form of
+    EngineYesNo -> (\p -> [Just p]) <$> decimal
+    _ -> vectorOf 3 (frequency [(1, pure Nothing), (4, Just <$> decimal)]) `suchThat` any (maybe False (> 0))
+  order <- shuffle [0 .. length probabilities - 1]
+  pure (Vendor form probabilities order)
+
+-- | L13 in one dialect: for every accepted vendor answer A,
+-- @decodeAs \@(Weights t) (wireAnswerJson A)@ is @Just w@, and @w@ holds the
+-- vendor's probability at each option, 0 at an option the vendor left out,
+-- and @(1 - p, p)@ for a yes/no probability @p@.
+answerDecodes :: Dialect -> Property
+answerDecodes dialect = withMaxSuccess 2000 . forAll vendor $ \(Vendor form probabilities order) ->
+  let (decision, decode, names) = case form of
+        EngineChoice -> (choiceDecision, weightsAt @Team, ["Billing", "Technical", "Other"])
+        EngineScale -> (scaleDecision, weightsAt @Urgency, ["Routine", "Soon", "Urgent"])
+        EngineYesNo -> (yesNoDecision, weightsAt @Bool, ["False", "True"])
+      present = [(index, p) | index <- order, Just p <- [probabilities !! index]]
+      expected = case (form, probabilities) of
+        (EngineYesNo, [Just p]) -> [1 - toRational p, toRational p]
+        _ -> map (maybe 0 toRational) probabilities
+      response = vendorResponse dialect form names present
+   in counterexample (show response) $ case decodeResponse dialect decision response of
+        Left failure -> counterexample ("refused: " <> show failure) False
+        Right answer -> counterexample (T.unpack (wireAnswerJson answer)) (decode (wireAnswerJson answer) === Just expected)
+
+-- | The response that a vendor of the dialect returns for the given
+-- probabilities, each paired with the index of its option.
+vendorResponse :: Dialect -> EngineDecisionForm -> [Text] -> [(Int, Scientific)] -> A.Value
+vendorResponse SystemOne form names present =
+  A.object ["answers" A..= A.object ["decision" A..= answer]]
+  where
+    answer = case form of
+      EngineYesNo -> A.object ["type" A..= ("noul" :: Text), "noul" A..= A.Number (firstOf present)]
+      EngineChoice -> A.object ["type" A..= ("choice" :: Text), "choice" A..= ("Billing" :: Text), "probabilities" A..= A.object [Key.fromText (names !! index) A..= A.Number p | (index, p) <- present]]
+      EngineScale -> A.object ["type" A..= ("score" :: Text), "score" A..= (1 :: Int), "probabilities" A..= A.object [Key.fromText (T.pack (show index)) A..= A.Number p | (index, p) <- present]]
+vendorResponse OpenAIDecisions form names present =
+  A.object ["answers" A..= A.Array (V.singleton answer)]
+  where
+    answer = case form of
+      EngineYesNo -> A.object ["type" A..= ("predicate" :: Text), "name" A..= ("decision" :: Text), "probability" A..= A.Number (firstOf present)]
+      EngineChoice -> A.object ["type" A..= ("choice" :: Text), "name" A..= ("decision" :: Text), "probabilities" A..= [A.object ["value" A..= (names !! index), "probability" A..= A.Number p] | (index, p) <- present]]
+      EngineScale -> A.object ["type" A..= ("score" :: Text), "name" A..= ("decision" :: Text), "probabilities" A..= [A.object ["value" A..= index, "label" A..= (names !! index), "probability" A..= A.Number p] | (index, p) <- present]]
+
+-- | The probability of a yes/no answer, which has exactly one.
+firstOf :: [(Int, Scientific)] -> Scientific
+firstOf ((_, p) : _) = p
+firstOf [] = 0
+
+answerLaws :: [(String, Property)]
+answerLaws =
+  [ ("L13 every accepted " <> T.unpack (dialectWord dialect) <> " answer decodes at the decision schema", answerDecodes dialect)
+  | dialect <- [minBound .. maxBound]
+  ]
+
+-- ---------------------------------------------------------------------------
 -- Driver
 -- ---------------------------------------------------------------------------
 
 main :: IO ()
 main = do
-  let properties = lawsFor @Colour "Colour" <> lawsFor @Level "Level" <> lawsFor @Bool "Bool" <> boolLaws <> promptLaws
+  let properties = lawsFor @Colour "Colour" <> lawsFor @Level "Level" <> lawsFor @Bool "Bool" <> boolLaws <> swappedLaws <> promptLaws <> answerLaws
       args = stdArgs {maxSuccess = 300, chatty = False}
   results <- mapM (\(name, p) -> (,) name <$> quickCheckWithResult args p) properties
   let propertyFailures = [name | (name, result) <- results, not (isSuccess result)]
       cases = sum (map (numTests . snd) results)
   mapM_ (\(name, result) -> putStrLn ("FAIL " <> name) >> putStr (output result)) [r | r@(_, result) <- results, not (isSuccess result)]
   mapM_ (putStrLn . coverage) [r | r@(_, result) <- results, isSuccess result, not (Map.null (classes result))]
-  let fixedFailures = [name | (name, ok) <- nonCanonical, not ok]
+  answerFixtures <- traverse fixtureLaw lawFixtures
+  let fixed = nonCanonical <> answerFixtures
+      fixedFailures = [name | (name, ok) <- fixed, not ok]
   mapM_ (putStrLn . ("FAIL " <>)) fixedFailures
   let failures = propertyFailures <> fixedFailures
   if null failures
@@ -695,7 +965,7 @@ main = do
             <> " properties over "
             <> show cases
             <> " cases and "
-            <> show (length nonCanonical)
+            <> show (length fixed)
             <> " fixed checks passed"
         )
     else do

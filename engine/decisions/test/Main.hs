@@ -1,6 +1,6 @@
 -- | The decisions engine's test suite: the pure wire checks, then the engine
--- against an in-process loopback stub, then law L13. It contacts no endpoint
--- outside this process.
+-- against an in-process loopback stub. It contacts no endpoint outside this
+-- process.
 module Main (main) where
 
 import EngineTests (engineTests)

@@ -111,7 +111,12 @@
 # decision record, the projective reading of a record as a distribution, the
 # convex-space, functor and expectation laws of that distribution, the
 # commuting equations of the readings on every record, zero and negative ones
-# included, and the round trip and canonicity of the decision prompt codec.
+# included, also on a type whose hand-written Enum breaks the naming law, the
+# round trip and canonicity of the decision prompt codec, and law L13: every
+# answer that the decisions wire accepts, from the fixtures in
+# `engine/decisions/test/fixtures` and generated in both dialects, decodes at
+# the decision's schema. The probe reads those fixtures relative to the
+# repository root, which is this gate's working directory.
 #
 # No Lean or corpus is required. The shared compiler-parsed source-boundary gate
 # runs before the runtime policy and compatibility probes.

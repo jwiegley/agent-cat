@@ -1799,7 +1799,9 @@ The chance that the statement of a yes/no decision holds, which is
 @code{chance [True]}.
 
 @item expectedLevel decision
-The expected rank of a scale, a number from 0 to @code{|T| − 1}.
+The expected rank of a scale, a number from 0 to @code{|T| − 1}.  The rank of a
+level is the position of its option in the answer record, which is its position
+in declaration order for every question that @code{decide} asks.
 
 @item reading `atLeast` bound
 The test @code{⟨w, p⟩ ≥ θ}.
@@ -1808,8 +1810,8 @@ The test @code{⟨w, p⟩ ≥ θ}.
 The test @code{⟨w, p⟩ ≤ θ}.
 
 @item levelAtLeast level decision
-The test that the expected level is at least the rank of @code{level}, which is
-@code{expectedLevel decision `atLeast` rank level}.
+The test that the expected level is at least the rank @code{r} of
+@code{level}, which is @code{expectedLevel decision `atLeast` r}.
 
 @item mostLikely option decision
 The test that the option is among the most probable options.  Every option of a

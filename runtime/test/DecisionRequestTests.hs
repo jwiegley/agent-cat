@@ -21,11 +21,13 @@ import Agentic.Plan.Decision
     renderDecisionPrompt,
   )
 import Agentic.Planning (Addressee (AddrModel, AddrPerson, AddrTool, AddrToolExec), Code (CodeStructured))
-import Agentic.Runtime (WorldIO (worldAskIO), engineRequest, renderRequest, scriptedWorld)
+import Agentic.Runtime (WorldIO (worldAskIO), engineRequest, scriptedWorld)
 import Agentic.Schema (Schema (SchemaNumber, SchemaObject, SchemaProperty), schemaNumber, schemaObject, schemaProperty)
 import Control.Monad (unless)
+import Data.Foldable (toList)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.Text (Text)
+import qualified Data.Text as T
 
 decisionRequestTests :: IO ()
 decisionRequestTests = do
@@ -37,9 +39,12 @@ decisionRequestTests = do
     decisionAt scaleCode (ask (AddrModel "probe") scalePrompt) == Just scaleDecision
   expect "an observation at a model carries its decision" $
     engineDecision (engineRequest yesNoCode (observeRequest (question (AddrModel "probe") yesNoPrompt))) == Just yesNoDecision
-  expect "the decision leaves the prompt the engine reads unchanged" $
-    enginePrompt (engineRequest yesNoCode (ask (AddrModel "probe") yesNoPrompt))
-      == renderRequest yesNoCode (ask (AddrModel "probe") yesNoPrompt)
+  expect "a yes/no prompt carries its question in words" $
+    asksInWords yesNoDecision (enginePrompt (engineRequest yesNoCode (ask (AddrModel "probe") yesNoPrompt)))
+  expect "a choice prompt carries its question in words" $
+    asksInWords choiceDecision (enginePrompt (engineRequest choiceCode (ask (AddrModel "probe") choicePrompt)))
+  expect "a scale prompt carries its question in words" $
+    asksInWords scaleDecision (enginePrompt (engineRequest scaleCode (ask (AddrModel "probe") scalePrompt)))
   expect "a request with a decision survives the engine request codec" $
     let request = engineRequest choiceCode (ask (AddrModel "probe") choicePrompt)
      in decodeEngineRequest (encodeEngineRequest request) == Right request
@@ -184,6 +189,18 @@ invalidPrompt =
   renderDecisionPrompt
     (DecisionQuestion YesNoForm "Is this message about billing?" (("Yes", "") :| [("No", "")]))
     "The invoice is wrong."
+
+-- | The prompt states the question in words: it contains every line of the
+-- instructions, the name of every option, and every line of every non-empty
+-- option description. The lines are checked one at a time, because the
+-- prompt indents the continuation lines of a text.
+asksInWords :: EngineDecision -> Text -> Bool
+asksInWords decision prompt = all (`T.isInfixOf` prompt) (instructionLines <> names <> descriptionLines)
+  where
+    entries = toList (engineDecisionOptions decision)
+    instructionLines = filter (not . T.null) (T.lines (engineDecisionInstructions decision))
+    names = map engineOptionName entries
+    descriptionLines = [line | EngineOption _ (Just text) <- entries, line <- T.lines text, not (T.null line)]
 
 expect :: String -> Bool -> IO ()
 expect label ok = unless ok (fail ("decision request: " <> label))
