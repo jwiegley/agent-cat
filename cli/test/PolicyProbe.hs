@@ -161,6 +161,7 @@ import Agentic.Route
   ( Backend (BackendAcp, BackendDecisions, BackendDeck),
     backendSpelling,
     parseBackend,
+    parseConfiguredBackend,
     parseRoute,
   )
 import Data.Aeson (Value, encode, object, toJSON, (.=))
@@ -2290,8 +2291,13 @@ main = do
           == Left
             [wft|unknown backend 'grpc:x' in --route: a backend is acp:<adapter> (start an adapter of this run's own) or deck:<id> (send to a live agent-deck session)|]
       ),
-      ( "an unknown decisions dialect names the dialects",
+      ( "an unknown decisions dialect in --route names both shapes",
         parseBackend "decisions:anthropic"
+          == Left
+            [wft|unknown backend 'decisions:anthropic' in --route: a backend is acp:<adapter> (start an adapter of this run's own) or deck:<id> (send to a live agent-deck session)|]
+      ),
+      ( "an unknown decisions dialect in a routing file names the dialects",
+        parseConfiguredBackend "decisions:anthropic"
           == Left "unknown decisions dialect 'anthropic' in 'decisions:anthropic': a decisions backend is decisions:system-one or decisions:openai"
       ),
       ("no colon at all", either ("unknown backend 'codex'" `T.isInfixOf`) (const False) (parseBackend "codex")),

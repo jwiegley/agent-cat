@@ -743,7 +743,7 @@ loadV2Layers layers = do
     ([user], [project]) -> Right (user, Just project)
     _ -> Left "version-2 routing requires one user document followed by at most one project document"
   forM_ project $ \selector -> do
-    _ <- selectRoutingPersona privileged Nothing Nothing (Just selector)
+    _ <- firstAtProject (selectRoutingPersona privileged Nothing Nothing (Just selector))
     pure ()
   pure
     LoadedRouting
@@ -755,6 +755,11 @@ loadV2Layers layers = do
   where
     firstUserAt path bytes = firstAt path (decodeRoutingUserV2 bytes)
     firstProjectAt path bytes = firstAt path (decodeRoutingProjectV2 bytes)
+    -- A refusal of the project layer against its persona names the project
+    -- file, as a refusal at decode does.
+    firstAtProject = case [path | (ProjectRoutingLayer, path, _) <- layers] of
+      [path] -> firstAt path
+      _ -> id
     firstAt path = either (Left . ((T.pack path <> ": ") <>)) Right
 
 -- | Load the conventional user and project files for this process.

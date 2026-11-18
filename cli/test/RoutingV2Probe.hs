@@ -804,6 +804,13 @@ main = do
           && fmap projectRoutingPersona (loadedRoutingV2Project loaded) == Just "personal"
           && loadedRoutingSources loaded == [userPath, projectPath]
       Left _ -> False
+  BS.writeFile projectPath (BS.pack (T.unpack (T.replace "        thinking: high\n" "" (T.pack (BS.unpack projectYaml)))))
+  lackingProject <- loadRoutingLayers [(UserRoutingLayer, userPath), (ProjectRoutingLayer, projectPath)]
+  check failures "a project file whose rung omits thinking is refused with the file named" $
+    either
+      (== T.pack projectPath <> ": persona 'personal' profile 'deep-thinker': realization of model 'opus' needs both thinking and max-output")
+      (const False)
+      lackingProject
   BS.writeFile userPath "version: 1\nrouters: []\nprofiles: []\n"
   mixed <- loadRoutingFiles [userPath, projectPath]
   check failures "v1 and v2 routing layers cannot be mixed" $
