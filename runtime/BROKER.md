@@ -109,8 +109,10 @@ byte. It also refuses a duplicate key at any depth, an unknown or a missing
 field, and any bytes other than the encoder's rendering of the decoded record,
 so `decodeFlowLine (encodeFlowLine r)` returns `r`. The run-log body codecs use
 the existing strict codecs: `requestJson` and the exact `El` codec for
-questions and answers, the version-1 engine codecs for engine requests, results,
-steering and permission reports, and `encodeControlFor` and `decodeControlFor`
+questions and answers, the engine request codec, which writes version 1 for a
+request without a decision and version 2 for a request that carries one, the
+version-1 engine codecs for results, steering and permission reports, and
+`encodeControlFor` and `decodeControlFor`
 at the protocol that a control body names. Each body decoder refuses any value
 that its encoder does not write.
 

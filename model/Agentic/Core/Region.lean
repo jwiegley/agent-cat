@@ -239,7 +239,8 @@ def numberFieldsAt? : Shape → List String → Option (List String)
 /-- `[[s.recordAt p v]]` = the number record at the field path `p` inside the
 value `v`, as its options and the record `n ↦ v n` (an unlisted name reads `0`),
 or `none` exactly where `s.numberFieldsAt? p` is `none`. The options agree with
-`numberFieldsAt?` (`recordAt_names`). -/
+`numberFieldsAt?` (`recordAt_names`), and the two are `none` at the same paths
+(`recordAt_map_names`). -/
 def recordAt : (s : Shape) → List String → s.El → Option (List String × (String → Rat))
   | s, [], value =>
     match s.numberRecord value with
@@ -311,6 +312,38 @@ theorem recordAt_names {s : Shape} {p : List String} {ns : List String} (value :
         rw [if_neg hne] at h
         exact ihr value.2 field path h
     | _ => simp [numberFieldsAt?] at h
+
+/-- At the empty path the options of the record are the options that
+`numberFieldsAt?` names, and both are `none` together. -/
+private theorem recordAt_nil_map_names {s : Shape} (value : s.El) :
+    (s.recordAt [] value).map Prod.fst = s.numberFieldsAt? [] := by
+  have hn := numberRecord_names s value
+  simp only [recordAt, numberFieldsAt?]
+  rw [← hn]
+  cases numberRecord s value with
+  | none => rfl
+  | some es => cases es <;> rfl
+
+/-- **The record is defined exactly where its options are.**
+
+  `(s.recordAt p v).map Prod.fst = s.numberFieldsAt? p`
+
+so `recordAt` is `none` at a path exactly where `numberFieldsAt?` is `none`,
+and otherwise it reads a record over the options that `numberFieldsAt?` names. -/
+theorem recordAt_map_names {s : Shape} {p : List String} (value : s.El) :
+    (s.recordAt p value).map Prod.fst = s.numberFieldsAt? p := by
+  cases p with
+  | nil => exact recordAt_nil_map_names value
+  | cons field path =>
+    induction s generalizing field path with
+    | property name schema rest ihs ihr =>
+      simp only [numberFieldsAt?, recordAt]
+      split
+      · cases path with
+        | nil => exact recordAt_nil_map_names value.1
+        | cons f' p' => exact ihs value.1 f' p'
+      · exact ihr value.2 field path
+    | _ => simp [numberFieldsAt?, recordAt]
 
 end Schema.Shape
 

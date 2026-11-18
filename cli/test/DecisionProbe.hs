@@ -3,6 +3,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
@@ -37,9 +38,10 @@ import Agentic.Workflow
   )
 import Control.Exception (ErrorCall, evaluate, try)
 import qualified Data.Aeson as A
-import Data.List (nub, sort)
+import Data.List (intercalate, nub, sort)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.List.NonEmpty as NE
+import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Ratio ((%))
 import qualified Data.Set as Set
@@ -495,6 +497,111 @@ genMutant = do
           pure ls
         ]
 
+-- | The lines a prompt is assembled from: the canonical spelling of each part
+-- of a header, and near misses of each.
+data Fragment
+  = Instruction
+  | InstructionMore
+  | FormHeader
+  | OptionLine
+  | Continuation
+  | Guidance
+  | EvidenceLine
+  | Noise
+  deriving (Eq, Show, Enum, Bounded)
+
+-- | One line for a fragment, canonical with probability 9/10.
+genFragment :: Fragment -> Gen Text
+genFragment fragment = frequency [(9, canonical), (1, nearMiss)]
+  where
+    pick = elements
+    name = pick ["Red", "Blue", "False", "True", "a-1", "λ"]
+    text = T.pack <$> genLine
+    canonical = case fragment of
+      Instruction -> pick ["Pick one", "Decide", "", "Options (exactly one is right):"]
+      InstructionMore -> ("  " <>) <$> text
+      FormHeader -> pick [formLine f | f <- [minBound .. maxBound]]
+      OptionLine -> oneof [("  " <>) <$> name, (\n d -> "  " <> n <> ": " <> d) <$> name <*> (T.pack <$> listOf1 (elements "xy z:"))]
+      Continuation -> ("    " <>) <$> text
+      Guidance -> pick [guidanceText]
+      EvidenceLine -> pick ["Evidence:"]
+      Noise -> text
+    nearMiss = case fragment of
+      Instruction -> text
+      InstructionMore -> (" " <>) <$> text
+      FormHeader -> pick ["Options (exactly one is right): ", "options (exactly one is right):", " Levels (from lowest to highest):"]
+      OptionLine ->
+        oneof
+          [ (\n -> "  " <> n <> ": ") <$> name,
+            (\n -> "  " <> n <> ":x") <$> name,
+            (\n -> "   " <> n) <$> name,
+            (\n -> "  " <> n <> " x") <$> name,
+            (\n -> "  " <> n <> ":") <$> name
+          ]
+      Continuation -> (\t -> "   " <> t) <$> text
+      Guidance -> pick [guidanceText <> " ", T.init guidanceText]
+      EvidenceLine -> pick ["Evidence: ", "evidence:", "Evidence"]
+      Noise -> pick ["", "  ", "    ", ":"]
+    formLine = \case
+      ChoiceForm -> "Options (exactly one is right):"
+      YesNoForm -> "Answers (True if the statement holds, False if it does not):"
+      ScaleForm -> "Levels (from lowest to highest):"
+    guidanceText = "Give each option the probability that it is the right one, as a number from 0 to 1. The probabilities sum to 1."
+
+-- | Text assembled from header lines, option lines, guidance lines,
+-- continuation lines and noise in arbitrary order. Most prompts follow the
+-- order of the grammar, some of them perturbed by a swap, an insertion, a
+-- deletion or a duplication of a line, and the others are a shuffle of those
+-- lines or a sequence of fragments drawn at random. A real share of the text
+-- parses.
+genAssembled :: Gen Text
+genAssembled = do
+  ordered <- grammarOrder
+  lines' <-
+    frequency
+      [ (6, pure ordered),
+        (4, perturb ordered),
+        (1, shuffle ordered),
+        (1, listOf1 (elements [minBound .. maxBound] >>= genFragment))
+      ]
+  ending <- frequency [(2, pure "\n"), (2, ("\n" <>) <$> genEvidence), (1, pure "")]
+  pure (T.intercalate "\n" lines' <> ending)
+  where
+    grammarOrder = do
+      instruction <- genFragment Instruction
+      more <- listOfUpTo 2 (genFragment InstructionMore)
+      formLine <- genFragment FormHeader
+      options' <- concat <$> (choose (1, 4) >>= \k -> vectorOf k optionBlock)
+      guidance' <- genFragment Guidance
+      evidence' <- genFragment EvidenceLine
+      pure ([instruction] <> more <> [formLine] <> options' <> [guidance', evidence'])
+    optionBlock = do
+      option <- genFragment OptionLine
+      continuations <- frequency [(3, pure []), (1, listOfUpTo 2 (genFragment Continuation))]
+      pure (option : continuations)
+    listOfUpTo k g = choose (0, k) >>= \m -> vectorOf m g
+    perturb ls = do
+      k <- choose (1, 2)
+      foldr (=<<) (pure ls) (replicate k perturbOnce)
+    perturbOnce ls = do
+      i <- choose (0, max 0 (length ls - 1))
+      let (before, after) = splitAt i ls
+      extra <- elements [minBound .. maxBound] >>= genFragment
+      elements
+        [ before <> take 1 (drop 1 after) <> take 1 after <> drop 2 after,
+          before <> [extra] <> after,
+          before <> drop 1 after,
+          before <> take 1 after <> after
+        ]
+
+-- | A property over prompts that reports, and requires, the share of them
+-- that parse.
+coverParse :: Testable prop => Double -> Double -> Text -> prop -> Property
+coverParse parsed refused p =
+  checkCoverage
+    . cover parsed (isJust (parseDecisionPrompt p)) "parses"
+    . cover refused (isNothing (parseDecisionPrompt p)) "is refused"
+
 promptLaws :: [(String, Property)]
 promptLaws =
   [ ("L12 generated questions are valid", forAll genQuestion $ \q -> validDecisionQuestion q == Right ()),
@@ -509,11 +616,13 @@ promptLaws =
     ),
     ( "L12 canonicity on mutated prompts",
       forAll genMutant $ \p ->
-        maybe True (\(q, e) -> renderDecisionPrompt q e == p) (parseDecisionPrompt p)
+        coverParse 20 20 p $
+          maybe True (\(q, e) -> renderDecisionPrompt q e == p) (parseDecisionPrompt p)
     ),
-    ( "L12 canonicity on arbitrary text",
-      forAll (T.pack <$> listOf (elements "ab: \nOE")) $ \p ->
-        maybe True (\(q, e) -> renderDecisionPrompt q e == p) (parseDecisionPrompt p)
+    ( "L12 canonicity on assembled text",
+      forAll genAssembled $ \p ->
+        coverParse 10 20 p $
+          maybe (property True) (\(q, e) -> renderDecisionPrompt q e === p) (parseDecisionPrompt p)
     ),
     ( "L12 the single-line instructions are the prompt's first line",
       forAll genQuestion $ \q -> forAll genEvidence $ \e ->
@@ -539,13 +648,25 @@ nonCanonical =
     ("eleven levels are invalid", invalid ScaleForm [(T.pack ('l' : show k), "") | k <- [1 .. 11 :: Int]]),
     ("a yes/no question must be False then True", invalid YesNoForm [("True", ""), ("False", "")]),
     ("a carriage return is invalid", invalid ChoiceForm [("a", "x\ry"), ("b", "")]),
-    ("blank instructions are invalid", either (const True) (const False) (validDecisionQuestion (DecisionQuestion ChoiceForm "  \n " (("a", "") :| [("b", "")]))))
+    ("blank instructions are invalid", either (const True) (const False) (validDecisionQuestion (DecisionQuestion ChoiceForm "  \n " (("a", "") :| [("b", "")])))),
+    ("a half-space rational not in lowest terms is refused", halfspaceRefused "{\"numerator\":2,\"denominator\":4}"),
+    ("a half-space rational with a zero denominator is refused", halfspaceRefused "{\"numerator\":1,\"denominator\":0}"),
+    ("a half-space rational with a negative denominator is refused", halfspaceRefused "{\"numerator\":1,\"denominator\":-2}"),
+    ("a half-space rational with an extra key is refused", halfspaceRefused "{\"numerator\":1,\"denominator\":2,\"sign\":1}"),
+    ("a half-space rational with a decimal numerator is refused", halfspaceRefused "{\"numerator\":1.0,\"denominator\":2}"),
+    ("a half-space rational with a negative exponent is refused", halfspaceRefused "{\"numerator\":1,\"denominator\":10e-1}"),
+    ("a half-space rational reads the integer 10", halfspaceReads "{\"numerator\":10,\"denominator\":1}" 10),
+    ("a half-space rational reads the integer 100", halfspaceReads "{\"numerator\":1,\"denominator\":100}" (1 % 100)),
+    ("a half-space rational reads 1e1 as the integer 10", halfspaceReads "{\"numerator\":1e1,\"denominator\":1}" 10)
   ]
   where
     guidanceLine = "Give each option the probability that it is the right one, as a number from 0 to 1. The probabilities sum to 1."
     header optionLines =
       T.unlines (["Pick", "Options (exactly one is right):"] <> optionLines <> [guidanceLine, "Evidence:"]) <> "tail"
     refused = isNothing . parseDecisionPrompt
+    halfspaceWith rational = "{\"weights\":[{\"option\":\"Red\",\"weight\":" <> rational <> "}],\"atLeast\":{\"numerator\":0,\"denominator\":1}}"
+    halfspaceRefused rational = isNothing (A.decode (halfspaceWith rational) :: Maybe Halfspace)
+    halfspaceReads rational value = A.decode (halfspaceWith rational) == Just (Halfspace [("Red", value)] 0)
     invalid form opts = case opts of
       first : rest -> either (const True) (const False) (validDecisionQuestion (DecisionQuestion form "Pick" (first :| rest)))
       [] -> False
@@ -562,6 +683,7 @@ main = do
   let propertyFailures = [name | (name, result) <- results, not (isSuccess result)]
       cases = sum (map (numTests . snd) results)
   mapM_ (\(name, result) -> putStrLn ("FAIL " <> name) >> putStr (output result)) [r | r@(_, result) <- results, not (isSuccess result)]
+  mapM_ (putStrLn . coverage) [r | r@(_, result) <- results, isSuccess result, not (Map.null (classes result))]
   let fixedFailures = [name | (name, ok) <- nonCanonical, not ok]
   mapM_ (putStrLn . ("FAIL " <>)) fixedFailures
   let failures = propertyFailures <> fixedFailures
@@ -579,3 +701,15 @@ main = do
     else do
       putStrLn ("decision probe: " <> show (length failures) <> " failed: " <> show (sort failures))
       exitFailure
+  where
+    coverage (name, result) =
+      name
+        <> ": "
+        <> intercalate
+          ", "
+          [ className <> " " <> show (100 * count `div` max 1 (numTests result)) <> "%"
+          | (className, count) <- Map.toList (classes result)
+          ]
+        <> " of "
+        <> show (numTests result)
+        <> " cases"
