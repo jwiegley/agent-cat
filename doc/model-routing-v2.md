@@ -245,11 +245,12 @@ Version 2 intentionally supports no literal, shell command, keychain program, or
 
 An engine instance has:
 
-- `backend`: the existing `acp:` or `deck:` grammar;
+- `backend`: the `acp:`, `deck:` or `decisions:` grammar (section 5.4);
 - `provider`: non-secret identity used for preflight/provenance;
-- optional `environment` for `acp:` engines only: exact child environment bindings, each from a non-secret literal or a named secret
-- optional `session-meta` for `acp:` engines only: a public JSON object sent as `_meta` with each `session/new` request
-- optional `catalogue`: an informational model endpoint.
+- optional `environment` for `acp:` engines only: exact child environment bindings, each from a non-secret literal or a named secret;
+- optional `session-meta` for `acp:` engines only: a public JSON object sent as `_meta` with each `session/new` request;
+- optional `catalogue`: an informational model endpoint; and
+- `endpoint`, which a `decisions:` engine requires and every other engine omits (section 5.4).
 
 Sensitive-looking environment names cannot take `value`; they must take `secret`. Unknown environment-binding fields are refused. Adapter arguments remain separate and retain the existing credential-bearing argv refusal.
 
@@ -295,7 +296,85 @@ A persona carries two explicit allowlists and then defines whole symbolic profil
 
 Each profile chain is non-empty, and every rung must name a model eligible for that persona. Project profile overrides and `--realize` may select only from the same model allowlist; project configuration cannot widen either allowlist. The same symbolic name may resolve differently in every persona.
 
-A profile rung retains the version-1 generation requirements: `thinking`, `max-output`, and optional non-secret scalar ACP `options`. Generation settings remain on the rung rather than the model alias because one exact model may serve distinct symbolic profiles at different effort or output limits.
+A profile rung retains the version-1 generation requirements: `thinking`, `max-output`, and optional non-secret scalar ACP `options`. Generation settings remain on the rung rather than the model alias because one exact model may serve distinct symbolic profiles at different effort or output limits. A rung whose model belongs to a decisions engine is the one exception, and section 5.4 states its rule.
+
+### 5.4 Decisions engines
+
+A decisions engine puts each decision question to an HTTP endpoint, which answers with one probability for each option. The engine is `Agentic.Decisions` in `engine/decisions`. It answers only the questions that `decide` asks, and it starts no process and holds no session. Version-1 routing refuses a `decisions:` backend with the text `a decisions engine needs routing configuration version 2`.
+
+The backend names the wire dialect of the endpoint. `decisions:system-one` sends the System One body, with `model`, `state` and `questions`. `decisions:openai` sends the OpenAI body, with `model`, `input` and `questions`. Any other dialect word is refused when the document is decoded.
+
+The following user file defines two hosted engines and one local engine:
+
+```yml
+version: 2
+default-persona: personal
+secrets:
+  openrouter: { env: OPENROUTER_API_KEY }
+  openai: { env: OPENAI_API_KEY }
+engines:
+  openrouter-decisions:
+    backend: decisions:system-one
+    provider: openrouter
+    endpoint:
+      url: https://openrouter.ai/api/alpha/decisions
+      auth: { header: authorization, scheme: bearer, secret: openrouter }
+      timeout-ms: 30000
+      max-bytes: 1048576
+  openai-decisions:
+    backend: decisions:openai
+    provider: openai
+    endpoint:
+      url: https://api.openai.com/v1/decisions
+      auth: { header: authorization, scheme: bearer, secret: openai }
+      timeout-ms: 30000
+      max-bytes: 1048576
+  drex-local:
+    backend: decisions:system-one
+    provider: nace-ai
+    endpoint: { url: "http://127.0.0.1:11434/v1/systemone", timeout-ms: 60000, max-bytes: 1048576 }
+models:
+  jev:  { engine: openrouter-decisions, select: [ { exact: typesafe/jev-1.14 } ] }
+  luna: { engine: openai-decisions,     select: [ { exact: gpt-6-luna } ] }
+  drex: { engine: drex-local,           select: [ { exact: drex-max-v1 } ] }
+personas:
+  personal:
+    engines: [openrouter-decisions, openai-decisions, drex-local]
+    models: [jev, luna, drex]
+    profiles:
+      triage:
+        chain: [ { model: jev }, { model: drex } ]
+```
+
+The routing probe `cli/test/RoutingV2Probe.hs` decodes this example with the production decoder. The four `yaml` examples of section 5.1 and later are the ones that `doc/check-model-routing-v2.hs` reads, and this example is not among them.
+
+The fields of `endpoint` are these:
+
+- `url` is the complete URL that receives each request. It follows the catalogue URL rule of section 5.3 without change. HTTPS is always accepted. Plain HTTP is accepted only without `auth` and only for a literal loopback address, so an endpoint that needs a credential on loopback cannot be configured.
+- `auth` is optional and has the form and meaning of the catalogue `auth`. Its secret is resolved when a live command needs the engine, exactly as a catalogue credential is, and a run whose endpoint secret is unset is refused before it starts.
+- `headers` is an optional map of literal non-secret headers, bounded as catalogue headers are.
+- `timeout-ms` is in `1..600000`, and `max-bytes` is in `1..4194304`.
+- `limits` is optional and has the fields `options` and `levels`. They bound the options of a choice and the levels of a scale that the endpoint accepts, and their defaults are 255 and 10. A question beyond them is refused before anything is sent.
+
+A decisions engine declares no `environment` and no `catalogue`. Its concrete models therefore select by `exact` id only, and a `prefix` selector is refused, because a prefix needs an inventory. A profile rung whose model belongs to a decisions engine writes no `max-output` and no `thinking` other than `"off"`. Its `options` are merged into the top level of the request body, and an option that names a field that the engine writes itself is refused: `model`, `state` and `questions` for System One, and `model`, `input` and `questions` for OpenAI. Every other rung still writes both `thinking` and `max-output`. A `--realize` override that moves a rung with a thinking level or an output limit onto a decisions model is refused.
+
+A decisions backend serves only named models. It is refused as a run's default route with the text `a decisions backend serves only named models`, and `--route` cannot name one, because its endpoint exists only in the routing file. When no route uses the ACP or deck engine, the flags `--adapter-arg`, `--scratch`, `--binary` and `--poll` are refused because they are not the decisions engine's to take, and `--adapter` remains refused without `--engine acp`.
+
+Each decisions engine is a backend of its own, keyed by its engine name, so two engines of one dialect stay distinct. The run header and `run.backends` name it as `engine:NAME[BACKEND]`, for example `engine:openrouter-decisions[decisions:system-one]`. The engine's execution fingerprint covers every non-secret field of its endpoint.
+
+Before a run starts, the runner parses each endpoint URL and builds its headers from the resolved secret, and it contacts no endpoint. It also walks the program. Every question whose model axis, or a spare in that axis's chain, routes to a decisions backend must be a model question that `decide` asks: its answer is a number record, and a closed question carries the decision prompt of that record. Otherwise the run is refused with the text `the question at model axis 'AXIS' reaches a decisions backend, and a decisions backend answers only a model question that decide asks`. A question that a tool of the row or a person answers in process is not checked, and the engine refuses a question behind a dynamic continuation when it is asked.
+
+The following local runners are reachable by URL alone, with `decisions:system-one`. None of them is verified against a fixture, and every detail in the table is unconfirmed. Section 11 of `doc/research/decision-models.md` lists each such detail, and `engine/decisions/src/Agentic/Decisions/Wire.hs` marks the ones that the wire code depends on with `UNCONFIRMED(Uk)`.
+
+| Runner | URL | Notes |
+|---|---|---|
+| Drex through Kapitsa or the llama.cpp fork `llama-server` | `http://127.0.0.1:8000/v1/systemone` | Unconfirmed. The response may lack `model`, `id` and `cost` (U11). Drex Max's own Python path is a command-line tool with no HTTP server. |
+| Drex through the Ollama fork | `http://127.0.0.1:11434/v1/systemone` | Unconfirmed. The request must name `model` (U11). |
+| Ollama 0.35 and later | `http://127.0.0.1:11434/v1/systemone` | Unconfirmed (U11). |
+| Kev | `http://127.0.0.1:8009/v1/systemone` | Unconfirmed. Kev requires `Authorization: Bearer` when `KEV_API_KEY` is set (U16), and the URL rule refuses an authenticated plain-HTTP URL, so only a Kev that runs without a key is reachable. |
+| Clef through SGLang | `http://127.0.0.1:30000/v1/systemone` | Unconfirmed (U11). |
+
+Two hosted details in the example are also unconfirmed. OpenRouter documents `/api/alpha/decisions` as an alpha path whose shape may change, and whether `/api/v1/systemone` serves models other than Jev is unconfirmed (U1). The hosted Nace (Drex) API has no confirmed URL or authentication (U9), so only local Drex runners appear here.
 
 ## 6. Persona selection
 

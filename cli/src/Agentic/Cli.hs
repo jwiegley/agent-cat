@@ -301,6 +301,7 @@ import Data.Char (isAlphaNum)
 import qualified Data.ByteString.Lazy as BL
 import Data.List (find, nub, sort, sortOn, tails)
 import Data.List.NonEmpty (NonEmpty ((:|)))
+import Data.Either (isRight)
 import Data.Maybe (fromMaybe, isJust, isNothing, listToMaybe, mapMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -481,10 +482,11 @@ import Agentic.Runtime
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef, writeIORef)
 import Agentic.Route (parseBackend)
 import Agentic.Route
-  ( Backend (BackendAcp, BackendDeck),
+  ( Backend (BackendAcp, BackendDeck, BackendDecisions),
     Routes,
-    Scheme (SchemeAcp, SchemeDeck),
+    Scheme (SchemeAcp, SchemeDeck, SchemeDecisions),
     backendSpelling,
+    decisionsDefaultRefusal,
     parseRoute,
     routeBackends,
     routeByModel,
@@ -497,8 +499,13 @@ import Agentic.Route
     schemeWord,
   )
 import Agentic.RoutingConfig
-  ( DiscoveryMode (..),
+  ( CatalogueAuth (..),
+    CatalogueAuthScheme (..),
+    DiscoveryMode (..),
+    Endpoint (..),
+    EngineDefinition (..),
     LoadedRouting (..),
+    RoutingConfigV2 (routingV2Engines),
     Realization (..),
     ResolvedEngineContext,
     ResolvedRealization (..),
@@ -540,6 +547,12 @@ import Agentic.RoutingInspect
     routingInspectionV2,
   )
 import qualified Data.Set as Set
+import qualified Agentic.Decisions as Decisions
+import Agentic.RoutingSecrets (resolvedEngineEndpointCredential, withSecretValue)
+import Agentic.DSL (Addressee (AddrModel, AddrTool, AddrToolExec))
+import Agentic.Plan.Decision (decisionSchemaRep, numberFieldNames, parseDecisionPrompt, validDecisionQuestion)
+import Agentic.Schema (demoteSchema)
+import qualified Network.HTTP.Client as HTTP
 import Agentic.Runtime
   ( ShellConfig (shellCwd, shellLog, shellTimeoutMs),
     Tool (..),
@@ -557,7 +570,14 @@ import Agentic.RequirePinned (guardFullPinCoverage, guardUnpinnedAsk)
 import Agentic.Cost (costM, costSummary)
 import Agentic.Plan
   ( ExecTrace,
+    Plan (..),
+    Q (..),
+    QScope (..),
+    Request (..),
+    RequestShape (..),
+    Shape (..),
     askNodes,
+    tagValues,
     intentCounts,
     codes,
     level,
@@ -588,7 +608,7 @@ import Agentic.Workflow
     inputSpecs,
     supply,
   )
-import Agentic.Planning (Addressee, answerFromJson, answerJson, billExecFresh, billMemo)
+import Agentic.Planning (answerFromJson, answerJson, billExecFresh, billMemo)
 
 -- | Keep the pre-RTS control bootstrap linked into each registry executable.
 -- Its constructor reserves fd 3 before an event manager can allocate it.
@@ -898,6 +918,9 @@ data RunRoutes = RunRoutes
     rrExpectedRoutingFingerprint :: !(Maybe Text),
     -- | Exact environments retained only until their ACP children are spawned.
     rrChildEnvironments :: !(Map.Map Text ChildEnvironment),
+    -- | The decisions endpoints of the run's decisions engines, by engine
+    -- alias, with their secrets resolved.
+    rrDecisionsEndpoints :: !(Map.Map Text Decisions.DecisionsEndpoint),
     -- | Whether inventory selection and secret resolution have run once.
     rrV2Frozen :: !Bool,
     -- | Concrete settings by runtime model axis, populated after the program is built.
@@ -941,10 +964,14 @@ executionRoutes rr =
        in EngineRoute
             { engineRouteAlias = case (rrSelectedRoutingV2 rr, backend, realization) of
                 (Just _, BackendAcp _, Just configured) -> Just (routerName (resolvedRouter configured))
+                -- Two decisions engines of one dialect differ by endpoint,
+                -- so each keeps its alias and is a backend of its own.
+                (Just _, BackendDecisions _, Just configured) -> Just (routerName (resolvedRouter configured))
                 _ -> Nothing,
               engineRouteManaged = isJust (rrSelectedRoutingV2 rr) && case backend of
                 BackendAcp _ -> isJust realization
-                BackendDeck _ -> any ((== backend) . resolvedBackend) (Map.elems (rrRealizations rr)),
+                BackendDeck _ -> any ((== backend) . resolvedBackend) (Map.elems (rrRealizations rr))
+                BackendDecisions _ -> isJust realization,
               engineRouteBackend = backend
             }
 
@@ -1415,6 +1442,7 @@ frontendCmd broker reg = Frontend.runFrontendSession (regBinary reg) runnerVersi
                   Nothing -> "routing"
                   Just (BackendAcp _) -> "acp"
                   Just (BackendDeck _) -> "deck"
+                  Just (BackendDecisions _) -> "routing"
               options = MachineOptions runtimeVersion answering ManagerIntake
               lineage = maybe RootRun Frontend.parentOperation parent
               checkParent = traverse
@@ -2847,6 +2875,7 @@ runCmdControlled broker scoped personAnswering runtimeControls persistence obser
 
     verifyDeckRoute rr route = case engineRouteBackend route of
       BackendAcp _ -> pure ()
+      BackendDecisions _ -> pure ()
       BackendDeck session -> do
         let realizations = routeRealizations rr route
         case find (not . Map.null . realizationOptions . resolvedSpec) realizations of
@@ -2888,6 +2917,15 @@ runCmdControlled broker scoped personAnswering runtimeControls persistence obser
             ( concurrentWorld
                 (\_ _ -> ioError (userError ("no connection was made for the backend acp:" <> T.unpack adapter)))
             )
+      BackendDecisions _ -> case engineRouteAlias route >>= (`Map.lookup` rrDecisionsEndpoints rr) of
+        Just endpoint ->
+          worldOfEngineBrokered broker defaultExecSettings
+            <$> Decisions.newDecisionsEngine endpoint (decisionsModelFor rr route)
+        Nothing ->
+          pure
+            ( concurrentWorld
+                (\_ _ -> ioError (userError ("no endpoint was resolved for the backend " <> T.unpack (engineRouteSpelling route))))
+            )
 
     routeRealizations rr route
       | Just alias <- engineRouteAlias route =
@@ -2906,6 +2944,26 @@ runCmdControlled broker scoped personAnswering runtimeControls persistence obser
             | realization <- Map.elems (rrRealizations rr),
               resolvedBackend realization == engineRouteBackend route
           ]
+
+    -- The model that a decisions engine names for a question: the exact id
+    -- and options of the realization that the question's model axis selects,
+    -- when that realization belongs to this route's engine.
+    decisionsModelFor :: RunRoutes -> EngineRoute -> Maybe Text -> Either Text Decisions.DecisionsModel
+    decisionsModelFor rr route axis = case axis >>= (`Map.lookup` rrRealizations rr) of
+      Just realization
+        | Just (routerName (resolvedRouter realization)) == engineRouteAlias route ->
+            Right
+              Decisions.DecisionsModel
+                { Decisions.decisionsModelId = realizationModel (resolvedSpec realization),
+                  Decisions.decisionsModelOptions = realizationOptions (resolvedSpec realization)
+                }
+      _ ->
+        Left
+          ( "the decisions engine "
+              <> engineRouteSpelling route
+              <> " serves no model for the model axis "
+              <> maybe "(none)" id axis
+          )
 
     modelConfigOf :: ResolvedRealization -> Engine.ModelConfig
     modelConfigOf realization =
@@ -2981,6 +3039,7 @@ runCmdControlled broker scoped personAnswering runtimeControls persistence obser
             <> exceptTools
         output
           ("  " <> [wft|a `running` tool's command runs in this process's directory, which the deck session — started by somebody else — need not share|])
+      BackendDecisions _ -> sayManyBackends rr dir [route]
     sayBackends rr dir routes' = sayManyBackends rr dir routes'
 
     -- The routed table names distinct backend count, full-coverage or explicit
@@ -3033,6 +3092,7 @@ runCmdControlled broker scoped personAnswering runtimeControls persistence obser
                   <> "— its working directory is its own; this run's tools run in "
                   <> T.pack dir
             BackendAcp _ -> pure ()
+            BackendDecisions _ -> pure ()
 
         -- Every model this program pins — the `served by` primaries and their
         -- spares — that no route claims. `pinnedModels` has the set in hand and
@@ -3059,6 +3119,17 @@ runCmdControlled broker scoped personAnswering runtimeControls persistence obser
             BackendAcp adapter ->
               "the " <> adapter <> " adapter: " <> T.unwords (map T.pack (acpCommand (acpConfigForRoute rr "." route)))
             BackendDeck session -> "agent-deck session " <> session
+            BackendDecisions dialect ->
+              case engineRouteAlias route >>= (`Map.lookup` rrDecisionsEndpoints rr) of
+                Just endpoint ->
+                  "the "
+                    <> Decisions.dialectWord dialect
+                    <> " decisions endpoint "
+                    <> Decisions.endpointUrl endpoint
+                    <> ", "
+                    <> tshow (Decisions.endpointTimeoutMs endpoint)
+                    <> "ms to a request"
+                Nothing -> "a " <> Decisions.dialectWord dialect <> " decisions endpoint"
 
     announceRouting rr
       | null sources && Map.null (rrRealizations rr) = pure ()
@@ -3450,6 +3521,7 @@ resolveTargetForProgram tools (Routed rr) prog = do
     Nothing -> resolveRoutingConfig (loadedRouting (rrRouting rr)) (rrCommandRoutes rr) authored
     Just selected -> expandRoutingConfigV2 selected (rrRealizeOverrides rr) (rrCommandRoutes rr) authored
   resolved <- coveredIfRequired tools rr prog resolved0
+  decisionsDefaultRefusal (resolvedRoutes resolved)
   pure
     ( Routed
         rr
@@ -3480,6 +3552,7 @@ resolveRoutingOnly tools (RoutingLoaded options loaded selected) prog = do
         rrDiscoveryMode = fromMaybe DiscoveryNormal (roDiscoveryMode options),
         rrExpectedRoutingFingerprint = roExpectedRoutingFingerprint options,
         rrChildEnvironments = Map.empty,
+        rrDecisionsEndpoints = Map.empty,
         rrV2Frozen = False,
         rrRealizations = resolvedRealizations resolved,
         rrScratch = T.unpack <$> roScratch options,
@@ -3522,6 +3595,7 @@ validateRoutingOnlyFlags options table = mapM_ forbidUnused [SchemeAcp, SchemeDe
     used = Set.fromList (map schemeOf (routeBackends table))
     flags SchemeAcp = [("--adapter-arg", not (null (roAdapterArgs options))), ("--scratch", isJust (roScratch options))]
     flags SchemeDeck = [("--binary", isJust (roBinary options)), ("--poll", isJust (roPollMs options))]
+    flags SchemeDecisions = []
     forbidUnused scheme
       | scheme `Set.member` used = Right ()
       | otherwise = case find snd (flags scheme) of
@@ -3569,6 +3643,14 @@ finalizeTargetForProgram tools (Routed rr) prog = case rrSelectedRoutingV2 rr of
               inventories <- discovered
               frozen <- freezeRoutingConfigV2 selected inventories expanded
               coveredFrozen <- coveredIfRequired tools rr prog frozen
+              decisionsDefaultRefusal (resolvedRoutes coveredFrozen)
+              decisionsEndpoints <- decisionsEndpointsFor (selectedRoutingV2 selected) contexts executionRequired
+              decisionAsksRefusal
+                tools
+                (rrPersonAnswers rr)
+                (resolvedChains coveredFrozen)
+                (resolvedRoutes coveredFrozen)
+                (progPlan prog)
               fingerprintFrozen <- freezeRoutingConfigV2 selected inventories fingerprintExpanded
               let childEnvironments =
                     Map.fromList
@@ -3597,9 +3679,116 @@ finalizeTargetForProgram tools (Routed rr) prog = case rrSelectedRoutingV2 rr of
                       { rrRoutes = resolvedRoutes coveredFrozen,
                         rrRealizations = resolvedRealizations resolvedWithEnvironment,
                         rrChildEnvironments = childEnvironments,
+                        rrDecisionsEndpoints = decisionsEndpoints,
                         rrV2Frozen = True
                       }
                 )
+
+-- | The decisions endpoints of the engines that a run requires, by engine
+-- alias, with the authentication header built from the secret that
+-- 'resolveEngineContexts' resolved. This is eager preflight: the URL is parsed
+-- here and nothing is sent.
+decisionsEndpointsFor :: RoutingConfigV2 -> Map.Map Text ResolvedEngineContext -> [Text] -> Either Text (Map.Map Text Decisions.DecisionsEndpoint)
+decisionsEndpointsFor config contexts aliases =
+  Map.fromList
+    <$> sequence
+      [ (\resolved -> (alias, resolved)) <$> endpointOf alias dialect endpoint
+        | alias <- nub aliases,
+          Just engine <- [Map.lookup alias (routingV2Engines config)],
+          BackendDecisions dialect <- [engineBackend engine],
+          Just endpoint <- [engineEndpoint engine]
+      ]
+  where
+    endpointOf alias dialect endpoint = do
+      case HTTP.parseRequest (T.unpack (endpointUrl endpoint)) :: Maybe HTTP.Request of
+        Nothing -> Left ("engine '" <> alias <> "' has an endpoint URL that cannot be parsed")
+        Just _ -> Right ()
+      (authHeaders, secrets) <- case endpointAuth endpoint of
+        Nothing -> Right ([], [])
+        Just auth -> case Map.lookup alias contexts >>= resolvedEngineEndpointCredential of
+          Nothing -> Left ("engine '" <> alias <> "' endpoint secret '" <> catalogueAuthSecret auth <> "' is not resolved")
+          Just credential ->
+            Right . withSecretValue credential $ \secret ->
+              let value = case catalogueAuthScheme auth of
+                    CatalogueAuthRaw -> secret
+                    CatalogueAuthBearer -> "Bearer " <> secret
+               in ([(catalogueAuthHeader auth, value)], [secret])
+      pure
+        Decisions.DecisionsEndpoint
+          { Decisions.endpointDialect = dialect,
+            Decisions.endpointUrl = endpointUrl endpoint,
+            Decisions.endpointHeaders = Map.toAscList (endpointHeaders endpoint) <> authHeaders,
+            Decisions.endpointSecrets = secrets,
+            Decisions.endpointTimeoutMs = endpointTimeoutMs endpoint,
+            Decisions.endpointMaxBytes = endpointMaxBytes endpoint,
+            Decisions.endpointLimits = endpointLimits endpoint
+          }
+
+-- | Refuse a program that may put a question other than a decision question
+-- to a decisions backend.
+--
+-- A question reaches the backends of its model axis and of every spare in
+-- that axis's chain. When one of them is a decisions backend, the question
+-- must be a model question at a structured code whose schema is a number
+-- record, and a closed question must carry a decision prompt whose schema is
+-- that record, which is exactly when 'Agentic.Exec.decisionOf' gives the
+-- engine a decision. A question that a tool of the row or a person answers in
+-- process never reaches a backend and is not checked. Questions behind a
+-- dynamic continuation are not visible to a fold of the term, and the engine
+-- refuses them when they are asked.
+decisionAsksRefusal :: [Text] -> [Addressee] -> Map.Map Text [Text] -> Routes Backend -> Plan g a -> Either Text ()
+decisionAsksRefusal tools personAnswered chains table = go
+  where
+    go :: Plan g1 a1 -> Either Text ()
+    go = \case
+      PRet _ -> Right ()
+      PAskC code request rest -> do
+        let question = reqQuestion request
+        checkAsk code (qAddressee question) (scopeModelAxis (qScope question)) (Just (qPrompt question))
+        go rest
+      PAsk code shape _ rest -> do
+        let question = rsQuestion shape
+        checkAsk code (shAddressee question) (scopeModelAxis (shScope question)) Nothing
+        go rest
+      PCase tag _ arms -> mapM_ (go . arms) (tagValues tag)
+      PDyn {} -> Right ()
+
+    checkAsk :: SCode c -> Addressee -> Maybe Text -> Maybe Text -> Either Text ()
+    checkAsk code addressee axis prompt
+      | inProcess addressee = Right ()
+      | not (any isDecisions (backendsOf axis)) = Right ()
+      | otherwise = case (addressee, code) of
+          (AddrModel _, SStructured schema)
+            | isJust (numberFieldNames (demoteSchema schema)),
+              all (decisionPromptAt (demoteSchema schema)) prompt ->
+                Right ()
+          _ ->
+            Left
+              ( "the question at model axis '"
+                  <> fromMaybe "" axis
+                  <> "' reaches a decisions backend, and a decisions backend answers only a model question that decide asks"
+              )
+
+    inProcess addressee = case addressee of
+      AddrToolExec {} -> True
+      AddrTool name -> name `elem` tools || addressee `elem` personAnswered
+      _ -> addressee `elem` personAnswered
+
+    backendsOf = \case
+      Nothing -> maybe [] pure (routeDefault table)
+      Just model ->
+        [ backend
+          | axis <- model : Map.findWithDefault [] model chains,
+            Just backend <- [Map.lookup axis (routeByModel table) <|> routeDefault table]
+        ]
+
+    isDecisions = \case
+      BackendDecisions _ -> True
+      _ -> False
+
+    decisionPromptAt rep prompt = case parseDecisionPrompt prompt of
+      Just (question, _) -> isRight (validDecisionQuestion question) && decisionSchemaRep question == rep
+      Nothing -> False
 
 withExecutionFingerprints :: Map.Map Text ResolvedEngineContext -> ResolvedRouting -> ResolvedRouting
 withExecutionFingerprints contexts resolved =
@@ -3791,6 +3980,7 @@ acpConfigForRoute rr dir route = case engineRouteBackend route of
             acpAdapterName = Just adapter
           }
   BackendDeck _ -> error "Agentic.Cli.acpConfigForRoute: deck route"
+  BackendDecisions _ -> error "Agentic.Cli.acpConfigForRoute: decisions route"
 
 -- | The @--model@ and @--effort@ choice, for the default answerer only. A
 -- named route to another adapter keeps that adapter's own defaults.
@@ -3929,6 +4119,7 @@ runFactsWith reg name target sentinel =
         let routes' = routeBackends (executionRoutes rr)
             acps = [route | route <- routes', BackendAcp _ <- [engineRouteBackend route]]
             decks = [session | route <- routes', BackendDeck session <- [engineRouteBackend route]]
+            decisions = [route | route <- routes', BackendDecisions _ <- [engineRouteBackend route]]
             acpWords = case acps of
               (route : _) -> "acp: " <> acpSessionPolicy (acpConfigForRoute rr "." route)
               [] -> ""
@@ -3936,13 +4127,22 @@ runFactsWith reg name target sentinel =
             -- owed is the policy, and a pane's title is neither a policy nor
             -- something a report should be repeating.
             deckWords = "deck: " <> deckSessionPolicy
-         in case (acps, decks) of
+            -- A decisions endpoint holds no conversation: every question is
+            -- one request of its own.
+            decisionsWords = "decisions: one request per question, and no session"
+            sessionWords = case (acps, decks) of
               (_ : _, []) -> acpWords
               ([], _ : _) -> deckWords
               (_ : _, _ : _) -> acpWords <> "; " <> deckWords
-              -- Every executable table is nonempty after explicit-target or
-              -- full-coverage validation.
-              ([], []) -> "no engine: this run reaches nothing"
+              ([], []) -> ""
+         in case (sessionWords, decisions) of
+              ("", []) ->
+                -- Every executable table is nonempty after explicit-target or
+                -- full-coverage validation.
+                "no engine: this run reaches nothing"
+              ("", _ : _) -> decisionsWords
+              (_, []) -> sessionWords
+              (_, _ : _) -> sessionWords <> "; " <> decisionsWords
 
 -- | @run.routes@ — __the route table as this run resolved it__, one line per
 -- answerer: the label, @\" = \"@, and 'backendSpelling'.
@@ -4407,7 +4607,7 @@ validateManagerPreparedTarget reg arguments prepared = do
         Just value -> Just <$> decodeBackend value
         Nothing | field "coverage"==Just(String "full") -> Right Nothing
         _ -> Left Manager.InvalidReply
-      let actualKind=case fallback of Nothing->"routing";Just(BackendAcp _)->"acp";Just(BackendDeck _)->"deck"
+      let actualKind=case fallback of Nothing->"routing";Just(BackendAcp _)->"acp";Just(BackendDeck _)->"deck";Just(BackendDecisions _)->"routing"
           usesAcp=any (\backend->case backend of BackendAcp _->True;_->False) (maybe routes' (:routes') fallback)
       unless(preparedTargetKind prepared==actualKind)(Left Manager.InvalidReply)
       case target of
@@ -4573,6 +4773,7 @@ chooseTarget o = case (roScripted o, roEngine o, roSession o) of
     flagsOf = \case
       SchemeAcp -> acpFlags
       SchemeDeck -> deckFlags
+      SchemeDecisions -> []
 
     forbidForeign used =
       mapM_
@@ -4581,6 +4782,14 @@ chooseTarget o = case (roScripted o, roEngine o, roSession o) of
 
     live def = do
       named <- traverse parseRoute (roRoutes o)
+      case [model | (model, BackendDecisions _) <- named] of
+        model : _ ->
+          Left
+            ( "--route cannot send '"
+                <> model
+                <> "' to a decisions backend: a decisions engine and its endpoint are defined only in version-2 routing configuration"
+            )
+        [] -> Right ()
       case firstDuplicate (map fst named) of
         Just m -> Left ("--route names the model '" <> m <> "' twice; a model has one backend in a run")
         Nothing -> Right ()
@@ -4602,6 +4811,7 @@ chooseTarget o = case (roScripted o, roEngine o, roSession o) of
             rrDiscoveryMode = DiscoveryNormal,
             rrExpectedRoutingFingerprint = Nothing,
             rrChildEnvironments = Map.empty,
+            rrDecisionsEndpoints = Map.empty,
             rrV2Frozen = False,
             rrRealizations = Map.empty,
             rrScratch = T.unpack <$> roScratch o,
