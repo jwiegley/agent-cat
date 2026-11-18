@@ -15,6 +15,7 @@ the tests, the root `README.md`, and the Texinfo manual in
 | `request-intent-representation.md` | The ruling that places execution intent in the executable `Plan` as `Request = Q × Intent`. It gives the erasing denotation, the operational policies, the alternatives, and the evidence ceilings. |
 | `isaac-workflows.md` | How the incite workflows were read, priced, and ported into the authoring surface, and the decisions D1 through D8 that shaped its vocabulary. |
 | `dslate-design/` | The implementation designs for those decisions. They cover functions and inputs, text panels and deciders, the revising redesign, and receipts with fail-over. |
+| [decision-models.md](decision-models.md) | The 2026-11-17 record of the decision-model APIs behind the `decide` verb: TypeSafe System One, the OpenRouter and OpenAI Decisions APIs, the other hosted models, the local runners, the common contract, and the details that no primary source confirmed. |
 | `source-aware-workflow-inputs.md` | The approved design for command-tail and standard-input workflow inputs, descriptor version 2, and the control file descriptor. |
 | `pi-workflow-extension.md` | The design of the Pi extension as the control plane of agent-cat. It gives the capability matrix, the options that were considered, the machine protocol, and the delivered roadmap. |
 | [workflow-manager.md](workflow-manager.md) | The proposed remote single-user manager, with a source inventory, exact approval and ownership model, REST and SSE contracts, security boundaries, client migration, and verification obligations. |

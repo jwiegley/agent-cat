@@ -39,9 +39,11 @@ A workflow is a program that asks questions and acts on the answers. Each
 question names a party, which is a model, a tool, or a person. Each answer has
 one of five kinds. It is text, a verdict from a reviewer, a yes-or-no flag, a
 receipt that confirms an action, or a structured value that a schema describes.
-A workflow can branch on a flag or a verdict. It can send one question to a
-panel of reviewers and combine their verdicts. It can revise a candidate a
-bounded number of times, and it can call functions that contain no branches.
+A workflow can branch on a flag or a verdict. It can put a decision to a
+decision model, which answers with a probability for each option, and branch
+on a test of that answer. It can send one question to a panel of reviewers and
+combine their verdicts. It can revise a candidate a bounded number of times,
+and it can call functions that contain no branches.
 The workflow has no other form of control. Every program that the authoring
 surface accepts therefore has a finite set of possible paths, and the system
 can compute its cost before anyone is asked anything.
@@ -206,8 +208,8 @@ compares intent-annotated execution events and returns their erasure as
 `semanticTrace`. Version 4 adds a typed program result beside the unchanged
 program.
 
-`bisim/corpus/` holds 193 frozen pairs of a request and its reply. The
-corpus contains 95 checked replies, 54 refusals, and 44 results from the string
+`bisim/corpus/` holds 205 frozen pairs of a request and its reply. The
+corpus contains 102 checked replies, 59 refusals, and 44 results from the string
 layer. The three typed-result entries are version 4, and every other entry is
 version 2. The corpus serves as the specification of the boundary. The command
 `lake exe corpus-gen` re-observes every request and rewrites its reply, and this
@@ -362,9 +364,9 @@ persist an immutable manifest, append-only events, reusable typed answers, an
 effect journal, and checkpoints; lineage verbs create immutable child runs.
 `list --json` preserves descriptor version 2. `--descriptor-version 3` selects
 the routing and protocol-negotiation capabilities of the current frontend.
-The registry currently holds ten programs: `harden`, `hello`,
-`structured`, `structured-result`, `capital`, `plan-feature`, `review-lite`,
-`ship-feature-lite`, `grind-tests`, and `stack-prs`.
+The registry currently holds eleven programs: `harden`, `hello`,
+`structured`, `structured-result`, `capital`, `triage`, `plan-feature`,
+`review-lite`, `ship-feature-lite`, `grind-tests`, and `stack-prs`.
 
 ## The terminal interface
 

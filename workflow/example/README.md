@@ -8,6 +8,9 @@ smallest complete program, which the first chapter of the manual walks through.
 `Structured` exports the structured-answer programs and the host record whose
 schema one `deriveSchema` splice derives. `Capital` exports `capitalProgram`,
 which names three tools that its registry row answers with Haskell functions.
+`Triage` exports `triageProgram`, which routes a ticket by three decision
+questions and four tests of their answers, together with its option types
+`Team` and `Urgency`.
 
 ## Dependencies
 
