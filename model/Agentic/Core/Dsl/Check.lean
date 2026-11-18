@@ -268,6 +268,10 @@ private def useKindR (sig : List (String × List (String × Code) × Code))
   -- followed by `f <- decide lastNonEmptyLineIs y […]` infers `y : text`, which
   -- is the ergonomic that makes the vocabulary pleasant to use.
   | .decide _ x' _ _ => if x' == x then some Code.text else none
+  -- A weighing uses its subject and grounds no kind: the subject answers a
+  -- structured code, whose schema a use cannot reconstruct, so the binding that
+  -- a weighing reads carries its kind by annotation or by another use.
+  | .weigh _ _ _ _ => none
   | .call f args _ => useArgs sig x f args
 
 private def useKindS (sig : List (String × List (String × Code) × Code))
@@ -509,6 +513,33 @@ def callPlan {Δ : Ctx} (S : Bindings Δ) (fns : Fns) (f : String)
     | .error err => .error err
     | .ok σ => .ok ⟨fe.result, Plan.sub fe.plan σ⟩
 
+/-- The first entry of one half-space's weights that is not an option of the
+record, or that names an option already named in the same half-space, in
+reading order. -/
+private def weightsGuard (pos : Pos) (ns : List String) (seen : List String) :
+    List (String × Rat) → Except CheckError Unit
+  | [] => .ok ()
+  | (n, _) :: ws =>
+    if !ns.contains n then
+      .error ⟨pos, s!"a weighing reads only its decision's options, and `{n}` \
+                     is not one", n⟩
+    else if seen.contains n then
+      .error ⟨pos, s!"a weighing names the option `{n}` twice in one \
+                     half-space", n⟩
+    else weightsGuard pos ns (n :: seen) ws
+
+/-- Every half-space of a region names only options of the record, and each
+names an option at most once. A weight on a name that is not an option tests
+nothing the decision answers, and an option named twice in one half-space has
+a weight that the source states only as a sum. -/
+private def regionGuard (pos : Pos) (ns : List String) :
+    List Region.Halfspace → Except CheckError Unit
+  | [] => .ok ()
+  | h :: hs =>
+    match weightsGuard pos ns [] h.weights with
+    | .error err => .error err
+    | .ok _ => regionGuard pos ns hs
+
 /-- A clause-position source at an imposed kind. A panel answers `verdict` and
 nothing else — `all must approve` is the verdict monoid, and no other kind
 carries one. A call answers its declared result. -/
@@ -564,6 +595,32 @@ def rhsPlan {Γ : Ctx} (fns : Fns) (c : Code) (S : Bindings Γ) (r : RawRhs) (wh
     | c =>
       .error ⟨pos, s!"{what}: a decider answers `flag`, not `{codeName c}`",
               "decide"⟩
+  -- A weighing is `Region.holds` of the number record at its path, read out of
+  -- a structured binding. Its region is checked against the record's options
+  -- before anything is elaborated, and its value is a `.ret`.
+  | .weigh x path R pos =>
+    match c with
+    | .flag =>
+      match lookupBinding S pos x with
+      | .error err => .error err
+      | .ok ⟨_, .structured sch, e⟩ =>
+        match sch.1.numberFieldsAt? path with
+        | none =>
+          .error ⟨pos, s!"a weighing's path names no number record in `{x}`", x⟩
+        | some ns =>
+          match regionGuard pos ns R with
+          | .error err => .error err
+          | .ok _ =>
+            .ok (.ret (fun γ =>
+              match sch.1.recordAt path (e γ) with
+              | some (ns', v) => Region.holds ns' R v
+              | none => false))
+      | .ok b =>
+        .error ⟨pos, s!"a weighing reads a decision, and `{x}` answers \
+                       `{codeName b.code}`", x⟩
+    | c =>
+      .error ⟨pos, s!"{what}: a weighing answers `flag`, not `{codeName c}`",
+              "weigh"⟩
   | .call f args pos =>
     match callPlan S fns f args pos with
     | .error err => .error err
@@ -599,6 +656,12 @@ def bindForm {A : Type} {Γ : Ctx} (fns : Fns) (c : Code) (S : Bindings Γ) (r :
   -- paths, and the same rung.
   | .decide d x ws pos =>
     match rhsPlan fns c S (.decide d x ws pos) "this binding" with
+    | .error err => .error err
+    | .ok v => .ok (fun k =>
+        Plan.graft v (fun _ σ e => Plan.sub k (fun δ => Env.cons (e δ) (σ δ))))
+  -- A weighing is a `.ret` as a decider is, so it too elaborates to no node.
+  | .weigh x path R pos =>
+    match rhsPlan fns c S (.weigh x path R pos) "this binding" with
     | .error err => .error err
     | .ok v => .ok (fun k =>
         Plan.graft v (fun _ σ e => Plan.sub k (fun δ => Env.cons (e δ) (σ δ))))
@@ -831,11 +894,12 @@ def checkBlockResult (result : Code) (fns : Fns) :
     -- plain ask. A wrong annotation is refused by the positional diagnosis.
     match (match rhs with
            | .panel _ _ => .ok (ann.getD Code.verdict)
-           -- Positional, never inferred: a text panel answers `text` and a
-           -- decider answers `flag`, and a wrong annotation is refused by the
-           -- positional diagnosis in `rhsPlan`.
+           -- Positional, never inferred: a text panel answers `text`, and a
+           -- decider and a weighing answer `flag`, and a wrong annotation is
+           -- refused by the positional diagnosis in `rhsPlan`.
            | .panelText _ _ => .ok (ann.getD Code.text)
            | .decide _ _ _ _ => .ok (ann.getD Code.flag)
+           | .weigh _ _ _ _ => .ok (ann.getD Code.flag)
            | .call f _ _ =>
              (match fns.find? f with
               | some fe =>
@@ -1065,11 +1129,12 @@ def checkBody {k : Code} (fns : Fns) (answer : Option String) (result : Code) :
     | .ok _ =>
     match (match rhs with
            | .panel _ _ => .ok (ann.getD Code.verdict)
-           -- Positional, never inferred: a text panel answers `text` and a
-           -- decider answers `flag`, and a wrong annotation is refused by the
-           -- positional diagnosis in `rhsPlan`.
+           -- Positional, never inferred: a text panel answers `text`, and a
+           -- decider and a weighing answer `flag`, and a wrong annotation is
+           -- refused by the positional diagnosis in `rhsPlan`.
            | .panelText _ _ => .ok (ann.getD Code.text)
            | .decide _ _ _ _ => .ok (ann.getD Code.flag)
+           | .weigh _ _ _ _ => .ok (ann.getD Code.flag)
            | .call f _ _ =>
              (match fns.find? f with
               | some fe =>
@@ -1160,6 +1225,8 @@ def rhsAsks (fns : Fns) : RawRhs → Nat
   -- A decider asks nothing: its value is a `.ret`, and `Plan.graft_ret` leaves
   -- no node at all.
   | .decide _ _ _ _ => 0
+  -- A weighing asks nothing for the same reason.
+  | .weigh _ _ _ _ => 0
   | .call f _ _ =>
     match fns.find? f with
     | some fe => fe.asks
