@@ -117,7 +117,9 @@ routingInspectionV2 loaded selected readiness inventories resolved =
               .= object
                 [ "targetKind" .= backendTargetKind (engineBackend engine),
                   "arguments" .= backendLaunchArguments (engineBackend engine),
-                  "fingerprint" .= routingLaunchFingerprint (selectedPersonaName selected) (engineBackend engine) resolved
+                  "fingerprint" .= case engineBackend engine of
+                    BackendDecisions _ -> routingOnlyLaunchFingerprint (selectedPersonaName selected) resolved
+                    backend -> routingLaunchFingerprint (selectedPersonaName selected) backend resolved
                 ],
             "catalogue" .= catalogueJson engine (Map.lookup name inventories)
           ]
@@ -269,10 +271,14 @@ launchRealizationPolicy target =
 backendTargetKind :: Backend -> Text
 backendTargetKind BackendAcp {} = "acp"
 backendTargetKind BackendDeck {} = "deck"
+-- A decisions backend cannot be a default answerer, so its engine launches
+-- through routing configuration alone.
+backendTargetKind BackendDecisions {} = "routing"
 
 backendLaunchArguments :: Backend -> [Text]
 backendLaunchArguments (BackendAcp adapter) = ["--engine", "acp", "--adapter", adapter]
 backendLaunchArguments (BackendDeck session) = ["--session", session]
+backendLaunchArguments (BackendDecisions _) = []
 
 resolvedRealizationPolicy :: ResolvedRealization -> Value
 resolvedRealizationPolicy target =

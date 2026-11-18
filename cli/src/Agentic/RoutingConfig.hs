@@ -83,7 +83,7 @@ import Agentic.RoutingSecrets
     resolvedEngineExecutionFingerprint,
   )
 import Agentic.Route
-  ( Backend,
+  ( Backend (BackendDecisions),
     Routes,
     parseBackend,
     routeDefault,
@@ -226,6 +226,9 @@ instance FromJSON Router where
     name <- nonBlank "router name" =<< o .: "name"
     backendText <- nonBlank "router backend" =<< o .: "backend"
     backend <- either (fail . T.unpack) pure (parseBackend backendText)
+    case backend of
+      BackendDecisions _ -> fail "a decisions engine needs routing configuration version 2"
+      _ -> pure ()
     provider <- nonBlank "router provider" =<< o .: "provider"
     pure (Router name backend provider)
 
@@ -458,6 +461,20 @@ expandRoutingConfigV2 selected overrides commandRoutes authored = do
     applyAlias axis target = do
       let alias = Map.findWithDefault (realizationModel (resolvedSpec target)) axis overrides
       (model, engine) <- modelAndEngine config persona (selectedPersonaName selected) alias
+      case engineBackend engine of
+        BackendDecisions dialect ->
+          let spec0 = resolvedSpec target
+           in either
+                (\problem -> Left ("routing axis '" <> axis <> "': " <> problem))
+                Right
+                ( validateDecisionsRealization
+                    dialect
+                    alias
+                    (realizationThinking spec0)
+                    (realizationMaxOutput spec0)
+                    (realizationOptions spec0)
+                )
+        _ -> pure ()
       let router =
             Router
               { routerName = concreteModelEngine model,
@@ -569,8 +586,10 @@ lowerSelectedRouting selected = do
         Realization
           { realizationRouter = concreteModelEngine model,
             realizationModel = realizationV2Model realization,
-            realizationThinking = realizationV2Thinking realization,
-            realizationMaxOutput = realizationV2MaxOutput realization,
+            -- Validation admits an unwritten setting only for a decisions
+            -- model, which has neither a thinking level nor an output limit.
+            realizationThinking = fromMaybe ThinkOff (realizationV2Thinking realization),
+            realizationMaxOutput = fromMaybe Nothing (realizationV2MaxOutput realization),
             realizationOptions = realizationV2Options realization
           }
 
