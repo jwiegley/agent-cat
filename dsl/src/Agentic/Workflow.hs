@@ -191,8 +191,8 @@
 -- > the revising result `x` is not yet consumed: `case x { settled …
 -- > unsettled … }` is the next statement, and nothing else touches it
 --
--- (@Check.lean:653@'s @pendingErr@, raised at @550@, @558@, @566@, @567@,
--- @568@, @680@ and @701@ — every statement form but @.caseResult@), so there
+-- (@Check.lean:742@'s @pendingErr@, raised at @845@, @863@, @871@, @872@,
+-- @873@, @954@ and @975@ — every statement form but @.caseResult@), so there
 -- is nothing an author could legally have written between the bind and its
 -- @case@ for the fork to swallow.
 --
@@ -326,7 +326,7 @@ module Agentic.Workflow
     panel,
     panelText,
     Decider (..),
-    decide,
+    matches,
     Answer (..),
     structured,
     Schema (..),
@@ -344,6 +344,28 @@ module Agentic.Workflow
     answering,
     annotated,
     Ann,
+
+    -- * Decisions
+    Options,
+    Decision,
+    Question,
+    choice,
+    scale,
+    yesNo,
+    yesNoMeaning,
+    decide,
+
+    -- * Readings of a decision
+    Reading,
+    DecisionRecord,
+    chance,
+    chanceYes,
+    expectedLevel,
+    atLeast,
+    noMoreThan,
+    levelAtLeast,
+    mostLikely,
+    isDistribution,
 
     -- * The block
     Stage (..),
@@ -442,6 +464,24 @@ import Agentic.Builder
     noParams,
   )
 import qualified Agentic.Builder as B
+import Agentic.Decision
+  ( ChoiceSize,
+    DecisionSchema,
+    Options,
+    ScaleSize,
+    optionName,
+    options,
+    rank,
+  )
+import Agentic.DSL.Decision
+  ( DecisionForm (..),
+    DecisionQuestion (..),
+    Halfspace (..),
+    decisionSchemaRep,
+    numberFieldNames,
+    renderDecisionHeader,
+    validDecisionQuestion,
+  )
 import Agentic.DSL.Plan
   ( KnownCode,
     SCode (..),
@@ -453,6 +493,7 @@ import Agentic.Schema
     KnownSchema (..),
     Schema (..),
     SchemaWitness,
+    demoteSchema,
     schemaArray,
     schemaBoolean,
     schemaInteger,
@@ -479,7 +520,9 @@ import Data.Char (isDigit)
 import Data.Kind (Constraint, Type)
 import qualified Data.List.NonEmpty as NE
 import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
+import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.Proxy (Proxy (..))
+import Data.Ratio (denominator, numerator)
 import Data.Text (Text)
 import qualified Data.Text as T
 -- The @ErrorMessage@ constructors are imported qualified, and only there:
@@ -705,29 +748,31 @@ panelText [] =
     (T.unpack [wft|panelText: a text panel needs at least one member — `panelText []` asks no one and fences nothing|])
 panelText (m : ms) = B.panelText (m NE.:| ms)
 
--- | @decide LastNonEmptyLineIs status ["WORK COMPLETE"]@ — a pure
+-- | @matches LastNonEmptyLineIs status ["WORK COMPLETE"]@ — a pure
 -- classification of text already in hand, answering a flag an @if@ can decide
--- on (D7).
+-- on (D7). It is the surface spelling of 'Agentic.Builder.decide', which
+-- prints the @decide@ node of the specification. The surface name 'decide'
+-- asks a decision model instead.
 --
 -- It asks nothing and costs nothing in any fold, so the net effect of writing
 -- one where an asked flag stood is __one fewer question on every path, the same
 -- number of paths, and the same rung__. The needles are literal program text
 -- and never words: a needle a model could author is a test a model chooses,
 -- which is not a decider.
-decide ::
+matches ::
   forall h s.
   (KnownIx h s) =>
   Decider ->
   V h 'CodeText ->
   [Text] ->
   Rhs s 'CodeFlag
-decide _ _ [] =
+matches _ _ [] =
   error
-    (T.unpack [wft|decide: a decider needs at least one needle to test for — a decider with none is a test that is constantly false, with nothing in the source to show it|])
-decide d v ws
+    (T.unpack [wft|matches: a decider needs at least one needle to test for — a decider with none is a test that is constantly false, with nothing in the source to show it|])
+matches d v ws
   | any T.null ws =
       error
-        (T.unpack [wft|decide: a decider needs its needles to say something, and the empty needle tests nothing|])
+        (T.unpack [wft|matches: a decider needs its needles to say something, and the empty needle tests nothing|])
   | otherwise = B.decide @h @s d v (NE.fromList ws)
 
 -- | Answer kinds as evidence. A structured answer carries the schema singleton
@@ -766,6 +811,261 @@ annotated a c = withAnswer c (\code -> Ann code (B.oneAt code a))
 data Ann (s :: Scope) (c :: Code) = Ann (SCode c) (Rhs s c)
 
 -- ---------------------------------------------------------------------------
+-- Decisions
+-- ---------------------------------------------------------------------------
+
+-- | The answer code of a decision over a finite option set T: a structured
+-- answer whose schema is the record ℚ^T of one @number@ field per option, in
+-- option order. A record v means the distribution v/Σv of the simplex Δ(T)
+-- when v lies in the cone C(T) = {v ≥ 0, Σv > 0}, and it means nothing
+-- outside the cone.
+type Decision t = 'CodeStructured (DecisionSchema t)
+
+-- | A question whose answer is a point of Δ(T): the wire form that asks it,
+-- the literal instructions, and a literal description of every option of T in
+-- option order. The form selects the wire primitive and does not change the
+-- answer type, which is 'Decision' @t@ for every form.
+data Question t = Question DecisionForm Text [(Text, Text)]
+
+-- | The question with every option of T described by the given function.
+question :: forall t. Options t => DecisionForm -> Text -> (t -> Text) -> Question t
+question form instructions describe =
+  Question form instructions [(optionName t, describe t) | t <- options @t]
+
+-- | @choice instructions describe@: which one of the options of T is right,
+-- where T has no structure beyond its options. A choice takes from 2 to 255
+-- options, and the type says so.
+choice :: forall t. (Options t, ChoiceSize t) => Text -> (t -> Text) -> Question t
+choice = question ChoiceForm
+
+-- | @scale instructions describe@: which level of the ordered set T is right,
+-- with the levels from lowest to highest in declaration order. The reading
+-- 'expectedLevel' and the test 'levelAtLeast' read that order. A scale takes
+-- from 2 to 10 levels, and the type says so.
+scale :: forall t. (Options t, ScaleSize t) => Text -> (t -> Text) -> Question t
+scale = question ScaleForm
+
+-- | @yesNo statement@: whether the statement holds, as a point of Δ(Bool)
+-- with 'True' meaning that it holds. The options are named only.
+yesNo :: Text -> Question Bool
+yesNo statement = question YesNoForm statement (const "")
+
+-- | @yesNoMeaning statement meaning@: 'yesNo' with a description of what each
+-- answer means.
+yesNoMeaning :: Text -> (Bool -> Text) -> Question Bool
+yesNoMeaning = question YesNoForm
+
+-- | The question as the planning vocabulary carries it, or the reason it
+-- cannot be asked: 'validDecisionQuestion', and the naming law L2,
+--
+-- > decisionSchemaRep q == demoteSchema (schemaWitness @(DecisionSchema t))
+--
+-- which a hand-written 'Enum' that lists the options out of declaration order
+-- breaks.
+decisionQuestion :: forall t. Options t => Question t -> Either Text DecisionQuestion
+decisionQuestion (Question form instructions described) = do
+  dq <- case described of
+    first : rest -> Right (DecisionQuestion form instructions (first :| rest))
+    [] -> Left "a decision needs options, and the Bounded and Enum instances of this type list none"
+  validDecisionQuestion dq
+  if decisionSchemaRep dq == demoteSchema (schemaWitness @(DecisionSchema t))
+    then Right dq
+    else Left [wft|a decision lists its options in declaration order, and the Enum instance of this type lists them in another order, so the answer record and the options would disagree|]
+
+-- | @decide p q evidence@: ask the decision model @p@ the question @q@ about
+-- the evidence. The answer is a record of one number per option, read as the
+-- distribution v/Σv. It is one model question at the kind 'Decision' @t@,
+-- printed with its kind, whose prompt is
+--
+-- > renderDecisionHeader q <> evidence
+--
+-- so that @parseDecisionPrompt@ reads the question and the evidence back from
+-- the prompt (law L12). A question that 'validDecisionQuestion' or the naming
+-- law refuses is refused here at the value level, in the style of @panel []@.
+decide :: forall t s. Options t => Party 'IsModel -> Question t -> Words s -> Ann s (Decision t)
+decide p q evidence = case decisionQuestion q of
+  Left why -> error (T.unpack ("decide: " <> why))
+  Right dq ->
+    annotated
+      (ask p (lit (renderDecisionHeader dq) : evidence))
+      (Structured (schemaWitness @(DecisionSchema t)))
+
+-- ---------------------------------------------------------------------------
+-- Readings of a decision
+-- ---------------------------------------------------------------------------
+
+-- | The constraint that a structured answer is the answer record of a
+-- decision: a non-empty record of @number@ fields, the vector space ℚ^T over
+-- its field names. 'Decision' @t@ satisfies it for every option set T.
+--
+-- A reading that takes no option value is typed by this constraint rather
+-- than by 'Options' @t@, because 'Decision' is not injective in @t@: the
+-- handle's type fixes the record and not the Haskell type that named it.
+type DecisionRecord sch = (KnownSchema sch, NumberRecordShape sch sch)
+
+-- | Reduces to @()@ exactly when the schema is a non-empty record of numbers.
+-- The first argument is the whole schema, kept for the refusal.
+type family NumberRecordShape (whole :: Schema) (sch :: Schema) :: Constraint where
+  NumberRecordShape whole ('SchemaProperty n 'SchemaNumber 'SchemaObject) = ()
+  NumberRecordShape whole ('SchemaProperty n 'SchemaNumber rest) = NumberRecordShape whole rest
+  NumberRecordShape whole sch =
+    TypeError
+      ( 'TL.Text "a reading of a decision reads a record of number fields, and this answer is "
+          'TL.:<>: 'TL.ShowType whole
+      )
+
+-- | An affine reading ⟨w, ·⟩ : Δ(T) → ℚ of the decision record a handle
+-- holds, given by its weight vector w : T → ℚ as (option name, weight) pairs
+-- in option order. An option with no pair weighs 0, and on Δ(T) the reading
+-- ranges over [min w, max w].
+--
+-- The record's schema is held with the handle, so the reading is typed by the
+-- handle's scope alone.
+data Reading h where
+  Reading :: SchemaWitness sch -> V h ('CodeStructured sch) -> [(Text, Rational)] -> Reading h
+
+-- | @chance s x@: the chance ⟨1_S, p⟩ that the right option lies in the set
+-- S of the options in @s@, read as a set. The chance of no option is
+-- refused, because it is 0 on every distribution.
+chance :: forall h t. Options t => [t] -> V h (Decision t) -> Reading h
+chance [] _ =
+  error
+    (T.unpack [wft|chance: a chance needs at least one option, and the chance of no option is 0 on every distribution|])
+chance s x = Reading (schemaWitness @(DecisionSchema t)) x [(optionName t, 1) | t <- options @t, t `elem` s]
+
+-- | @chanceYes x@: the chance ⟨1_{True}, p⟩ that the statement holds,
+-- @chanceYes = chance [True]@.
+chanceYes :: V h (Decision Bool) -> Reading h
+chanceYes = chance [True]
+
+-- | @expectedLevel x@: the expected level ⟨ι, p⟩ of a scale, where ι is the
+-- rank of a level in option order (0 to |T| − 1). The option order is the
+-- field order of the record, which is declaration order for every question
+-- that 'decide' asks.
+expectedLevel :: forall h sch. DecisionRecord sch => V h ('CodeStructured sch) -> Reading h
+expectedLevel x = Reading witness x (zip names [0 ..])
+  where
+    witness = schemaWitness @sch
+    names = recordNames witness
+
+-- | The option names of a decision record, in field order.
+recordNames :: SchemaWitness sch -> [Text]
+recordNames = fromMaybe [] . numberFieldNames . demoteSchema
+
+-- | The range [min w, max w] of a reading on Δ(T), whose extreme points are
+-- the vertices δₜ.
+readingRange :: Reading h -> (Rational, Rational)
+readingRange (Reading witness _ ws) = case values of
+  [] -> (0, 0)
+  _ -> (minimum values, maximum values)
+  where
+    values = [fromMaybe 0 (lookup name ws) | name <- recordNames witness]
+
+-- | The refusal of a test that is constant on Δ(T), which holds of every
+-- distribution or of none and so says nothing.
+constantTest :: Text -> Rational -> (Rational, Rational) -> Bool -> a
+constantTest verb theta (low, high) holds =
+  error
+    ( T.unpack
+        ( T.concat
+            [ verb,
+              ": the reading ranges from ",
+              showRational low,
+              " to ",
+              showRational high,
+              " on every distribution, so a bound of ",
+              showRational theta,
+              if holds then " always holds" else " never holds",
+              [wft|, and a test that cannot fail or cannot pass says nothing|]
+            ]
+        )
+    )
+
+-- | A rational as an integer or as a fraction n/d in lowest terms.
+showRational :: Rational -> Text
+showRational r
+  | denominator r == 1 = T.pack (show (numerator r))
+  | otherwise = T.pack (show (numerator r) <> "/" <> show (denominator r))
+
+-- | @r \`atLeast\` θ@: the test ⟨w, p⟩ ≥ θ, which is the half-space H(w, θ)
+-- of Δ(T). It lowers to the region @[Halfspace w θ]@, and on every record v
+-- (law L11)
+--
+-- > holdsRegion [Halfspace w θ] v == maybe False (\p -> ⟨w, p⟩ >= θ) (distribution v)
+--
+-- A bound at or below min w, or above max w, is refused, because the test is
+-- then constant on Δ(T). This refuses every bound on the chance of all the
+-- options.
+atLeast :: forall h s. KnownIx h s => Reading h -> Rational -> Rhs s 'CodeFlag
+atLeast r@(Reading witness x ws) theta
+  | theta <= low = constantTest "atLeast" theta range True
+  | theta > high = constantTest "atLeast" theta range False
+  | otherwise = B.weigh @h @s witness x [] [Halfspace ws theta]
+  where
+    range@(low, high) = readingRange r
+
+-- | @r \`noMoreThan\` θ@: the test ⟨w, p⟩ ≤ θ, which is the half-space
+-- H(−w, −θ) of Δ(T). It lowers to the region @[Halfspace (negate <$> w) (−θ)]@,
+-- and on every record v (law L11)
+--
+-- > holdsRegion [Halfspace (negate <$> w) (−θ)] v == maybe False (\p -> ⟨w, p⟩ <= θ) (distribution v)
+--
+-- A bound at or above max w, or below min w, is refused, because the test is
+-- then constant on Δ(T).
+noMoreThan :: forall h s. KnownIx h s => Reading h -> Rational -> Rhs s 'CodeFlag
+noMoreThan r@(Reading witness x ws) theta
+  | theta >= high = constantTest "noMoreThan" theta range True
+  | theta < low = constantTest "noMoreThan" theta range False
+  | otherwise = B.weigh @h @s witness x [] [Halfspace [(name, negate c) | (name, c) <- ws] (negate theta)]
+  where
+    range@(low, high) = readingRange r
+
+-- | @levelAtLeast l x@: the expected level of the scale is at least the rank
+-- of @l@,
+--
+-- > levelAtLeast l x == expectedLevel x `atLeast` rank l
+--
+-- with the weights taken from 'rank', so that the bound and the weights read
+-- one order. The lowest level is refused, because every distribution reaches
+-- it.
+levelAtLeast :: forall h s t. (KnownIx h s, Options t) => t -> V h (Decision t) -> Rhs s 'CodeFlag
+levelAtLeast l x
+  | l == minBound =
+      error
+        (T.unpack [wft|levelAtLeast: every distribution reaches the lowest level, so a test of it always holds and says nothing|])
+  | otherwise = atLeast @h @s levels (rank l)
+  where
+    levels = Reading (schemaWitness @(DecisionSchema t)) x [(optionName u, rank u) | u <- options @t]
+
+-- | @mostLikely t x@: the option @t@ is among the most likely options, the
+-- argmax set of p. It lowers to the region
+--
+-- > [Halfspace [(optionName t, 1), (optionName u, −1)] 0 | u <- options, u /= t]
+--
+-- of the half-spaces p(t) − p(u) ≥ 0, and on every record v (law L11)
+--
+-- > holdsRegion (that region) v == maybe False ((t `elem`) . modes) (distribution v)
+--
+-- so every option of a tie is most likely.
+mostLikely :: forall h s t. (KnownIx h s, Options t) => t -> V h (Decision t) -> Rhs s 'CodeFlag
+mostLikely t x =
+  B.weigh @h @s
+    (schemaWitness @(DecisionSchema t))
+    x
+    []
+    [Halfspace [(optionName t, 1), (optionName u, -1)] 0 | u <- options @t, u /= t]
+
+-- | @isDistribution x@: the record is a distribution, that is, it lies in the
+-- cone C(T). It lowers to the empty region, and on every record v (law L11)
+--
+-- > holdsRegion [] v == isJust (distribution v)
+--
+-- A program routes a record that means nothing with it, because every other
+-- test is false on such a record.
+isDistribution :: forall h s sch. (KnownIx h s, DecisionRecord sch) => V h ('CodeStructured sch) -> Rhs s 'CodeFlag
+isDistribution x = B.weigh @h @s (schemaWitness @sch) x [] []
+
+-- ---------------------------------------------------------------------------
 -- The block: an indexed CPS monad over a Stage
 -- ---------------------------------------------------------------------------
 
@@ -777,7 +1077,7 @@ data Ann (s :: Scope) (c :: Code) = Ann (SCode c) (Rhs s c)
 --   * @'Review' c s@ and @'Amending' c s@ — a revision's two clauses;
 --   * @'Body' r s@ — a function body returning @r@.
 --
--- Lean's fourth state, @Pend Γ@ (@Check.lean:639@) — a block /pending/ the
+-- Lean's fourth state, @Pend Γ@ (@Check.lean:728@) — a block /pending/ the
 -- @case@ that consumes a bounded revision's result — has no stage here,
 -- because the fork happens at the bind and the arms are ordinary open blocks.
 -- Its refusal is not lost: see \"Two branches, two mechanisms\".
@@ -1575,7 +1875,7 @@ newtype Loop (c :: Code) (s :: Scope) = Loop
 -- @case@ is the branch, and 'revising'\''s 'Step' runs the rest of the block
 -- twice — once under @Settled@ and once under @Unsettled@ — to obtain the two
 -- arms it prints. That is exact, because Lean refuses every statement between
--- a revision's bind and its @case@ (@Check.lean:653@), so the two runs can
+-- a revision's bind and its @case@ (@Check.lean:742@), so the two runs can
 -- differ only in the arms themselves.
 --
 -- __Both runs are typed at the same scope, and now that scope is honest.__ A
@@ -1623,7 +1923,7 @@ amendWith rhs = W (\_ _ -> Amendment rhs)
 -- and the @case@ that consumes it are __one__ node: the intermediate has type
 -- @Plan Γ (El c, Bool)@ and @Ctx@ has no code for a candidate-and-ending pair.
 -- Lean carries it as a @Pend Γ@ that the next statement must consume
--- (@Check.lean:639@); here the 'Step' at 'Loop' forks the rest of the block
+-- (@Check.lean:728@); here the 'Step' at 'Loop' forks the rest of the block
 -- into the two arms and this closes over both. See 'Outcome'.
 revising ::
   forall h c s.

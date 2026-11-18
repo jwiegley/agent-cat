@@ -1,4 +1,5 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -11,13 +12,30 @@
 -- QuickCheck property over three option sets (a four-way choice, a five-level
 -- scale and Bool). The records include zero and negative ones, and the prompt
 -- generators include newlines, leading spaces, empty descriptions and header
--- look-alikes inside the evidence. The probe exits non-zero when any property
--- fails.
+-- look-alikes inside the evidence. Law L11 runs through the authoring surface
+-- itself: each reading is built with "Agentic.Workflow", and the probe reads
+-- back both the region the surface prints and the plan it elaborates to. The
+-- probe exits non-zero when any property fails.
 module Main (main) where
 
+import Agentic.Builder (Rhs (..), V (..))
+import Agentic.DSL (Env (..), Plan (PRet), RawRhs (RhsWeigh), Var (VHere), evalExpr)
 import Agentic.Decision
 import Agentic.Plan.Decision
 import Agentic.Schema
+import Agentic.Workflow
+  ( Decision,
+    DecisionRecord,
+    atLeast,
+    chance,
+    chanceYes,
+    expectedLevel,
+    isDistribution,
+    levelAtLeast,
+    mostLikely,
+    noMoreThan,
+  )
+import Control.Exception (ErrorCall, evaluate, try)
 import qualified Data.Aeson as A
 import Data.List (nub, sort)
 import Data.List.NonEmpty (NonEmpty ((:|)))
@@ -128,26 +146,68 @@ genSubset :: forall t. Options t => Gen [t]
 genSubset = listOf (elements (options @t))
 
 -- ---------------------------------------------------------------------------
--- Readings, lowered as the design's lowering table states
+-- Readings, built with the authoring surface
 -- ---------------------------------------------------------------------------
 
 record :: forall t. Options t => Weights t -> Maybe [(Text, Rational)]
 record w = numberRecordAt (schemaWitness @(DecisionSchema t)) [] (toSchemaEl w)
 
-lowerAtLeast :: [(Text, Rational)] -> Rational -> [Halfspace]
-lowerAtLeast ws theta = [Halfspace ws theta]
+-- | The scope of one decision binding, printed @x@.
+type Here t = '[ '("x", Decision t)]
 
-lowerNoMoreThan :: [(Text, Rational)] -> Rational -> [Halfspace]
-lowerNoMoreThan ws theta = [Halfspace [(n, negate c) | (n, c) <- ws] (negate theta)]
+-- | The handle of that binding.
+subject :: V (Here t) (Decision t)
+subject = V "x" VHere
 
-chanceWeights :: Options t => [t] -> [(Text, Rational)]
-chanceWeights s = [(optionName t, 1) | t <- nub s]
+-- | What the surface makes of a test, read on the record @w@: 'Nothing' when
+-- the surface refuses the test, and otherwise the verdict of the region it
+-- prints and the verdict of the plan it elaborates to.
+surface :: forall t. Options t => Rhs (Here t) 'CodeFlag -> Weights t -> IO (Maybe (Bool, Bool))
+surface rhs w = do
+  forced <- try (evaluate rhs)
+  pure $ case forced of
+    Left (_ :: ErrorCall) -> Nothing
+    Right built -> Just (printed built, planned built)
+  where
+    printed built = case rhsRaw built of
+      RhsWeigh "x" [] region _ -> maybe False (holdsRegion region) (record w)
+      _ -> error "the surface printed something other than a weighing of x at the empty path"
+    planned built = case rhsPlan built of
+      PRet e -> evalExpr e (ECons (toSchemaEl w) ENil)
+      _ -> error "the surface elaborated to something other than a ret"
 
-levelWeights :: forall t. Options t => [(Text, Rational)]
-levelWeights = [(optionName t, rank t) | t <- options @t]
+-- | Whether a test of Δ(T) is constant on it. Every test checked this way is
+-- a half-space, which is constant on the simplex exactly when it is constant
+-- on the vertices.
+constantOnSimplex :: forall t. Options t => (Dist t -> Bool) -> Bool
+constantOnSimplex meaning = case map (meaning . dirac) (options @t) of
+  first : rest -> all (== first) rest
+  [] -> True
 
-lowerMostLikely :: forall t. Options t => t -> [Halfspace]
-lowerMostLikely t = [Halfspace [(optionName t, 1), (optionName u, -1)] 0 | u <- options @t, u /= t]
+-- | Law L11 for a half-space test: the surface refuses it exactly when it is
+-- constant on Δ(T), and otherwise the printed region and the elaborated plan
+-- both read the record @w@ as the test reads its distribution.
+halfspaceLaw :: forall t. Options t => Rhs (Here t) 'CodeFlag -> (Dist t -> Bool) -> Weights t -> Property
+halfspaceLaw rhs meaning w = ioProperty $ do
+  got <- surface rhs w
+  pure $ case got of
+    Nothing -> counterexample "the surface refused a test that is not constant" (constantOnSimplex meaning)
+    Just verdicts ->
+      counterexample ("the surface accepted a constant test, or read " <> show verdicts) $
+        not (constantOnSimplex meaning) && agrees meaning w verdicts
+
+-- | Law L11 for a test that the surface never refuses.
+totalLaw :: forall t. Options t => Rhs (Here t) 'CodeFlag -> (Dist t -> Bool) -> Weights t -> Property
+totalLaw rhs meaning w = ioProperty $ do
+  got <- surface rhs w
+  pure $ case got of
+    Nothing -> counterexample "the surface refused the test" False
+    Just verdicts -> counterexample ("the surface read " <> show verdicts) (agrees meaning w verdicts)
+
+agrees :: Options t => (Dist t -> Bool) -> Weights t -> (Bool, Bool) -> Bool
+agrees meaning w (printed, planned) = printed == expected && planned == expected
+  where
+    expected = maybe False meaning (distribution w)
 
 dot :: Options t => [(Text, Rational)] -> Dist t -> Rational
 dot ws d = sum [c * probabilityOf d [t | t <- options, optionName t == n] | (n, c) <- ws]
@@ -164,7 +224,7 @@ genThreshold exact =
 
 lawsFor ::
   forall t.
-  (Options t, Show t, Eq (SchemaEl (DecisionSchema t))) =>
+  (Options t, Show t, Eq (SchemaEl (DecisionSchema t)), DecisionRecord (DecisionSchema t)) =>
   String ->
   [(String, Property)]
 lawsFor setName =
@@ -260,32 +320,29 @@ lawsFor setName =
     named "L11 chance S at least" $
       forAll (genWeights @t) $ \w -> forAll (genSubset @t) $ \s ->
         forAll (genThreshold ((`probabilityOf` s) <$> distribution w)) $ \theta ->
-          holds (lowerAtLeast (chanceWeights s) theta) w
-            == maybe False (\d -> probabilityOf d s >= theta) (distribution w),
+          halfspaceLaw (chance s (subject @t) `atLeast` theta) (\d -> probabilityOf d s >= theta) w,
     named "L11 chance S no more than" $
       forAll (genWeights @t) $ \w -> forAll (genSubset @t) $ \s ->
         forAll (genThreshold ((`probabilityOf` s) <$> distribution w)) $ \theta ->
-          holds (lowerNoMoreThan (chanceWeights s) theta) w
-            == maybe False (\d -> probabilityOf d s <= theta) (distribution w),
+          halfspaceLaw (chance s (subject @t) `noMoreThan` theta) (\d -> probabilityOf d s <= theta) w,
     named "L11 expected level at least" $
       forAll (genWeights @t) $ \w ->
         forAll (genThreshold (meanLevel <$> distribution w)) $ \theta ->
-          holds (lowerAtLeast (levelWeights @t) theta) w
-            == maybe False (\d -> meanLevel d >= theta) (distribution w),
+          halfspaceLaw (expectedLevel (subject @t) `atLeast` theta) (\d -> meanLevel d >= theta) w,
     named "L11 expected level no more than" $
       forAll (genWeights @t) $ \w ->
         forAll (genThreshold (meanLevel <$> distribution w)) $ \theta ->
-          holds (lowerNoMoreThan (levelWeights @t) theta) w
-            == maybe False (\d -> meanLevel d <= theta) (distribution w),
+          halfspaceLaw (expectedLevel (subject @t) `noMoreThan` theta) (\d -> meanLevel d <= theta) w,
     named "L11 level at least l" $
       forAll (genWeights @t) $ \w -> forAll (elements ts) $ \l ->
-        holds (lowerAtLeast (levelWeights @t) (rank l)) w
-          == maybe False (\d -> meanLevel d >= rank l) (distribution w),
+        halfspaceLaw (levelAtLeast l (subject @t)) (\d -> meanLevel d >= rank l) w,
     named "L11 most likely t" $
       forAll (genWeights @t) $ \w -> forAll (elements ts) $ \t ->
-        holds (lowerMostLikely t) w == maybe False ((t `elem`) . modes) (distribution w),
-    named "L11 the empty region is the cone" $
-      forAll (genWeights @t) $ \w -> holds [] w == isJust (distribution w),
+        totalLaw (mostLikely t (subject @t)) ((t `elem`) . modes) w,
+    named "L11 isDistribution is the empty region, which is the cone" $
+      forAll (genWeights @t) $ \w ->
+        totalLaw (isDistribution (subject @t)) (const True) w
+          .&&. holds [] w == isJust (distribution w),
     named "L11 every region reads on the normalized record" $
       forAll (genWeights @t) $ \w -> forAll (listOf (genHalfspace @t)) $ \region ->
         holds region w
@@ -319,14 +376,12 @@ boolLaws =
     ( "Bool: L11 chance of yes at least",
       forAll (genWeights @Bool) $ \w ->
         forAll (genThreshold ((probValue . probabilityOfTrue) <$> distribution w)) $ \theta ->
-          maybe False (holdsRegion (lowerAtLeast (chanceWeights [True]) theta)) (record w)
-            == maybe False (\d -> probValue (probabilityOfTrue d) >= theta) (distribution w)
+          halfspaceLaw (chanceYes (subject @Bool) `atLeast` theta) (\d -> probValue (probabilityOfTrue d) >= theta) w
     ),
     ( "Bool: L11 chance of yes no more than",
       forAll (genWeights @Bool) $ \w ->
         forAll (genThreshold ((probValue . probabilityOfTrue) <$> distribution w)) $ \theta ->
-          maybe False (holdsRegion (lowerNoMoreThan (chanceWeights [True]) theta)) (record w)
-            == maybe False (\d -> probValue (probabilityOfTrue d) <= theta) (distribution w)
+          halfspaceLaw (chanceYes (subject @Bool) `noMoreThan` theta) (\d -> probValue (probabilityOfTrue d) <= theta) w
     ),
     ( "Swapped: L2 detects a hand-written Enum that reorders the options",
       property (Just (map optionName (options @Swapped)) /= numberFieldNames (demoteSchema (schemaWitness @(DecisionSchema Swapped))))
