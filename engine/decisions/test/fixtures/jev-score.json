@@ -1,0 +1,1 @@
+{"id":"gen-dec-1763400000-Jev1score","provider":"TypeSafe","model":"typesafe/jev-1.14-20261014","answers":{"decision":{"type":"score","score":1.21,"legend":{"0":"Routine","1":"Soon","2":"Urgent"},"probabilities":{"0":0,"1":0.79,"2":0.21},"confidence":0.69}},"usage":{"input_tokens":91,"output_tokens":0,"cost":0.0000038}}

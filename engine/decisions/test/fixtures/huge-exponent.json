@@ -1,0 +1,1 @@
+{"model":"typesafe/jev-1.14-20261014","answers":{"decision":{"type":"choice","choice":"Billing","confidence":0.8,"probabilities":{"Billing":0.9,"Technical":0.1,"Other":1e-5000}}},"usage":{"input_tokens":87,"output_tokens":0}}
