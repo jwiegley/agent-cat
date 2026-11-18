@@ -8407,6 +8407,37 @@ cli/test/PolicyProbe.hs:2701 requires parseCommand collidingRegistry ["--tui", "
 ]
 #+end_src
 
+* TODO [#C] ext-pi shows result and answer text in the TUI without removing terminal escape sequences
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-h055
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-11-17 Tue 23:26]
+:MODIFIED: [2026-11-17 Tue 23:26]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+Found by the audit of the fix for acat-pwqe. The agent-cat-run and agent-cat-result entry renderers in ext-pi/src/index.ts put the verified result text raw into a pi-tui Text, which keeps ANSI codes; the monitor already shows occurrence answers the same way. A model-written result can carry escape sequences, OSC included. Not verified: whether pi-tui strips OSC before the terminal. Wanted: decide one sanitising rule for model-written text shown by the extension and test it.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-h055",
+    "depends_on_id": "acat-pwqe",
+    "type": "discovered-from",
+    "created_at": "2026-11-18T07:26:43.137936Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
+
 * DONE [#B] Worked example in Lean: harden-a-patch, specified end-to-end
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
@@ -10235,6 +10266,37 @@ The readiness audit found that ext-pi ordinary tests inherit the live manager pr
     "author": "johnw",
     "text": "Release validation on 2026-10-22: repaired the checkout dependency tree from the verified Pi 1.3 worktree. Typecheck, 224 ordinary tests with both inherited manager selectors deliberately invalid, nine local integration tests, the remote bridge check, documentation gate and root Nix runner package pass. The explicit live fixture initially refused a mode-0644 certificate under umask 022. The harness now sets certificate and key to 0600, and pi-client-controls passes all three Vitest steps and the independent manager-fact checks. Full policies passed the environment assertion and exposed acat-cpp5, the known lexical /var symlink refusal. Its fixture path now resolves before reaching the native checker. Evidence is under /Users/johnw/Products/agent-cat-release-20261022.",
     "created_at": "2026-10-22T04:38:41Z"
+  }
+]
+#+end_src
+
+* TODO [#C] ext-pi integration tests do not check the shown local result, and ran against a runner built from 5ead6b89
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-ksfv
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-11-17 Tue 23:26]
+:MODIFIED: [2026-11-17 Tue 23:26]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+Found by the audit of the fix for acat-pwqe. test/wf-routing-e2e.test.ts registers a no-op entry renderer and checks only status, so the result display is tested only against the JS fixture, which writes result.json before it emits the terminal event. The Haskell order was read (writeResultArtifact returns the reference of the bytes it wrote), not tested. Also untested: the refusal for a protocol version 1 run, and the entry line and RPC notification when the automatic read fails. Wanted: an integration assertion on the rendered result with a freshly built agentic-run, as ext-pi/AGENTS.md requires, and unit tests for the two refusals.
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-ksfv",
+    "depends_on_id": "acat-pwqe",
+    "type": "discovered-from",
+    "created_at": "2026-11-18T07:26:43.643085Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
   }
 ]
 #+end_src
@@ -15989,6 +16051,37 @@ A2 fess finding (low). tui/src/Agentic/Tui/ServiceLane.hs lines 6-8 and 69-70 sa
   }
 ]
 #+end_src
+
+* DONE [#B] Pi shows nothing of a succeeded local /wf run's result
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-pwqe
+:LABELS:   []
+:ISSUE_TYPE: bug
+:CREATED:  [2026-11-17 Tue 22:57]
+:MODIFIED: [2026-11-17 Tue 23:18]
+:CREATED_BY: johnw
+:FINISHED: [2026-11-17 Tue 23:18]
+:CLOSE_REASON: Fixed in ext-pi: a succeeded local run shows its verified result with its transcript entry (value from memory, reference only in the session file), /wf-result shows or saves it; npm run check, npm test (285 pass, the one failure is the pre-existing host-versions test) and npm run test:integration (25 pass).
+:SOURCE_REPO: agent-cat-pi-result
+:SOURCE_REPO_PATH: /Users/johnw/Products/agent-cat-pi-result
+:ORIGINAL_SIZE: 0
+:END:
+
+A local `/wf` run that succeeds shows the operator nothing of its result.
+
+Observed 2026-11-17 on Hera with the deployed extension (agent-cat 5ead6b89, ext-pi): `/wf wf:translate-en` with pasted text ran natively under the `sacred-text` persona, run `native-72577-1160832893792000`, 55 consultations, and ended `succeeded`. The session received one `agent-cat-run` entry (`agent-cat RUN_ID: succeeded translate-en`, the bill, `run store: DIR`) and nothing else. The verified result — the translation and its quality notes — was in `DIR/runtime/result.json` the whole time, and the operator concluded the run had produced nothing.
+
+Cause, read in `ext-pi/src`: `supervise` in `index.ts` appends the status entry on a terminal snapshot and never reads the result; `formatMonitor`/`MonitorModel` in `monitor.ts` render no result line; the only result command, `/wfm-result`, is service mode's and reads the manager, not a local run store. `verifyResultArtifact` in `supervisor.ts` already verifies the artifact against the terminal event (bytes, SHA-256, canonical form, run id, code) and discards what it parsed.
+
+Wanted:
+1. When a local run succeeds with a result, the operator sees it in the session without a further command: the verified result text (bounded, with the rest named), headed by the run and workflow. It is shown through the UI, not sent to the model.
+2. `/wf-result [RUN_ID [PATH]]`: show the verified result of a succeeded local run, live or restored after a Pi restart; with PATH, save its exact value to a new file with mode 0600, refusing an existing path, as `/wfm-result` does for service runs.
+3. The `agent-cat-run` entry and the monitor name the result (code, bytes, SHA-256, preview) and the command that shows it. The entry keeps a reference, never the payload.
+4. A result whose artifact fails verification is never shown; the refusal says why.
+5. `ext-pi/README.md` documents the behaviour and the command; the bare `/wf-help` table lists it.
+
+Not in scope: the model-facing `agent_cat_workflow` tool (a local `result` action would put result bytes in the transcript; service mode's `manager-result` deliberately saves to a path instead), and a `--scratch` for `/wf` runs.
 
 * TODO [#D] Address fess findings of C3 manager-log pruning
 :PROPERTIES:

@@ -438,7 +438,7 @@ export class OwnedRun {
       await this.#stderrQueue;
       await this.#eventMirrorQueue;
       if (this.#snapshot.status === "succeeded" && this.#snapshot.result) {
-        await verifyResultArtifact(this.#prepared.storeDir, this.#snapshot.runId, this.#snapshot.result);
+        await readVerifiedResult(this.#prepared.storeDir, this.#snapshot.runId, this.#snapshot.result);
       }
       if (this.#leaseTimer) clearInterval(this.#leaseTimer);
       await this.#leaseQueue;
@@ -952,7 +952,7 @@ async function readTextBounded(path: string, maximum: number): Promise<string> {
 }
 
 async function verifySnapshotResult(storeDir: string, runId: string, snapshot: RunSnapshot): Promise<void> {
-  if (snapshot.status === "succeeded" && snapshot.result) await verifyResultArtifact(storeDir, runId, snapshot.result);
+  if (snapshot.status === "succeeded" && snapshot.result) await readVerifiedResult(storeDir, runId, snapshot.result);
 }
 
 function jsonHasOuterWhitespace(value: string): boolean {
@@ -969,7 +969,14 @@ function jsonHasOuterWhitespace(value: string): boolean {
   return false;
 }
 
-async function verifyResultArtifact(storeDir: string, runId: string, reference: NonNullable<RunSnapshot["result"]>): Promise<void> {
+/**
+ * The result of a succeeded run, read from `runtime/result.json` of its run
+ * store and returned only when the artifact agrees with the reference of the
+ * terminal event: the byte count, the SHA-256, the canonical compact form,
+ * the run identifier and the result code. Any disagreement throws, so a
+ * caller never holds the result of an artifact that failed these checks.
+ */
+export async function readVerifiedResult(storeDir: string, runId: string, reference: NonNullable<RunSnapshot["result"]>): Promise<{ code: unknown; value: unknown; valueJson: string }> {
   const expectedBytes = BigInt(reference.bytes);
   const path = await confinedPath(storeDir, ["runtime", "result.json"]);
   const bytes = await readBytesBounded(path, MAX_SNAPSHOT_FILE);
@@ -988,6 +995,9 @@ async function verifyResultArtifact(storeDir: string, runId: string, reference: 
   const resultEntries = compactObjectEntries(entries[1][1]);
   if (JSON.stringify(resultEntries.map(([key]) => key)) !== JSON.stringify(["code", "value"])) throw new Error("result artifact payload has non-canonical, unknown, or missing fields");
   if (resultEntries[0][1] !== JSON.stringify(reference.code) || JSON.stringify(result.code) !== JSON.stringify(reference.code)) throw new Error("result artifact code does not canonically match its event");
+  // `valueJson` is the value exactly as the artifact spells it. `value` is
+  // its JSON.parse, which rounds a number outside the double range.
+  return { code: result.code, value: result.value, valueJson: resultEntries[1][1] };
 }
 
 function compactObjectEntries(value: string): Array<[string, string]> {

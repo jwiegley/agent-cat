@@ -1,4 +1,9 @@
-import type { ControlAckSnapshot, OccurrenceSnapshot, RunSnapshot } from "./types.ts";
+import type { ControlAckSnapshot, OccurrenceSnapshot, ResultRef, RunSnapshot } from "./types.ts";
+
+/** One line that names a verified result by reference, without its value. */
+export function resultSummary(reference: Pick<ResultRef, "bytes" | "sha256" | "code">): string {
+  return `result: ${reference.bytes} bytes, SHA-256 ${reference.sha256}, code ${JSON.stringify(reference.code)}`;
+}
 
 export class MonitorModel {
   #snapshot: RunSnapshot;
@@ -43,6 +48,12 @@ export class MonitorModel {
     const header = fit(`${this.#snapshot.runId}  ${this.#snapshot.status}  ${this.#snapshot.workflow ?? "starting"}  target=${this.#snapshot.target ?? "pending"}`, safeWidth);
     const footer = fit("↑/↓ select  enter fold  esc close", safeWidth);
     const prefix = this.#snapshot.failure ? [fit(`failure (${this.#snapshot.failureClass ?? "unknown"}): ${this.#snapshot.failure}`, safeWidth)] : [];
+    // A succeeded run names its verified result by reference. The value
+    // stays in the run store, and /wf-result reads and verifies it there.
+    if (this.#snapshot.status === "succeeded" && this.#snapshot.result) {
+      prefix.push(fit(resultSummary(this.#snapshot.result), safeWidth));
+      prefix.push(fit(`/wf-result ${this.#snapshot.runId} shows the verified result`, safeWidth));
+    }
     for (const ack of [...this.#snapshot.controlAcks.values()].slice(-3)) {
       prefix.push(fit(`control ${ack.controlId}: ${ack.state} — ${ack.message}`, safeWidth));
     }
