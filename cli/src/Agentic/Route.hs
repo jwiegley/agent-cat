@@ -174,10 +174,11 @@ schemeWord = \case
 -- one of the shapes is the same mistake: the operator has written something
 -- this run cannot start or send to, and what they need is the things they may
 -- write instead. This parser serves @--route@, which can name only an @acp:@
--- or a @deck:@ backend, so its refusal names those two shapes. A @decisions:@
--- value that names no dialect takes its own refusal, which names the dialects.
+-- or a @deck:@ backend, so its refusal names those two shapes, and a
+-- @decisions:@ value with an unknown dialect takes that same refusal.
 -- 'parseConfiguredBackend' is the same grammar for a routing file, whose
--- refusal also names the @decisions:@ shape.
+-- refusal also names the @decisions:@ shape, and where an unknown dialect
+-- takes its own refusal, which names the dialects.
 --
 -- __Surrounding whitespace is not part of either half__, and stripping it is a
 -- refusal and not a convenience. No adapter is named @\" \"@ and no session is
@@ -189,7 +190,7 @@ schemeWord = \case
 -- it is not a usage error. Trimmed, it is exactly the refusal @acp:@ gets,
 -- arriving where every other malformed shape does.
 parseBackend :: Text -> Either Text Backend
-parseBackend = parseBackendWith routeShapes
+parseBackend = parseBackendWith routeShapes (const . routeShapes)
   where
     routeShapes spec =
       "unknown backend '"
@@ -200,17 +201,25 @@ parseBackend = parseBackendWith routeShapes
 -- same, and the refusal of an unknown scheme names the three shapes that a
 -- routing file may write.
 parseConfiguredBackend :: Text -> Either Text Backend
-parseConfiguredBackend = parseBackendWith fileShapes
+parseConfiguredBackend = parseBackendWith fileShapes unknownDialect
   where
     fileShapes spec =
       "unknown backend '"
         <> spec
         <> "' in routing configuration: a backend is acp:<adapter> (start an adapter of this run's own), deck:<id> (send to a live agent-deck session) or decisions:<dialect> (send to a decisions endpoint that version-2 routing configuration defines)"
+    unknownDialect spec value =
+      "unknown decisions dialect '"
+        <> value
+        <> "' in '"
+        <> spec
+        <> "': a decisions backend is "
+        <> T.intercalate " or " ["decisions:" <> dialectWord dialect | dialect <- [minBound .. maxBound]]
 
--- | The grammar of 'parseBackend' and 'parseConfiguredBackend', with the
--- refusal of an unknown scheme as a parameter.
-parseBackendWith :: (Text -> Text) -> Text -> Either Text Backend
-parseBackendWith unknownShape spec = case T.breakOn ":" spec of
+-- | The grammar of 'parseBackend' and 'parseConfiguredBackend'. The refusal of
+-- an unknown scheme, and the refusal of an unknown decisions dialect, which
+-- takes the whole value and the dialect word, are parameters.
+parseBackendWith :: (Text -> Text) -> (Text -> Text -> Text) -> Text -> Either Text Backend
+parseBackendWith unknownShape unknownDialect spec = case T.breakOn ":" spec of
   (scheme, rest)
     | Just raw <- T.stripPrefix ":" rest,
       let value = T.strip raw,
@@ -218,19 +227,11 @@ parseBackendWith unknownShape spec = case T.breakOn ":" spec of
         case T.strip scheme of
           "acp" -> Right (BackendAcp value)
           "deck" -> Right (BackendDeck value)
-          "decisions" -> maybe (unknownDialect value) (Right . BackendDecisions) (dialectOfWord value)
+          "decisions" -> maybe (Left (unknownDialect spec value)) (Right . BackendDecisions) (dialectOfWord value)
           _ -> unknown
   _ -> unknown
   where
     unknown = Left (unknownShape spec)
-    unknownDialect value =
-      Left $
-        "unknown decisions dialect '"
-          <> value
-          <> "' in '"
-          <> spec
-          <> "': a decisions backend is "
-          <> T.intercalate " or " ["decisions:" <> dialectWord dialect | dialect <- [minBound .. maxBound]]
 
 -- | A backend as the operator would have written it: the printed inverse of
 -- 'parseBackend'.

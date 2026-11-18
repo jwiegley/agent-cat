@@ -12,7 +12,7 @@ The design adds no persona, provider, endpoint, key, or discovered model to DSL 
 
 The ordered profile chain remains the policy. The resolver does not infer “best” or “cheap” from vendor names, catalogue order, or mutable prices. To prefer a low-cost model, place its named model definition at the desired point in the selected persona's chain. This is explicit and deterministic, and it is sufficient to put a lower-cost model first.
 
-Version 1 remains supported with its decoder, layering, realization, and preflight unchanged. Live target precedence is shared across both versions. Mixed version-1 and version-2 user/project layers are refused with an actionable migration message rather than merged by guesswork.
+Version 1 remains supported with its layering, realization, and preflight unchanged. Its decoder accepts the same files, and its refusal of an unknown backend names the routing configuration and the three backend shapes. Live target precedence is shared across both versions. Mixed version-1 and version-2 user/project layers are refused with an actionable migration message rather than merged by guesswork.
 
 ## 2. Vocabulary
 
