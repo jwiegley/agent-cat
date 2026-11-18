@@ -185,6 +185,7 @@ library
     Agentic.DSL
     Agentic.DSL.Plan
     Agentic.Engine
+    Agentic.Engine.Decision
     Agentic.Manager
     Agentic.Manager.Client
     Agentic.Plan
@@ -470,6 +471,7 @@ test-suite engine-api-test
     , aeson
     , agentic
     , base
+    , bytestring
     , text
 
 test-suite runtime-contract-test
