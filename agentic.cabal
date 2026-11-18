@@ -182,12 +182,14 @@ library
     Agentic.Builder
     Agentic.Cli
     Agentic.Cost
+    Agentic.Decision
     Agentic.DSL
     Agentic.DSL.Plan
     Agentic.Engine
     Agentic.Manager
     Agentic.Manager.Client
     Agentic.Plan
+    Agentic.Plan.Decision
     Agentic.Planning
     Agentic.Route
     Agentic.RoutingConfig
@@ -220,6 +222,7 @@ library
     Agentic.Manager.Client.Failure
     Agentic.Manager.Client.Refresh
     Agentic.Cli.Frontend
+    Agentic.DSL.Decision
     Agentic.DSL.Json
     Agentic.Exec
     Agentic.InProcess
@@ -415,6 +418,12 @@ executable schema-probe
     , agentic:bisim-support
     , agentic:examples
     , agentic:verification
+
+executable decision-probe
+  import:          settings
+  hs-source-dirs:  cli/test
+  main-is:         DecisionProbe.hs
+  build-depends:   agentic
 
 executable manager-client-check
   import:          settings
