@@ -108,6 +108,12 @@ checked by the documentation gates.
 @c MEMBER Agentic.Cli.Tool.member:Tool support
 @hsindex Agentic.Cli.Tool.Tool
 @item @code{Agentic.Cli.Tool} @tab @code{Tool} @tab @code{Agentic.Cli.Tool}
+@c MEMBER Agentic.Decision.NumberRecord.member:recordFromList support
+@hsindex Agentic.Decision.NumberRecord.recordFromList
+@item @code{Agentic.Decision.NumberRecord} @tab @code{recordFromList} @tab @code{Agentic.Decision.NumberRecord}
+@c MEMBER Agentic.Decision.NumberRecord.member:recordToList support
+@hsindex Agentic.Decision.NumberRecord.recordToList
+@item @code{Agentic.Decision.NumberRecord} @tab @code{recordToList} @tab @code{Agentic.Decision.NumberRecord}
 @c MEMBER Agentic.Schema.Code.member:CodeAck support
 @hsindex Agentic.Schema.Code.CodeAck
 @item @code{Agentic.Schema.Code} @tab @code{CodeAck} @tab @code{Agentic.Schema.Code}
@@ -437,6 +443,14 @@ checked by the documentation gates.
 @subsection Exported-class instances
 
 @table @asis
+@c INSTANCE Agentic.Decision.NumberRecord.instance:ef5a56d144464a35 support
+@c INSTANCE-TEXT Agentic.Decision.NumberRecord.instance:ef5a56d144464a35 instance NumberRecord '[]
+@item @code{Agentic.Decision.NumberRecord}
+@code{instance NumberRecord '[]}
+@c INSTANCE Agentic.Decision.NumberRecord.instance:8c692b6ab9eb2690 support
+@c INSTANCE-TEXT Agentic.Decision.NumberRecord.instance:8c692b6ab9eb2690 instance NumberRecord ns => NumberRecord (n : ns)
+@item @code{Agentic.Decision.NumberRecord}
+@code{instance NumberRecord ns => NumberRecord (n : ns)}
 @c INSTANCE Agentic.Schema.Code.instance:910ab900cb0726bf support
 @c INSTANCE-TEXT Agentic.Schema.Code.instance:910ab900cb0726bf instance (GHC.Internal.TypeLits.KnownSymbol n, KnownScope s) => KnownScope ('(n, c) : s)
 @item @code{Agentic.Schema.Code}
@@ -493,6 +507,10 @@ checked by the documentation gates.
 @c INSTANCE-TEXT Agentic.Schema.HasSchema.instance:32ae41653e40dade instance HasSchema value => HasSchema [value]
 @item @code{Agentic.Schema.HasSchema}
 @code{instance HasSchema value => HasSchema [value]}
+@c INSTANCE Agentic.Schema.HasSchema.instance:4f4392073db7fdab support
+@c INSTANCE-TEXT Agentic.Schema.HasSchema.instance:4f4392073db7fdab instance Options t => HasSchema (Weights t)
+@item @code{Agentic.Schema.HasSchema}
+@code{instance Options t => HasSchema (Weights t)}
 @c INSTANCE Agentic.Schema.KnownCode.instance:ad37167528c0ed3a support
 @c INSTANCE-TEXT Agentic.Schema.KnownCode.instance:ad37167528c0ed3a instance KnownCode CodeAck
 @item @code{Agentic.Schema.KnownCode}
@@ -701,6 +719,10 @@ checked by the documentation gates.
 @c INSTANCE-TEXT Agentic.Workflow.HasSchema.instance:32ae41653e40dade instance HasSchema value => HasSchema [value]
 @item @code{Agentic.Workflow.HasSchema}
 @code{instance HasSchema value => HasSchema [value]}
+@c INSTANCE Agentic.Workflow.HasSchema.instance:4f4392073db7fdab support
+@c INSTANCE-TEXT Agentic.Workflow.HasSchema.instance:4f4392073db7fdab instance Options t => HasSchema (Weights t)
+@item @code{Agentic.Workflow.HasSchema}
+@code{instance Options t => HasSchema (Weights t)}
 @c INSTANCE Agentic.Workflow.InputSource.instance:edcedacddbeea46a support
 @c INSTANCE-TEXT Agentic.Workflow.InputSource.instance:edcedacddbeea46a instance Eq InputSource
 @item @code{Agentic.Workflow.InputSource}
