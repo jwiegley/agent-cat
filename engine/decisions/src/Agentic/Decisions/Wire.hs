@@ -22,7 +22,8 @@
 --
 -- Each detail that no primary source confirms carries a comment that begins
 -- with @UNCONFIRMED(Uk)@ beside the code that it governs, where @Uk@ names the
--- item in the design record.
+-- item of section 11 of @doc/research/decision-models.md@, which lists the
+-- unconfirmed details U1 to U17.
 module Agentic.Decisions.Wire
   ( -- * Dialects
     Dialect (..),
@@ -90,8 +91,10 @@ import qualified Data.Vector as V
 -- per endpoint, so this module names no path and no header.
 --
 -- UNCONFIRMED(U1): OpenRouter serves @/api/v1/systemone@ for Jev, and no source
--- confirms it for other models. The configured default is the documented alpha
--- path @/api/alpha/decisions@, which may change.
+-- confirms it for other models. The engine has no default URL, because the
+-- routing definition always configures the URL. The OpenRouter example in
+-- @doc/model-routing-v2.md@ uses the documented alpha path
+-- @/api/alpha/decisions@, which may change.
 --
 -- UNCONFIRMED(U9): no primary source gives the URL or the authentication of the
 -- hosted Nace (Drex) API. Only local runners at @/v1/systemone@ are covered.

@@ -493,9 +493,7 @@ test-suite engine-decisions-test
     , aeson
     , agentic
     , base
-    , http-client
     , http-types
-    , scientific
     , wai
     , warp
 

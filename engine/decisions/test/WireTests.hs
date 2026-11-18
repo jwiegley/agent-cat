@@ -77,8 +77,9 @@ dialectChecks =
   ]
     <> ["an unknown dialect word was accepted" | dialectOfWord "openrouter" /= Nothing]
 
--- | Each request body against the shape of the design's request table, and
--- the order of the options in the bytes.
+-- | Each request body against the request shapes that sections 3.2, 4.2 and
+-- 5.2 of @doc/research/decision-models.md@ record, and the order of the
+-- options in the bytes.
 requestChecks :: [String]
 requestChecks =
   concat

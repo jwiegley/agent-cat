@@ -1,55 +1,32 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
 
 -- | Checks of the engine against an in-process HTTP stub on the loopback
--- interface, and law L13: every answer that the engine accepts decodes at the
--- decision's schema, and its record holds the vendor's probabilities.
+-- interface. Law L13, which reads an accepted answer at the decision's
+-- schema, needs the DSL, so @decision-probe@ checks it.
 module EngineTests (engineTests) where
 
-import Agentic.Decision (Options, Weights, options, weight)
 import Agentic.Decisions
-import Agentic.Decisions.Wire (WireAnswer (..), decodeResponse)
 import Agentic.Engine
 import Agentic.Engine.Decision
-import Agentic.Schema.Json (decodeAs)
 import Control.Concurrent (threadDelay)
 import Control.Exception (try)
 import Data.Aeson (Value (..))
 import qualified Data.Aeson as Aeson
-import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.CaseInsensitive as CI
 import Data.IORef (IORef, atomicModifyIORef', newIORef, readIORef)
 import qualified Data.Map.Strict as Map
-import Data.Ratio ((%))
-import Data.Scientific (Scientific, scientific)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import qualified Data.Vector as V
 import GHC.Clock (getMonotonicTimeNSec)
-import GHC.Generics (Generic)
 import Network.HTTP.Types (Status, mkStatus, status200, status302)
 import Network.Wai (Application, Request, pathInfo, requestHeaders, responseLBS, strictRequestBody)
 import Network.Wai.Handler.Warp (testWithApplication)
-import Test.QuickCheck
-import WireTests (choiceDecision, fixture, scaleDecision, yesNoDecision)
-
--- | The options of 'choiceDecision', in its order.
-data Team = Billing | Technical | Other
-  deriving (Eq, Ord, Show, Enum, Bounded, Generic)
-
--- | The levels of 'scaleDecision', in its order.
-data Urgency = Routine | Soon | Urgent
-  deriving (Eq, Ord, Show, Enum, Bounded, Generic)
+import WireTests (choiceDecision, fixture, yesNoDecision)
 
 -- | One request as the stub received it: its path, headers and body.
 data Seen = Seen ![Text] ![(Text, Text)] !BL.ByteString
@@ -61,8 +38,7 @@ engineTests = do
     results <- traverse (\scenario -> scenario port seen) scenarios
     pure (concat results, port)
   refused <- connectionRefused closedPort
-  law <- answerLaw
-  pure (failures <> refused <> law)
+  pure (failures <> refused)
 
 -- ---------------------------------------------------------------------------
 -- The stub
@@ -71,6 +47,9 @@ engineTests = do
 -- | Answers by path: @ok/<fixture>@ returns a fixture, @slow@ waits three
 -- seconds, @status/<n>@ returns status @n@, @big@ returns 64 KiB, @redirect@
 -- redirects to a fixture, and @malformed@ returns text that is not JSON.
+-- @status/echo@ answers HTTP 400 with an error message that repeats the
+-- credential it received, and @ok-echo@ answers a fixture whose model and id
+-- repeat it, as a vendor that echoes its input would.
 stub :: IORef [Seen] -> Application
 stub seen request respond = do
   body <- strictRequestBody request
@@ -80,12 +59,20 @@ stub seen request respond = do
     ["slow"] -> threadDelay 3000000 >> fixture "jev-choice.json" >>= respond . json status200 . BL.fromStrict
     ["status", "402-in-flight"] -> fixture "error-402-in-flight.json" >>= respond . json (code 402) . BL.fromStrict
     ["status", "402-credits"] -> fixture "error-402-credits.json" >>= respond . json (code 402) . BL.fromStrict
+    ["status", "echo"] ->
+      respond (json (code 400) (Aeson.encode (Aeson.object ["error" Aeson..= Aeson.object ["code" Aeson..= (400 :: Int), "message" Aeson..= ("the key " <> credential <> " is not valid")]])))
+    ["ok-echo"] -> do
+      bytes <- fixture "jev-choice.json"
+      respond . json status200 . Aeson.encode $ case Aeson.decodeStrict bytes of
+        Just (Object fields) -> Object (KeyMap.insert "model" (String credential) (KeyMap.insert "id" (String ("gen-" <> credential)) fields))
+        _ -> Null
     ["status", n] -> respond (json (code (read (T.unpack n))) "{\"error\":{\"code\":0,\"message\":\"stub\"}}")
     ["big"] -> respond (json status200 (BL.fromStrict (BS.replicate 65536 32)))
     ["redirect"] -> respond (responseLBS status302 [("Location", "/ok/jev-choice.json")] "")
     ["malformed"] -> respond (json status200 "{\"answers\":")
     _ -> respond (json (code 404) "{}")
   where
+    credential = maybe "" (\value -> fromMaybe value (T.stripPrefix "Bearer " value)) (lookup "authorization" (headersOf request))
     json status = responseLBS status [("Content-Type", "application/json")]
     code :: Int -> Status
     code n = mkStatus n "stub"
@@ -109,7 +96,8 @@ scenarios =
     misrouted,
     refusedBeforeSending,
     redirectRefused,
-    malformed
+    malformed,
+    echoedSecret
   ]
 
 endpointAt :: Int -> Dialect -> Text -> DecisionsEndpoint
@@ -273,6 +261,21 @@ malformed port seen = do
   (outcome, _) <- turn seen (endpointAt port SystemOne "malformed") jev (requestFor (Just choiceDecision))
   pure (failureOf "a malformed body" ProtocolFailure "the response is not one JSON value" outcome)
 
+-- | A vendor that repeats the credential in its error message or in its
+-- narration fields shows it nowhere: the failure text and the narration carry
+-- the redaction in its place.
+echoedSecret :: Scenario
+echoedSecret port seen = do
+  (failed, _) <- turn seen (endpointAt port SystemOne "status/echo") jev (requestFor (Just choiceDecision))
+  (answered', _) <- turn seen (endpointAt port SystemOne "ok-echo") jev (requestFor (Just choiceDecision))
+  pure $
+    failureOf "an error that echoes the credential" ProtocolFailure "HTTP 400: the key <redacted> is not valid" failed
+      <> case answered' of
+        Right result ->
+          ["a narration that echoes the credential showed the secret: " <> T.unpack (engineNarration result) | "test-secret" `T.isInfixOf` engineNarration result]
+            <> ["a narration that echoes the credential was " <> T.unpack (engineNarration result) | not ("model <redacted>" `T.isInfixOf` engineNarration result)]
+        Left failure -> ["an answer whose narration echoes the credential was refused: " <> show failure]
+
 -- | A port on which nothing listens any more refuses the connection, which is
 -- a transport failure.
 connectionRefused :: Int -> IO [String]
@@ -296,106 +299,3 @@ failureOf what kind evidence outcome = case outcome of
         ]
       ]
   Right result -> [what <> " was answered: " <> show result]
-
--- ---------------------------------------------------------------------------
--- L13
--- ---------------------------------------------------------------------------
-
--- | The record of an answer at the schema of the option type @t@, as the
--- runtime decodes it, read back as one weight per option.
-weightsAt :: forall t. Options t => Text -> Maybe [Rational]
-weightsAt json = (\answer -> map (weight answer) (options @t)) <$> decodeAs @(Weights t) json
-
--- | L13: for every accepted vendor answer A,
--- @decodeAs \@(Weights t) (wireAnswerJson A)@ is @Just w@, and @w@ holds the
--- vendor's probability at each option, 0 at an option the vendor left out,
--- and @(1 - p, p)@ for a yes/no probability @p@.
-answerLaw :: IO [String]
-answerLaw = do
-  fixtures <- concat <$> traverse fixtureLaw lawFixtures
-  result <- quickCheckWithResult stdArgs {maxSuccess = 2000, chatty = False} answerDecodes
-  pure (fixtures <> ["L13 does not hold: " <> output result | not (isSuccess result)])
-
-lawFixtures :: [(FilePath, Dialect, EngineDecision, Text -> Maybe [Rational], [Rational])]
-lawFixtures =
-  [ ("jev-choice.json", SystemOne, choiceDecision, weightsAt @Team, [88 % 100, 11 % 100, 1 % 100]),
-    ("jev-score.json", SystemOne, scaleDecision, weightsAt @Urgency, [0, 79 % 100, 21 % 100]),
-    ("jev-noul.json", SystemOne, yesNoDecision, weightsAt @Bool, [2 % 100, 98 % 100]),
-    ("drex-v1.5-score-array-legend.json", SystemOne, scaleDecision, weightsAt @Urgency, [2489 % 10000, 166 % 1000, 5851 % 10000]),
-    ("drex-max-score-object-legend.json", SystemOne, scaleDecision, weightsAt @Urgency, [1 % 10, 3 % 10, 6 % 10]),
-    ("kev-score-object-legend.json", SystemOne, scaleDecision, weightsAt @Urgency, [0, 56 % 100, 44 % 100]),
-    ("openai-choice.json", OpenAIDecisions, choiceDecision, weightsAt @Team, [9 % 10, 6 % 100, 4 % 100]),
-    ("openai-score.json", OpenAIDecisions, scaleDecision, weightsAt @Urgency, [1 % 10, 7 % 10, 2 % 10]),
-    ("openai-predicate.json", OpenAIDecisions, yesNoDecision, weightsAt @Bool, [3 % 4, 1 % 4])
-  ]
-
-fixtureLaw :: (FilePath, Dialect, EngineDecision, Text -> Maybe [Rational], [Rational]) -> IO [String]
-fixtureLaw (name, dialect, decision, decode, expected) = do
-  bytes <- fixture name
-  pure $ case Aeson.decodeStrict bytes of
-    Nothing -> [name <> " is not JSON"]
-    Just value -> case decodeResponse dialect decision value of
-      Left failure -> ["L13: " <> name <> " was refused: " <> show failure]
-      Right answer
-        | decode (wireAnswerJson answer) == Just expected -> []
-        | otherwise -> ["L13: " <> name <> " decodes to " <> show (decode (wireAnswerJson answer)) <> ", expected " <> show expected]
-
--- | A vendor answer: its dialect, its form, and one probability per option,
--- with 'Nothing' for an option that the vendor leaves out.
-data Vendor = Vendor !Dialect !EngineDecisionForm ![Maybe Scientific] ![Int]
-  deriving (Show)
-
--- | A decimal in [0,1] with at most four digits after the point.
-decimal :: Gen Scientific
-decimal = do
-  digits <- choose (0, 4)
-  numerator' <- choose (0, 10 ^ digits)
-  pure (scientific numerator' (negate digits))
-
-vendor :: Gen Vendor
-vendor = do
-  dialect <- elements [minBound .. maxBound]
-  form <- elements [minBound .. maxBound]
-  probabilities <- case form of
-    EngineYesNo -> (\p -> [Just p]) <$> decimal
-    _ -> vectorOf 3 (frequency [(1, pure Nothing), (4, Just <$> decimal)]) `suchThat` any (maybe False (> 0))
-  order <- shuffle [0 .. length probabilities - 1]
-  pure (Vendor dialect form probabilities order)
-
-answerDecodes :: Property
-answerDecodes = forAll vendor $ \(Vendor dialect form probabilities order) ->
-  let (decision, decode, names) = case form of
-        EngineChoice -> (choiceDecision, weightsAt @Team, ["Billing", "Technical", "Other"])
-        EngineScale -> (scaleDecision, weightsAt @Urgency, ["Routine", "Soon", "Urgent"])
-        EngineYesNo -> (yesNoDecision, weightsAt @Bool, ["False", "True"])
-      present = [(index, p) | index <- order, Just p <- [probabilities !! index]]
-      expected = case (form, probabilities) of
-        (EngineYesNo, [Just p]) -> [1 - toRational p, toRational p]
-        _ -> map (maybe 0 toRational) probabilities
-      response = vendorResponse dialect form names present
-   in counterexample (show response) $ case decodeResponse dialect decision response of
-        Left failure -> counterexample ("refused: " <> show failure) False
-        Right answer -> counterexample (T.unpack (wireAnswerJson answer)) (decode (wireAnswerJson answer) === Just expected)
-
--- | The response that a vendor of the dialect returns for the given
--- probabilities, each paired with the index of its option.
-vendorResponse :: Dialect -> EngineDecisionForm -> [Text] -> [(Int, Scientific)] -> Value
-vendorResponse SystemOne form names present =
-  Aeson.object ["answers" Aeson..= Aeson.object ["decision" Aeson..= answer]]
-  where
-    answer = case form of
-      EngineYesNo -> Aeson.object ["type" Aeson..= ("noul" :: Text), "noul" Aeson..= Number (firstOf present)]
-      EngineChoice -> Aeson.object ["type" Aeson..= ("choice" :: Text), "choice" Aeson..= ("Billing" :: Text), "probabilities" Aeson..= Aeson.object [Key.fromText (names !! index) Aeson..= Number p | (index, p) <- present]]
-      EngineScale -> Aeson.object ["type" Aeson..= ("score" :: Text), "score" Aeson..= (1 :: Int), "probabilities" Aeson..= Aeson.object [Key.fromText (T.pack (show index)) Aeson..= Number p | (index, p) <- present]]
-vendorResponse OpenAIDecisions form names present =
-  Aeson.object ["answers" Aeson..= Array (V.singleton answer)]
-  where
-    answer = case form of
-      EngineYesNo -> Aeson.object ["type" Aeson..= ("predicate" :: Text), "name" Aeson..= ("decision" :: Text), "probability" Aeson..= Number (firstOf present)]
-      EngineChoice -> Aeson.object ["type" Aeson..= ("choice" :: Text), "name" Aeson..= ("decision" :: Text), "probabilities" Aeson..= [Aeson.object ["value" Aeson..= (names !! index), "probability" Aeson..= Number p] | (index, p) <- present]]
-      EngineScale -> Aeson.object ["type" Aeson..= ("score" :: Text), "name" Aeson..= ("decision" :: Text), "probabilities" Aeson..= [Aeson.object ["value" Aeson..= index, "label" Aeson..= (names !! index), "probability" Aeson..= Number p] | (index, p) <- present]]
-
--- | The probability of a yes/no answer, which has exactly one.
-firstOf :: [(Int, Scientific)] -> Scientific
-firstOf ((_, p) : _) = p
-firstOf [] = 0

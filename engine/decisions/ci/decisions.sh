@@ -4,10 +4,10 @@
 #
 # No Lean, no network and no paid endpoint. The test suite
 # `engine-decisions-test` runs the pure wire adapter against the response
-# fixtures in `test/fixtures`, runs the engine against a `warp` stub that
-# listens on 127.0.0.1 inside the test process, and checks law L13: every
-# answer the engine accepts decodes at the decision's schema and holds the
-# vendor's probabilities.
+# fixtures in `test/fixtures` and runs the engine against a `warp` stub that
+# listens on 127.0.0.1 inside the test process. Law L13, which reads every
+# accepted answer at the decision's schema, needs the DSL, and the gate
+# `cli/ci/policies.sh` checks it with `decision-probe`.
 #
 #     ./engine/decisions/ci/decisions.sh
 #
@@ -17,8 +17,9 @@
 #   1. The engine imports only the engine API and its own modules.
 #   2. `Agentic.Decisions` names no vendor field. Every vendor field name
 #      lives in `Agentic.Decisions.Wire`.
-#   3. Each unconfirmed detail U1 to U16 of the design record is marked
-#      `UNCONFIRMED(Uk)` in `Agentic.Decisions.Wire`.
+#   3. Each unconfirmed detail U1 to U17 that section 11 of
+#      `doc/research/decision-models.md` lists is marked `UNCONFIRMED(Uk)` in
+#      `Agentic.Decisions.Wire`.
 #
 # Exits 0 only if every rule holds and the suite passes.
 set -uo pipefail
@@ -54,11 +55,12 @@ for vendor_field in model state input questions answers criteria choices levels 
 done
 note "Agentic.Decisions names no vendor field"
 
-# 3. Every unconfirmed item of the design record is marked beside its code.
-for k in $(seq 1 16); do
+# 3. Every unconfirmed item of section 11 of doc/research/decision-models.md
+# is marked beside its code.
+for k in $(seq 1 17); do
   grep -qF "UNCONFIRMED(U$k):" "$wire" || bad "no UNCONFIRMED(U$k) mark in Agentic.Decisions.Wire"
 done
-note "UNCONFIRMED(U1) to UNCONFIRMED(U16) are marked"
+note "UNCONFIRMED(U1) to UNCONFIRMED(U17) are marked"
 
 # The suite.
 if test/cabal.sh test engine-decisions-test --test-show-details=direct; then

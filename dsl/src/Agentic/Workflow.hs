@@ -470,7 +470,6 @@ import Agentic.Decision
     ScaleSize,
     optionName,
     options,
-    rank,
   )
 import Agentic.DSL.Decision
   ( DecisionForm (..),
@@ -518,6 +517,7 @@ import Agentic.WF (KnownIx, Says (..), V (..), wf, wft)
 import Data.Char (isDigit)
 import Data.Kind (Constraint, Type)
 import qualified Data.List.NonEmpty as NE
+import Data.List (sort)
 import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.Proxy (Proxy (..))
@@ -937,15 +937,18 @@ chance s x = Reading (schemaWitness @(DecisionSchema t)) x [(optionName t, 1) | 
 chanceYes :: V h (Decision Bool) -> Reading h
 chanceYes = chance [True]
 
--- | @expectedLevel x@: the expected level ⟨ι, p⟩ of a scale, where ι is the
--- rank of a level in option order (0 to |T| − 1). The option order is the
--- field order of the record, which is declaration order for every question
--- that 'decide' asks.
+-- | @expectedLevel x@: the expected level ⟨ι, p⟩ of a scale. The rank ι(l)
+-- of a level l is the position of its option name in the field list of the
+-- record that @x@ holds, from 0 for the first field to |T| − 1 for the last.
+-- Under the naming law L2 the field order is the option order, so ι is
+-- 'Agentic.Decision.rank', and every question that 'decide' asks satisfies
+-- L2.
 expectedLevel :: forall h sch. DecisionRecord sch => V h ('CodeStructured sch) -> Reading h
-expectedLevel x = Reading witness x (zip names [0 ..])
-  where
-    witness = schemaWitness @sch
-    names = recordNames witness
+expectedLevel = levelReading (schemaWitness @sch)
+
+-- | The reading ⟨ι, ·⟩ of a decision record, with ι the field position.
+levelReading :: SchemaWitness sch -> V h ('CodeStructured sch) -> Reading h
+levelReading witness x = Reading witness x (zip (recordNames witness) [0 ..])
 
 -- | The option names of a decision record, in field order.
 recordNames :: SchemaWitness sch -> [Text]
@@ -1020,21 +1023,32 @@ noMoreThan r@(Reading witness x ws) theta
     range@(low, high) = readingRange r
 
 -- | @levelAtLeast l x@: the expected level of the scale is at least the rank
--- of @l@,
+-- ι(l) of @l@, which is the position of the option name of @l@ in the field
+-- list of the record, as for 'expectedLevel'. For every handle @x@ of type
+-- @V h (Decision t)@, whichever way it was made,
 --
--- > levelAtLeast l x == expectedLevel x `atLeast` rank l
+-- > levelAtLeast l x == expectedLevel x `atLeast` ι(l)
 --
--- with the weights taken from 'rank', so that the bound and the weights read
--- one order. The lowest level is refused, because every distribution reaches
--- it.
+-- so the bound and the weights read one order. Under the naming law L2,
+-- ι(l) is @rank l@. The test is refused when the option names of T are not
+-- the field names of the record, and the level in the first field is
+-- refused, because every distribution reaches it.
 levelAtLeast :: forall h s t. (KnownIx h s, Options t) => t -> V h (Decision t) -> Rhs s 'CodeFlag
 levelAtLeast l x
-  | l == minBound =
+  | sort names /= sort (map optionName (options @t)) =
       error
-        (T.unpack [wft|levelAtLeast: every distribution reaches the lowest level, so a test of it always holds and says nothing|])
-  | otherwise = atLeast @h @s levels (rank l)
+        (T.unpack [wft|levelAtLeast: the option names of this type are not the field names of its decision record, so a level has no rank|])
+  | otherwise = case [i | (i, name) <- zip [0 :: Integer ..] names, name == optionName l] of
+      [0] ->
+        error
+          (T.unpack [wft|levelAtLeast: every distribution reaches the lowest level, so a test of it always holds and says nothing|])
+      [i] -> atLeast @h @s (levelReading witness x) (fromInteger i)
+      _ ->
+        error
+          (T.unpack [wft|levelAtLeast: the level is not one field of the decision record, so it has no rank|])
   where
-    levels = Reading (schemaWitness @(DecisionSchema t)) x [(optionName u, rank u) | u <- options @t]
+    witness = schemaWitness @(DecisionSchema t)
+    names = recordNames witness
 
 -- | @mostLikely t x@: the option @t@ is among the most likely options, the
 -- argmax set of p. It lowers to the region

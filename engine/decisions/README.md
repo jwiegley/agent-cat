@@ -74,10 +74,21 @@ direnv exec . bash engine/decisions/ci/triage.sh
 The gate checks that the engine imports only the engine API, that
 `Agentic.Decisions` names no vendor field, and that every unconfirmed detail
 is marked. It then runs `engine-decisions-test`. The suite checks the request
-bodies and every response fixture in `test/fixtures`, runs the engine against
-a `warp` stub on the loopback interface inside the test process, and checks
-law L13: every accepted answer decodes at the decision's schema and holds the
-vendor's probabilities. No test contacts an endpoint outside the process.
+bodies and every response fixture in `test/fixtures`, and it runs the engine
+against a `warp` stub on the loopback interface inside the test process. The
+stub includes a vendor that repeats the credential in its error message and
+in its narration fields, and the suite checks that no failure text and no
+narration shows it. No test contacts an endpoint outside the process.
+
+The files under `test/fixtures` are constructed from the response shapes that
+the vendors document. They are not captures of live responses, and their
+identifiers, provider names, model names and costs are illustrative.
+
+Law L13 states that every answer the engine accepts decodes at the decision's
+schema and holds the vendor's probabilities. Its check reads the answer with
+the DSL, which this engine never imports, so `decision-probe` in the CLI layer
+checks it for the response fixtures and for generated answers in both
+dialects, and `cli/ci/policies.sh` runs that probe.
 
 The second gate, `ci/triage.sh`, runs the `triage` example through
 `agentic-run run --routing` once for each dialect. Its endpoint is

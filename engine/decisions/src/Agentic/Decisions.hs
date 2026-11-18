@@ -63,6 +63,8 @@ import Agentic.Engine
 import Control.Exception (IOException, displayException, throwIO, try)
 import qualified Data.Aeson as Aeson
 import Data.Aeson.Encoding (encodingToLazyByteString)
+import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.KeyMap as KeyMap
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.CaseInsensitive as CI
@@ -170,7 +172,9 @@ instance Engine DecisionsEngine where
 --    is read up to the byte bound.
 -- 5. A connection failure or a timeout is a transport failure.
 -- 6. The status is classified.
--- 7. The body is decoded.
+-- 7. The body is decoded, and every secret of the endpoint is removed from
+--    each string and each key of the decoded body, so that no vendor text
+--    that reaches a failure or the narration shows a credential.
 -- 8. The record is returned as a completed answer.
 --
 -- Steps 1 to 3 send nothing.
@@ -187,7 +191,7 @@ decisionsTurn engine request = do
   let body = encodingToLazyByteString (encodeRequest dialect (decisionsModelId model) (decisionsModelOptions model) decision)
   outcome <- exchange body
   (status, bytes) <- either (uncurry refuse) pure outcome
-  let decoded = decodeBody <$> bytes
+  let decoded = fmap (redactSecrets (endpointSecrets endpoint)) . decodeBody <$> bytes
   case classifyStatus status (either (const Nothing) Just =<< decoded) of
     Just failure -> wire failure
     Nothing -> do
@@ -254,6 +258,23 @@ decisionsTurn engine request = do
         InternalException cause -> (TransportFailure, "the connection failed: " <> T.pack (displayException cause))
         ProxyConnectException _ _ _ -> (TransportFailure, "the proxy connection failed")
         other -> (ProtocolFailure, "the HTTP exchange failed: " <> T.pack (takeWhile (/= ' ') (show other)))
+
+-- | @redactSecrets secrets v@ is @v@ with every occurrence of every non-empty
+-- secret replaced by @<redacted>@ in each string and in each object key, at
+-- every depth. Numbers, booleans and nulls are unchanged, so the
+-- probabilities that a body carries are read as the vendor sent them.
+redactSecrets :: [Text] -> Aeson.Value -> Aeson.Value
+redactSecrets secrets
+  | null present = id
+  | otherwise = go
+  where
+    present = filter (not . T.null) secrets
+    go = \case
+      Aeson.String text -> Aeson.String (redact text)
+      Aeson.Array items -> Aeson.Array (fmap go items)
+      Aeson.Object fields -> Aeson.Object (KeyMap.fromList [(Key.fromText (redact (Key.toText key)), go value) | (key, value) <- KeyMap.toList fields])
+      other -> other
+    redact text = foldl' (\acc secret -> T.replace secret "<redacted>" acc) text present
 
 -- | Reads a body up to a bound. 'Nothing' means the body exceeds the bound,
 -- and reading stops at the first chunk that crosses it.
