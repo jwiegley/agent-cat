@@ -18,6 +18,7 @@ module Agentic.RoutingSecrets
     resolvedEngineCredentialProblem,
     resolvedEngineExecutionFingerprint,
     resolvedEngineCatalogueCredential,
+    resolvedEngineEndpointCredential,
     resolveEngineContexts,
     requireEngineCredentials,
   )
@@ -25,6 +26,7 @@ where
 
 import Agentic.Acp (ChildEnvironment, explicitChildEnvironmentWithRedactions)
 import Agentic.Route (Backend, backendSpelling)
+import Agentic.Decisions (Limits (..))
 import Agentic.RoutingConfig.V2
 import Control.Monad (forM, forM_, unless)
 import Crypto.Hash (Digest, SHA256, hash)
@@ -50,7 +52,9 @@ data ResolvedEngineContext = ResolvedEngineContext
     -- | Why the engine is not credential-ready: the first unset secret.
     resolvedEngineCredentialProblem :: !(Maybe Text),
     resolvedEngineExecutionFingerprint :: !Text,
-    resolvedEngineCatalogueCredential :: !(Maybe SecretValue)
+    resolvedEngineCatalogueCredential :: !(Maybe SecretValue),
+    -- | The secret of a decisions endpoint's authentication header.
+    resolvedEngineEndpointCredential :: !(Maybe SecretValue)
   }
 
 resolveEngineContexts :: SelectedRoutingV2 -> [Text] -> Map String String -> Either Text (Map Text ResolvedEngineContext)
@@ -69,7 +73,11 @@ resolveEngineContexts selected required ambient = do
     engine <- maybe (Left ("unknown engine '" <> alias <> "'")) Right (Map.lookup alias (routingV2Engines config))
     bindingResults <- traverse (resolveBinding config personaName alias ambient) (engineEnvironment engine)
     credentialResult <- traverse (resolveCatalogueCredential config personaName alias ambient) (engineCatalogue engine >>= catalogueAuth)
-    let unset = lefts (Map.elems bindingResults) <> maybe [] (either pure (const [])) credentialResult
+    endpointResult <- traverse (resolveCatalogueCredential config personaName alias ambient) (engineEndpoint engine >>= endpointAuth)
+    let unset =
+          lefts (Map.elems bindingResults)
+            <> maybe [] (either pure (const [])) credentialResult
+            <> maybe [] (either pure (const [])) endpointResult
         credential = credentialResult >>= either (const Nothing) Just
         selectedBindings = Map.fromList [(T.unpack name, value) | (name, Right value) <- Map.toList bindingResults]
         redactions =
@@ -89,7 +97,8 @@ resolveEngineContexts selected required ambient = do
               problem : _ -> Just problem
               [] -> Nothing,
             resolvedEngineExecutionFingerprint = engineExecutionFingerprint config alias engine,
-            resolvedEngineCatalogueCredential = credential
+            resolvedEngineCatalogueCredential = credential,
+            resolvedEngineEndpointCredential = endpointResult >>= either (const Nothing) Just
           }
       )
   pure (Map.fromList contexts)
@@ -98,8 +107,7 @@ engineExecutionFingerprint :: RoutingConfigV2 -> Text -> EngineDefinition -> Tex
 engineExecutionFingerprint config alias engine =
   "sha256:" <> T.pack (show (hash bytes :: Digest SHA256))
   where
-    bytes = BL.toStrict . encode $
-      object
+    bytes = BL.toStrict . encode . object $
         [ "engine" .= alias,
           "backend" .= backendSpelling (engineBackend engine),
           "provider" .= engineProvider engine,
@@ -107,6 +115,31 @@ engineExecutionFingerprint config alias engine =
             [ object ["name" .= name, "binding" .= bindingValue binding]
               | (name, binding) <- Map.toAscList (engineEnvironment engine)
             ]
+        ]
+          <> maybe [] (\endpoint -> ["endpoint" .= endpointValue endpoint]) (engineEndpoint engine)
+    -- Every non-secret field of a decisions endpoint, and the secret by name
+    -- and source, so that a changed endpoint changes the fingerprint.
+    endpointValue :: Endpoint -> Value
+    endpointValue endpoint =
+      object
+        [ "url" .= endpointUrl endpoint,
+          "auth"
+            .= fmap
+              ( \auth ->
+                  object
+                    [ "header" .= catalogueAuthHeader auth,
+                      "scheme" .= case catalogueAuthScheme auth of
+                        CatalogueAuthRaw -> "raw" :: Text
+                        CatalogueAuthBearer -> "bearer",
+                      "secret" .= catalogueAuthSecret auth,
+                      "source" .= fmap secretEnvironmentName (Map.lookup (catalogueAuthSecret auth) (routingV2Secrets config))
+                    ]
+              )
+              (endpointAuth endpoint),
+          "headers" .= Map.toAscList (endpointHeaders endpoint),
+          "timeoutMs" .= endpointTimeoutMs endpoint,
+          "maxBytes" .= endpointMaxBytes endpoint,
+          "limits" .= object ["options" .= limitOptions (endpointLimits endpoint), "levels" .= limitLevels (endpointLimits endpoint)]
         ]
     bindingValue :: EnvironmentBinding -> Value
     bindingValue (EnvironmentValue value) =

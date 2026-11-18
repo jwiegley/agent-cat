@@ -231,7 +231,7 @@ placeholder in the checked modules.
 under the theorem's recorded axiom footprint.
 @tab Named declarations in @file{model/Agentic/Core/}
 @item Frozen corpus replay
-@tab Haskell reproduces all 193 committed request/reply observations without
+@tab Haskell reproduces all 205 committed request/reply observations without
 Lean in the test loop.
 @tab @file{bisim/corpus/} and @command{tier0}
 @item Curated surface comparison
@@ -253,7 +253,7 @@ bare-question semantics, and every corpus entry except the three typed-result
 entries has this version.  Version 3 adds intent-bearing execution events and a
 @code{semanticTrace} that is obtained by erasure, and the live differential
 test uses it.  Version 4 adds a typed program result beside the unchanged
-program, and the three newest corpus entries have this version.  A pass at
+program, and the three typed-result corpus entries have this version.  A pass at
 version 3 establishes representation parity for the annotations.  It does not
 make intent part of semantic answer identity.  @ref{Conformance Boundary}
 gives the wire format.
@@ -576,6 +576,65 @@ accepted program lies at or below the branch rung.  The Haskell authoring
 surface enforces many refusals through its types, or it makes the invalid state
 impossible to represent.  The frozen corpus retains the Lean refusal contract
 for the first-order boundary.
+
+@section Weighings of a decision
+
+@cindex weighing
+@cindex region
+A test of a decision prints as the first-order node @code{weigh}.  The node
+carries the printed name of its subject, a field path, a region, and a
+position.  The path names the number record inside the value of the subject,
+and the empty path names the value itself.  A region is a list of half-spaces.
+Each half-space has a list of weights, each a pair of an option name and a
+rational, and a threshold @code{atLeast}.  The JSON form spells each rational
+as an object with @code{numerator} and @code{denominator}, as the conformance
+encoding of a schema value does.
+
+The checker accepts a weighing when its subject answers a structured code with
+a number record at the path, when every weight names an option of that record,
+and when no half-space names an option twice.  It refuses the other cases with
+messages that begin @samp{a weighing reads a decision}, @samp{a weighing's path
+names no number record}, @samp{a weighing reads only its decision's options},
+and @samp{a weighing names the option}.  The oracle classifies these refusals
+under the guard @code{other}.  A weighing answers @code{flag}, and it uses its
+subject without fixing the kind of that subject.  It elaborates to a @code{ret}
+node, so it asks nothing and adds nothing to a cost tree.  The Haskell builder
+function @code{Agentic.Builder.weigh} prints the same node.
+
+@file{model/Agentic/Core/Region.lean} gives the meaning of a region.  For the
+options @code{names} of a record @code{v}, @code{holds names R v} is true
+exactly when @code{v} lies in the cone and every half-space of @code{R} holds
+homogeneously, that is, when @code{θ·Σv ≤ ⟨w, v⟩} for each half-space with
+weights @code{w} and threshold @code{θ}.  With the empty region it states that
+@code{v} means a distribution.  The module proves four laws of this reading:
+
+@table @code
+@item holds_scale
+For @code{c > 0}, the record @code{c·v} holds exactly when @code{v} holds.  The
+reading sees the ray of a representative and ignores its scale.
+@item holds_add
+If two records hold, their sum holds.  The cone is convex, and each homogeneous
+half-space is a convex cone of representatives.
+@item holds_iff_normalized
+On the cone, the homogeneous test agrees with the test of each half-space on
+the normalized point @code{normalize names v = v/Σv}.
+@item normalize_mem_simplex
+On the cone, the normalized point is nonnegative at every option and has total
+mass 1, so it is a point of the simplex.
+@end table
+
+The axiom footprint of each of the four theorems is @code{propext},
+@code{Classical.choice}, and @code{Quot.sound}, the three standard axioms of
+Lean that the Mathlib lemmas on rationals use.  The theorems @code{recordAt_names} and
+@code{recordAt_map_names} relate the record that a weighing reads at a path to
+the options that the checker names there, and their footprint is
+@code{propext} and @code{Quot.sound}.  The statement that the normalized point
+lies in the @code{stdSimplex} of Mathlib is made in the module documentation
+and is proved by @code{normalize_mem_simplex} in the vocabulary of the module.
+The module imports no convex analysis from Mathlib, which keeps that part of
+Mathlib out of the closure of the conformance oracle.  The corpus entries
+@file{decision-000} to @file{decision-011} freeze seven checked weighings and
+five refusals.
 
 @section Validation contract and authoring hazards
 
@@ -1243,7 +1302,7 @@ and a fenced body that closes its own tag or the tag of a sibling.
 @code{@{"name": "@dots{}", "request": <request>, "reply": <reply>, "oracleVersion": <Nat>@}}.
 The last field records the oracle format under which the entry was frozen.
 Each file was produced by one run of the oracle, and its output was committed.
-The checkout holds 193 files, which are 95 checked replies, 54 refusals, and
+The checkout holds 205 files, which are 102 checked replies, 59 refusals, and
 44 string results.  The three typed-result entries are version 4, and every
 other entry is version 2.  The flagship is the entry
 @file{example-000-the-flagship-single-file}.  Its request is the same
@@ -1468,7 +1527,8 @@ throughout.
 @chapter Authoring Workflows
 
 This chapter develops the authoring surface from prompts and questions through
-statements, finite branches, panels, decisions, and bounded revision.
+statements, finite branches, panels, text matches, decisions, and bounded
+revision.
 
 @section Blocks and terminals
 
@@ -1593,11 +1653,13 @@ An empty list is refused when the Program is forced.  The authoring surface
 uses ordinary lists so that a panel reads naturally.  The value-level refusal
 preserves the same language contract as the first-order checker.
 
-@section Pure decisions
+@section Text matches
 
 @cindex decider
-@code{decide} classifies text already held in a handle and yields a flag without
-asking anyone.  The vocabulary is closed:
+@code{matches decider textHandle needles} classifies text already held in a
+handle and yields a flag without asking anyone.  It prints the first-order
+@code{decide} node, which is the name that the specification gives this text
+scan.  The vocabulary of deciders is closed:
 
 @table @code
 @item LastNonEmptyLineIs
@@ -1612,7 +1674,7 @@ A path read from a diff header matches one of the glob patterns.
 
 The line deciders compare under the ASCII case-folding rules of the project.
 Needles remain literal program text, and each needle must be nonempty.  The
-list must contain at least one needle.  When a decision replaces an asked flag,
+list must contain at least one needle.  When a match replaces an asked flag,
 it removes one question from every path, and the path count and the analysis
 rung stay the same.
 
@@ -1635,6 +1697,266 @@ three terminal arms in the Lean tag order.  There is no Haskell data
 constructor to match here.  The branch is placed at the explicit
 @code{caseVerdict} call, which can come many statements after the verdict was
 bound.
+
+@section Decisions
+
+@cindex decision
+@cindex decision model
+A decision asks which one of a finite set of options is right.  The option set
+is a Haskell type @code{T} whose constructors take no fields, and the type
+derives @code{Bounded}, @code{Enum}, @code{Eq}, @code{Ord}, @code{Show}, and
+@code{Generic}.  The constructor names are the option names, and the
+declaration order is the option order.  The constraint @code{Options t} states
+these requirements, so an author writes no instance.
+
+The answer to a decision is a record with one @code{number} field for each
+option, in option order.  It is a point @code{v} of the vector space
+@code{ℚ^T}, and its answer code is @code{Decision t}, the structured code whose
+schema is that record.  The record is read projectively.  When @code{v} lies in
+the cone @code{C(T) = @{v | v ≥ 0 and Σv > 0@}}, it means the distribution
+@code{π(v) = v/Σv}, which is a point of the probability simplex
+@code{Δ(T) = @{p : T → ℚ≥0 | Σp = 1@}}.  Two records that differ by a positive
+factor therefore mean the same distribution.  A record outside the cone has a
+negative entry or a zero sum, and it means nothing.
+
+A yes/no decision is the two-point case @code{T = Bool}, in which @code{True}
+means that the statement holds.  A point of @code{Δ(Bool)} is determined by the
+chance of @code{True}, which is a number from 0 to 1.  A scale is the ordered
+case.  Its levels run from lowest to highest in declaration order, and the rank
+of a level is its position, from 0 to @code{|T| − 1}.  The three forms denote a
+point of the same simplex.  The form selects the question that the decision
+model is asked, and it leaves the answer code unchanged.
+
+A reading of a decision is an affine map from @code{Δ(T)} to @code{ℚ}.  Every
+such map is a pairing @code{⟨w, p⟩ = Σ w(t)·p(t)} with a weight vector
+@code{w : T → ℚ}.  The chance of a set @code{S} of options is the pairing with
+the indicator of @code{S}, and the expected level of a scale is the pairing
+with the rank.  A test compares a reading with a bound @code{θ}, and the
+distributions that pass the test form a half-space of @code{Δ(T)}.  On a record
+@code{v} the test is read homogeneously as @code{⟨w, v⟩ ≥ θ·Σv}, which agrees
+with the test on @code{π(v)} and needs no division.
+
+@subsection Questions and the decide statement
+
+@table @code
+@item choice instructions describe
+Build a @code{Question t} that asks which option of @code{T} is right, where
+@code{T} has no structure beyond its options.  @code{describe} gives the
+description of each option, and an empty description leaves the option named
+only.  A choice takes from 2 to 255 options, and a type with fewer or more
+options is a compile-time error.
+
+@item scale instructions describe
+Build a @code{Question t} that asks which level of the ordered set @code{T} is
+right.  A scale takes from 2 to 10 levels, and the type checker enforces the
+bound.
+
+@item yesNo statement
+Build a @code{Question Bool} that asks whether the statement holds.  The two
+options are named only.
+
+@item yesNoMeaning statement meaning
+Build the same question with a description of what each answer means.
+
+@item decide party question evidence
+Ask the model party the question about the evidence, and bind the answer at
+the code @code{Decision t}.  The binding prints its kind, as @code{annotated}
+does.  The prompt opens with a header that states the instructions, the options
+with their descriptions, and the request for one probability for each option.
+The evidence follows the header verbatim.  A decisions engine reads the
+question back from that header, and any other engine answers the prompt as it
+is written.
+@end table
+
+A @code{decide} statement is one model question.  It counts as one question in
+every fold, and it is memoized like any other question.  When the Program is
+forced, @code{decide} raises a value-level error if the instructions are empty,
+if a text contains a carriage return, or if a hand-written @code{Enum} instance
+lists the options in an order other than declaration order.  The message begins
+with @samp{decide:}.
+
+@subsection Readings and tests
+
+A reading is a value that a test consumes, and a test binds a flag, which a
+Haskell @code{if}, @code{when}, or @code{unless} consumes.  A test asks nothing
+and costs nothing in any fold.
+
+@table @code
+@item chance options decision
+The reading of the chance that the right option lies in the listed set.  The
+list is read as a set.
+
+@item chanceYes decision
+The chance that the statement of a yes/no decision holds, which is
+@code{chance [True]}.
+
+@item expectedLevel decision
+The expected rank of a scale, a number from 0 to @code{|T| − 1}.  The rank of a
+level is the position of its option in the answer record, which is its position
+in declaration order for every question that @code{decide} asks.
+
+@item reading `atLeast` bound
+The test @code{⟨w, p⟩ ≥ θ}.
+
+@item reading `noMoreThan` bound
+The test @code{⟨w, p⟩ ≤ θ}.
+
+@item levelAtLeast level decision
+The test that the expected level is at least the rank @code{r} of
+@code{level}, which is @code{expectedLevel decision `atLeast` r}.
+
+@item mostLikely option decision
+The test that the option is among the most probable options.  Every option of a
+tie passes.
+
+@item isDistribution decision
+The test that the record lies in the cone, so that it means a distribution.
+@end table
+
+Three constructions are refused with value-level errors, because each test
+would be constant on @code{Δ(T)}.  These are the chance of no option, a bound
+outside the open range of the reading, and @code{levelAtLeast} at the lowest
+level.  For @code{atLeast} the refused bounds are those at or below the least
+weight and those above the greatest weight.  For @code{noMoreThan} they are
+those at or above the greatest weight and those below the least weight.  A
+bound on the chance of all the options is therefore always refused.  Each test
+prints as a first-order @code{weigh} node, which
+@ref{Representation and Analysis} describes.
+
+@subsection A worked decision
+
+The registered example @code{triage} routes a support ticket with three
+decisions.  The following text is its source in @file{workflow/example/Triage.hs}:
+
+@c SOURCE workflow/example/Triage.hs
+@verbatim
+data Team = Billing | Technical | Account | Other
+  deriving (Bounded, Enum, Eq, Ord, Show, Generic)
+
+data Urgency = Routine | Soon | Urgent
+  deriving (Bounded, Enum, Eq, Ord, Show, Generic)
+
+team :: Question Team
+team =
+  choice "Which team should handle this ticket?" \case
+    Billing -> "Payments, charges, invoices, and refunds."
+    Technical -> "Errors, outages, and problems using the product."
+    Account -> "Sign-in, profile, and subscription settings."
+    Other -> "Anything that fits none of the teams above."
+
+urgency :: Question Urgency
+urgency =
+  scale "How urgent is this ticket?" \case
+    Routine -> "It can wait for the normal queue."
+    Soon -> "It should be handled today."
+    Urgent -> "It blocks the customer now."
+
+refund :: Question Bool
+refund = yesNo "The customer explicitly asks for money back."
+
+-- | The model that answers the three decisions.
+triager :: Party 'IsModel
+triager = model "triage" `servedBy` "triage"
+
+-- | The model that answers a ticket at one desk.
+desk :: Text -> Party 'IsModel
+desk name = model name `servedBy` "balanced"
+
+triageProgram :: Parameterized
+triageProgram =
+  taking (stdinInputAs "ticket" :> noInputs) \ticket -> workflow W.do
+    routed <- decide triager team [wf|{ticket}|]
+    asked <- decide triager refund [wf|{ticket}|]
+    pressing <- decide triager urgency [wf|{ticket}|]
+    readable <- isDistribution routed
+    if readable
+      then W.do
+        billing <- mostLikely Billing routed
+        if billing
+          then W.do
+            refunding <- chanceYes asked `atLeast` 0.9
+            if refunding
+              then ask_ (desk "refund-desk") [wf|
+                Prepare the refund this ticket asks for.
+                {ticket}|]
+              else ask_ (desk "billing-desk") [wf|
+                Answer this billing ticket.
+                {ticket}|]
+          else W.do
+            urgent <- levelAtLeast Soon pressing
+            if urgent
+              then ask_ (desk "on-call") [wf|
+                An urgent ticket needs you.
+                {ticket}|]
+              else ask_ (desk "support-desk") [wf|
+                Answer this ticket.
+                {ticket}|]
+      else ask_ (desk "triage-desk") [wf|
+        The triage model gave no usable answer for this ticket.
+        {ticket}|]
+@end verbatim
+@c END SOURCE
+
+The first test routes a team answer that means nothing to the triage desk.  A
+ticket that is most likely a billing ticket goes to the refund desk when the
+customer asks for money back with a chance of at least 0.9, and to the billing
+desk otherwise.  Any other ticket goes to the on-call desk when its expected
+urgency is at least the rank of @code{Soon}, and to the support desk otherwise.
+@code{agentic-run plan triage} reports the level @code{branch} and eight ask
+nodes.  Each of the five paths asks the three decisions and one desk, so every
+path costs four questions.  The registered script answers 0.88 for
+@code{Billing}, 0.96 for @code{True}, and 0.7 for @code{Soon}, so a scripted run
+with a ticket on standard input takes the refund-desk path.
+
+@subsection Calibration and thresholds
+
+@cindex calibration
+Two decision models generally give different probabilities for the same
+question.  A threshold in a test is
+therefore a statement about the model that answers, and it is tuned for that
+model.  Fail-over keeps the meaning of an answer, which is a point of
+@code{Δ(T)} on every rung, and it changes the calibration.  When a decision
+falls back from one model to another through @code{fallingBackTo} or through a
+profile chain, a fixed threshold tests a different property of the answer of
+the second model.  A program that depends on a tuned threshold names one serving
+model for the decision, or it accepts that change of meaning.  The threshold
+belongs to the test and is no part of the question, so a change of threshold
+leaves the question, its memo key, and its cost unchanged.
+
+A confidence figure that a vendor reports is no part of the answer.  The gate
+@code{(p_max − 1/n)/(1 − 1/n) ≥ c} that several vendors report holds exactly
+when some option has a chance of at least @code{c + (1 − c)/n}, so a chain of
+@code{chance} tests expresses it.  A gate on the entropy of the distribution is
+no half-space, and no test expresses it.
+
+@subsection Answers outside the cone
+
+A world may answer any record of the right shape.  On a record outside the cone
+every test other than @code{isDistribution} is false, so a program that tests
+such a record takes the @code{else} arm.  @code{isDistribution} tests membership
+of the cone, and a program uses it to route an answer that means nothing, as
+@code{triage} does with its triage desk.  A scripted run answers a question that
+its table does not cover with the zero record, which lies outside the cone.  A
+decisions engine never returns a record outside the cone, because it refuses a
+response without a distribution as a protocol failure.  A generative model that
+answers the prompt can return any record that decodes.
+
+@subsection Routing a decision
+
+A decision is a model question, and it is routed by its model axis like any
+other question.  A generative engine, through ACP or agent-deck, receives the
+prompt with the JSON Schema of the record appended, and its answer is decoded at
+that schema.  A decisions engine sends the question in the native form of an
+HTTP decisions endpoint and returns the probabilities of the vendor as the
+record.  A routing file of version 2 defines a decisions engine with the
+backend @code{decisions:system-one} or @code{decisions:openai} and an
+@code{endpoint}.  Section 5.4 of @file{doc/model-routing-v2.md} states its
+fields, its URL rule, and the local runners that it reaches.  Before a run
+starts, the runner refuses a question that reaches a decisions backend unless
+@code{decide} asks it.  A question behind a dynamic continuation is invisible to
+that check, and the decisions engine refuses it when it is asked.
+@file{doc/research/decision-models.md} records the
+vendor APIs and the details that no primary source confirms.
 
 @section Bounded revision
 
@@ -1931,10 +2253,10 @@ starting an adapter or asking an addressee.
 @section List and help
 
 @code{agentic-run list} prints the registry in declaration order.  The current
-repository has ten rows, named @code{harden}, @code{hello}, @code{structured},
-@code{structured-result}, @code{capital}, @code{plan-feature},
-@code{review-lite}, @code{ship-feature-lite}, @code{grind-tests}, and
-@code{stack-prs}.  Each line
+repository has eleven rows, named @code{harden}, @code{hello},
+@code{structured}, @code{structured-result}, @code{capital}, @code{triage},
+@code{plan-feature}, @code{review-lite}, @code{ship-feature-lite},
+@code{grind-tests}, and @code{stack-prs}.  Each line
 includes the short description of the row.
 
 @code{agentic-run help NAME} and @code{agentic-run NAME --help} print the same
@@ -2491,6 +2813,8 @@ direnv exec . ./cli/ci/routing-config.sh
 direnv exec . ./cli/ci/citations.sh
 direnv exec . ./engine/acp/ci/acp.sh
 direnv exec . ./engine/agent-deck/ci/deck.sh
+direnv exec . ./engine/decisions/ci/decisions.sh
+direnv exec . ./engine/decisions/ci/triage.sh
 @end example
 
 @file{cli/ci/policies.sh} checks the import policy between the source
@@ -2508,8 +2832,13 @@ docstring still names an existing file and line.  @file{engine/acp/ci/acp.sh}
 drives the ACP transport against @file{engine/acp/test/stub_adapter.py} and
 the misbehaving adapters beside it.  @file{engine/agent-deck/ci/deck.sh}
 drives the deck transport against @file{engine/agent-deck/test/stub-deck.sh}.
-@file{engine/acp/ci/route-live.sh} is the one script that contacts real
-backends.  It is manual and paid, and it is outside every automatic gate.
+@file{engine/decisions/ci/decisions.sh} runs the decisions engine against an
+HTTP stub inside its test process, and @file{engine/decisions/ci/triage.sh}
+runs the @code{triage} example through routing against
+@file{engine/decisions/test/stub_decisions.py} on the loopback interface.
+@file{engine/acp/ci/route-live.sh} and @file{engine/decisions/ci/route-live.sh}
+are the scripts that contact real backends.  They are manual and paid, and
+they are outside every automatic gate.
 
 @section Documentation gates
 
@@ -2904,11 +3233,12 @@ corresponding builder error.
 Closed classification vocabulary with constructors @code{LastNonEmptyLineIs},
 @code{ContainsLine}, @code{AnyLineStartsWith}, and @code{AnyPathMatches}.
 
-@c COVER API Agentic.Workflow.decide author
-@item decide decider textHandle needles
+@c COVER API Agentic.Workflow.matches author
+@item matches decider textHandle needles
 Purely classify bound text and return a flag @code{Rhs}.  Needles are literal
 and nonempty, and at least one must be present.  Empty input raises a
-value-level error.  The operation asks nothing and adds no request node.
+value-level error.  The operation asks nothing and adds no request node, and
+it prints the first-order @code{decide} node.
 @end table
 
 @section Answer kinds and schemas
@@ -2992,6 +3322,206 @@ Witness for the empty product ending an object.
 Prepend a statically named field to an object witness.  @code{rest} must be an
 object tail, and duplicate property names fail the @code{FreshProperty}
 constraint.
+@end table
+
+@section Decisions and their readings
+
+The authoring entries below are exported by @code{Agentic.Workflow}.  The
+module @code{Agentic.Decision} states the meaning of a decision answer in
+Haskell, and its entries follow them.
+
+@table @code
+@c COVER API Agentic.Workflow.Options author
+@c COVER API Agentic.Decision.Options support
+@item Options t
+Constraint synonym for an option set: @code{Generic}, @code{Bounded},
+@code{Enum}, and @code{Ord}, a generic constructor name for each value, and the
+schema of the answer record.  Its naming law states that the option names in
+option order equal the field names of @code{DecisionSchema t}, which holds for
+every derived @code{Enum}.
+
+@c COVER API Agentic.Workflow.Decision author
+@item Decision t
+The answer code of a decision, @code{'CodeStructured (DecisionSchema t)}.
+
+@c COVER API Agentic.Workflow.Question author
+@item Question t
+Abstract question whose answer is a point of the simplex over @code{t}.  It
+holds the form, the literal instructions, and a literal description of every
+option.
+
+@c COVER API Agentic.Workflow.choice author
+@item choice instructions describe
+Build a choice question.  The constraint @code{ChoiceSize t} requires from 2
+to 255 options.
+
+@c COVER API Agentic.Workflow.scale author
+@item scale instructions describe
+Build a scale question with the levels in declaration order.  The constraint
+@code{ScaleSize t} requires from 2 to 10 levels.
+
+@c COVER API Agentic.Workflow.yesNo author
+@item yesNo statement
+Build a yes/no question over @code{Bool} whose options are named only.
+
+@c COVER API Agentic.Workflow.yesNoMeaning author
+@item yesNoMeaning statement meaning
+Build a yes/no question whose options carry the descriptions that
+@code{meaning} gives.
+
+@c COVER API Agentic.Workflow.decide author
+@item decide party question evidence
+Ask a model party a decision question and return @code{Ann s (Decision t)}.
+Invalid instructions and a hand-written @code{Enum} that breaks the naming law
+raise a value-level error that begins with @samp{decide:}.
+
+@c COVER API Agentic.Workflow.Reading author
+@item Reading h
+Affine reading of the decision that a handle holds, given by its weight for
+each option.  An option without a weight weighs 0.
+
+@c COVER API Agentic.Workflow.DecisionRecord author
+@item DecisionRecord schema
+Constraint that a structured schema is a nonempty record of @code{number}
+fields.  It types @code{expectedLevel} and @code{isDistribution}, which take no
+option value.
+
+@c COVER API Agentic.Workflow.chance author
+@item chance options decision
+The chance that the right option lies in the listed set.  An empty list raises
+a value-level error.
+
+@c COVER API Agentic.Workflow.chanceYes author
+@item chanceYes decision
+The chance that a yes/no statement holds, @code{chance [True]}.
+
+@c COVER API Agentic.Workflow.expectedLevel author
+@item expectedLevel decision
+The expected rank of a scale.
+
+@c COVER API Agentic.Workflow.atLeast author
+@item reading `atLeast` bound
+Flag source for the test that the reading is at least the bound.  A bound at
+which the test is constant on the simplex raises a value-level error.
+
+@c COVER API Agentic.Workflow.noMoreThan author
+@item reading `noMoreThan` bound
+Flag source for the test that the reading is at most the bound, with the same
+refusal of a constant test.
+
+@c COVER API Agentic.Workflow.levelAtLeast author
+@item levelAtLeast level decision
+Flag source for the test that the expected level is at least the rank of
+@code{level}, which is the position of its option name among the fields of the
+decision record.  It raises a value-level error when the option names of the
+type are not the field names of the record, and when @code{level} names the
+first field of the record, because every distribution reaches that level.
+
+@c COVER API Agentic.Workflow.mostLikely author
+@item mostLikely option decision
+Flag source for the test that the option is among the most probable options.
+
+@c COVER API Agentic.Workflow.isDistribution author
+@item isDistribution decision
+Flag source for the test that the record lies in the cone and so means a
+distribution.
+
+@c COVER API Agentic.Decision.OptionNames support
+@item OptionNames t
+Type-level list of the constructor names of @code{t}, in declaration order.  A
+constructor with fields, or a type with no constructor, is a type error.
+
+@c COVER API Agentic.Decision.DecisionSchema support
+@item DecisionSchema t
+The schema of the answer record, @code{NumberFields (OptionNames t)}.
+
+@c COVER API Agentic.Decision.NumberFields support
+@item NumberFields names
+The schema with one @code{number} field for each name, in order.
+
+@c COVER API Agentic.Decision.NumberRecord support
+@item NumberRecord names
+Class whose methods @code{recordFromList} and @code{recordToList} convert a
+number record to and from the list of its values in field order.
+@code{recordFromList} is total, and it reads a missing value as 0.
+
+@c COVER API Agentic.Decision.options support
+@item options
+The option set @code{[minBound .. maxBound]} in option order.
+
+@c COVER API Agentic.Decision.optionName support
+@item optionName option
+The generic constructor name of an option.
+
+@c COVER API Agentic.Decision.rank support
+@item rank option
+The position of an option in option order, as a rational.
+
+@c COVER API Agentic.Decision.optionCount support
+@item optionCount
+The number of options of a type.
+
+@c COVER API Agentic.Decision.ChoiceSize support
+@c COVER API Agentic.Decision.ScaleSize support
+@item ChoiceSize t, ScaleSize t
+Constraints that bound a choice to 2 through 255 options and a scale to 2
+through 10 levels.  A breach is a type error that names the form, the bounds,
+and the count.
+
+@c COVER API Agentic.Decision.Prob support
+@c COVER API Agentic.Decision.prob support
+@c COVER API Agentic.Decision.probValue support
+@item Prob, prob, probValue
+The rationals from 0 to 1.  @code{prob r} is @code{Just} exactly when
+@code{r} lies in that interval, and @code{probValue} returns the rational.
+
+@c COVER API Agentic.Decision.Weights support
+@c COVER API Agentic.Decision.weightsOf support
+@c COVER API Agentic.Decision.weight support
+@item Weights t, weightsOf, weight
+The answer record as the vector space @code{ℚ^T}, with any representative.
+Its @code{HasSchema} instance relates it to @code{DecisionSchema t}.
+
+@c COVER API Agentic.Decision.Dist support
+@item Dist t
+A point of the simplex, held in a canonical form without zero entries, so that
+its equality is the equality of distributions.
+
+@c COVER API Agentic.Decision.distribution support
+@item distribution record
+The projection @code{v/Σv}, which is @code{Nothing} for a record outside the
+cone.
+
+@c COVER API Agentic.Decision.weights support
+@item weights distribution
+The inclusion of the simplex in the vector space of records.
+
+@c COVER API Agentic.Decision.probabilityOf support
+@c COVER API Agentic.Decision.expectation support
+@item probabilityOf distribution options, expectation f distribution
+The chance of a set of options and the pairing of a weight function with the
+distribution.
+
+@c COVER API Agentic.Decision.dirac support
+@c COVER API Agentic.Decision.mix support
+@c COVER API Agentic.Decision.pushforward support
+@item dirac, mix, pushforward
+The vertex at one option, the binary convex combination
+@code{mix λ p q = (1 − λ)p + λq}, and the image of a distribution under a
+function.
+
+@c COVER API Agentic.Decision.modes support
+@item modes distribution
+The nonempty set of most probable options, in option order.
+
+@c COVER API Agentic.Decision.bernoulli support
+@c COVER API Agentic.Decision.probabilityOfTrue support
+@item bernoulli, probabilityOfTrue
+The isomorphism between @code{Prob} and the distributions over @code{Bool}.
+
+@c COVER API Agentic.Decision.meanLevel support
+@item meanLevel distribution
+The expected rank, @code{expectation rank}.
 @end table
 
 @section Statements and branches
@@ -5987,10 +6517,21 @@ not finish with @code{amend}.  Retain exactly the two represented clause sources
 The authoring list is empty.  Supply at least one question.  For @code{panelText},
 also give every member a valid distinct label.
 
-@item decide: a decider needs at least one needle
+@item matches: a decider needs at least one needle
 The classifier has no meaningful literal test.  Supply one or more nonempty
 needles.  A test that is chosen from model-authored text changes the intended
 trust boundary, and it is unsupported.
+
+@item decide: a decision needs instructions
+A decision question has empty instructions, a carriage return in a text, or an
+@code{Enum} instance that lists the options out of declaration order.  Write
+the instructions, remove the carriage return, or derive @code{Enum}.
+
+@item atLeast: the reading ranges from 0 to 1 on every distribution
+A test of a reading is constant on the simplex, so it passes on every
+distribution or on none.  Choose a bound inside the range that the message
+names.  @code{chance []} and @code{levelAtLeast} at the lowest level are
+refused for the same reason.
 
 @item named: b0 is a name this surface generates for itself
 A selected binding or parameter uses the reserved @code{bN} or @code{rN} shape.
@@ -6217,6 +6758,11 @@ under a shape-based price.
 A member of the closed pure classification vocabulary that turns bound text into
 a flag without asking an addressee.
 
+@cindex decision
+@item decision
+A model question whose answer is a record of one number for each option of a
+finite option set, read as a point of the probability simplex over the options.
+
 @cindex denotation
 @item denotation
 The meaning function from a typed Plan and environment to a dialogue.  It erases
@@ -6384,6 +6930,10 @@ A workflow construction after which no statement follows in that block, such as
 @item verdict
 The ordered algebra in which approval leaves another verdict unchanged, refusal
 determines the result, and objection reason lists are concatenated.
+
+@item weighing
+A pure test of a decision record against a region, a finite list of
+half-spaces of the probability simplex.  It answers a flag and asks no one.
 
 @cindex world
 @item world

@@ -38,7 +38,7 @@ main = do
               EnginePermission report -> modifyIORef' reports (<> [report])
               _ -> pure ()
           }
-      request target intent kind prompt = EngineRequest target Nothing Nothing 0 intent kind prompt True
+      request target intent kind prompt = EngineRequest target Nothing Nothing 0 intent kind prompt True Nothing
   withAcp config $ \acp -> do
     let engine = engineOfAcp config acp
     effect <- startEngine engine context (request "tool apply" Effect ReceiptAnswer "Apply: +hardened line")

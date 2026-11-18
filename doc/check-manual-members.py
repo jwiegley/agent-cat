@@ -45,7 +45,7 @@ def ghci_info(parents: list[str]) -> dict[str, str]:
     commands = [
         ':set prompt ""',
         ':set prompt-cont ""',
-        ':module + Agentic.Builder Agentic.Cli Agentic.DSL Agentic.DSL.Plan Agentic.Planning Agentic.Runtime.Facts Agentic.Schema Agentic.Schema.Json Agentic.Schema.TH Agentic.WF Agentic.Workflow Agentic.Workflow.Do',
+        ':module + Agentic.Builder Agentic.Cli Agentic.DSL Agentic.DSL.Plan Agentic.Decision Agentic.Planning Agentic.Runtime.Facts Agentic.Schema Agentic.Schema.Json Agentic.Schema.TH Agentic.WF Agentic.Workflow Agentic.Workflow.Do',
     ]
     for index, parent in enumerate(parents):
         commands.extend(

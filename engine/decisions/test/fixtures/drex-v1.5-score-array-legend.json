@@ -1,0 +1,1 @@
+{"answers":{"decision":{"type":"score","score":1.3362,"legend":["Routine","Soon","Urgent"],"probabilities":{"0":0.2489,"1":0.166,"2":0.5851},"confidence":0.6681}},"usage":{"input_tokens":87,"output_tokens":166},"latency_ms":860.6}

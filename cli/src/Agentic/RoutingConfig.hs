@@ -83,9 +83,9 @@ import Agentic.RoutingSecrets
     resolvedEngineExecutionFingerprint,
   )
 import Agentic.Route
-  ( Backend,
+  ( Backend (BackendDecisions),
     Routes,
-    parseBackend,
+    parseConfiguredBackend,
     routeDefault,
     routeNamed,
     routes,
@@ -225,7 +225,10 @@ instance FromJSON Router where
     onlyKeys "router" ["name", "backend", "provider"] o
     name <- nonBlank "router name" =<< o .: "name"
     backendText <- nonBlank "router backend" =<< o .: "backend"
-    backend <- either (fail . T.unpack) pure (parseBackend backendText)
+    backend <- either (fail . T.unpack) pure (parseConfiguredBackend backendText)
+    case backend of
+      BackendDecisions _ -> fail "a decisions engine needs routing configuration version 2"
+      _ -> pure ()
     provider <- nonBlank "router provider" =<< o .: "provider"
     pure (Router name backend provider)
 
@@ -456,8 +459,35 @@ expandRoutingConfigV2 selected overrides commandRoutes authored = do
     persona = selectedPersona selected
 
     applyAlias axis target = do
-      let alias = Map.findWithDefault (realizationModel (resolvedSpec target)) axis overrides
+      let original = realizationModel (resolvedSpec target)
+          alias = Map.findWithDefault original axis overrides
       (model, engine) <- modelAndEngine config persona (selectedPersonaName selected) alias
+      case engineBackend engine of
+        BackendDecisions dialect ->
+          let spec0 = resolvedSpec target
+           in either
+                (\problem -> Left ("routing axis '" <> axis <> "': " <> problem))
+                Right
+                ( validateDecisionsRealization
+                    dialect
+                    alias
+                    (realizationThinking spec0)
+                    (realizationMaxOutput spec0)
+                    (realizationOptions spec0)
+                )
+        -- Validation refuses a written max-output on a rung of a decisions
+        -- model, so such a rung carries settings that nobody wrote, and a
+        -- model of another engine cannot take it.
+        _ -> forM_ (decisionsDialectOf config original) $ \_ ->
+          Left
+            ( "routing axis '"
+                <> axis
+                <> "': realization of model '"
+                <> alias
+                <> "' needs both thinking and max-output, and the rung of decisions model '"
+                <> original
+                <> "' writes no max-output"
+            )
       let router =
             Router
               { routerName = concreteModelEngine model,
@@ -569,8 +599,10 @@ lowerSelectedRouting selected = do
         Realization
           { realizationRouter = concreteModelEngine model,
             realizationModel = realizationV2Model realization,
-            realizationThinking = realizationV2Thinking realization,
-            realizationMaxOutput = realizationV2MaxOutput realization,
+            -- Validation admits an unwritten setting only for a decisions
+            -- model, which has neither a thinking level nor an output limit.
+            realizationThinking = fromMaybe ThinkOff (realizationV2Thinking realization),
+            realizationMaxOutput = fromMaybe Nothing (realizationV2MaxOutput realization),
             realizationOptions = realizationV2Options realization
           }
 
@@ -711,7 +743,7 @@ loadV2Layers layers = do
     ([user], [project]) -> Right (user, Just project)
     _ -> Left "version-2 routing requires one user document followed by at most one project document"
   forM_ project $ \selector -> do
-    _ <- selectRoutingPersona privileged Nothing Nothing (Just selector)
+    _ <- firstAtProject (selectRoutingPersona privileged Nothing Nothing (Just selector))
     pure ()
   pure
     LoadedRouting
@@ -723,6 +755,11 @@ loadV2Layers layers = do
   where
     firstUserAt path bytes = firstAt path (decodeRoutingUserV2 bytes)
     firstProjectAt path bytes = firstAt path (decodeRoutingProjectV2 bytes)
+    -- A refusal of the project layer against its persona names the project
+    -- file, as a refusal at decode does.
+    firstAtProject = case [path | (ProjectRoutingLayer, path, _) <- layers] of
+      [path] -> firstAt path
+      _ -> id
     firstAt path = either (Left . ((T.pack path <> ": ") <>)) Right
 
 -- | Load the conventional user and project files for this process.

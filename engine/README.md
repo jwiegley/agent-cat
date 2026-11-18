@@ -12,6 +12,8 @@ interface that the runtime and every transport share. `acp` implements the
 Agent Client Protocol as `Agentic.Acp`, and its children hold the selector
 modules for Claude, Codex, and Factory Droid. `agent-deck` implements
 `Agentic.AgentDeck`, which joins a session that agent-deck already owns.
+`decisions` implements `Agentic.Decisions`, which asks decision questions of a
+decisions HTTP endpoint.
 
 ## Dependencies
 
@@ -19,6 +21,7 @@ modules for Claude, Codex, and Factory Droid. `agent-deck` implements
 runtime -> engine/api
 engine/acp/{claude,codex,droid} -> engine/acp -> engine/api
 engine/agent-deck -> engine/api
+engine/decisions -> engine/api
 cli -> concrete engines
 ```
 
@@ -32,6 +35,7 @@ nix develop path:. -c cabal build all
 nix develop path:. -c cabal test engine-api-test
 ./engine/acp/ci/acp.sh
 ./engine/agent-deck/ci/deck.sh
+./engine/decisions/ci/decisions.sh
 ```
 
 ## Conventions

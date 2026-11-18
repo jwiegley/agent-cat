@@ -81,8 +81,10 @@ module Agentic.Route
 
     -- * What the command line said
     parseBackend,
+    parseConfiguredBackend,
     parseRoute,
     backendSpelling,
+    decisionsDefaultRefusal,
 
     Routes (..),
     routes,
@@ -93,6 +95,7 @@ module Agentic.Route
   )
 where
 
+import Agentic.Decisions (Dialect, dialectOfWord, dialectWord)
 import Agentic.Runtime (Routes (..), backendFor, routeBackends, routedWorld, routes, routesCovered)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -103,12 +106,14 @@ import qualified Data.Text as T
 
 -- | A transport, named the way an operator names it on the command line.
 --
--- The two are the two engines @run@ already has, and this type adds neither: an
--- 'BackendAcp' word is what @--adapter@ takes and reaches
+-- An 'BackendAcp' word is what @--adapter@ takes and reaches
 -- 'Agentic.Acp.adapterArgv' verbatim, a 'BackendDeck' word is what @--session@
--- takes and reaches 'Agentic.AgentDeck.defaultDeckConfig' verbatim. Nothing new
--- is parsed anywhere in this module: those two functions already turn a word
--- into a backend, and the grammar below is the colon and a lookup.
+-- takes and reaches 'Agentic.AgentDeck.defaultDeckConfig' verbatim, and a
+-- 'BackendDecisions' word is the wire dialect of a decisions endpoint, which
+-- 'Agentic.Decisions.dialectOfWord' reads. The endpoint itself is defined only
+-- in version-2 routing configuration, so a decisions backend serves only the
+-- models that such a configuration names. The grammar below is the colon and
+-- a lookup.
 --
 -- 'Eq' is load-bearing rather than decorative — it is what 'routeBackends'
 -- deduplicates by, so two pins routed to the same adapter share one process
@@ -119,25 +124,31 @@ data Backend
     BackendAcp !Text
   | -- | @deck:\<id\>@ — a live @agent-deck@ session somebody else started.
     BackendDeck !Text
+  | -- | @decisions:system-one@ | @decisions:openai@ — a decisions endpoint
+    -- that speaks this wire dialect.
+    BackendDecisions !Dialect
   deriving (Eq, Ord, Show)
 
--- | Which of the two transports a backend is.
+-- | Which of the three transports a backend is.
 --
 -- It exists for one caller: the run's flag check. @--binary@ and @--poll@ are
 -- the deck engine's and @--adapter@, @--adapter-arg@ and @--scratch@ are the
 -- acp engine's, and until routing existed a run /was/ one engine, so "not the
 -- acp engine's to take" was a complete sentence. With a @deck:@ route under an
 -- @acp@ default it is not, and the rule generalizes to the set of schemes in
--- the optional default and named routes.
+-- the optional default and named routes. The decisions scheme takes none of
+-- these flags.
 data Scheme
   = SchemeAcp
   | SchemeDeck
+  | SchemeDecisions
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 schemeOf :: Backend -> Scheme
 schemeOf = \case
   BackendAcp _ -> SchemeAcp
   BackendDeck _ -> SchemeDeck
+  BackendDecisions _ -> SchemeDecisions
 
 -- | How a scheme names itself in a refusal — today's words, unchanged, because
 -- a run with one scheme must refuse a foreign flag in exactly the sentence it
@@ -146,6 +157,7 @@ schemeWord :: Scheme -> Text
 schemeWord = \case
   SchemeAcp -> "the acp engine"
   SchemeDeck -> "the deck engine"
+  SchemeDecisions -> "the decisions engine"
 
 -- ---------------------------------------------------------------------------
 -- What the command line said
@@ -158,10 +170,15 @@ schemeWord = \case
 -- (@acp:C:\\adapters\\x@ on a machine that spells paths that way). Splitting
 -- anywhere else would make a legal name unnameable.
 --
--- Every failure is one refusal, naming both shapes, because everything that is
--- not one of the two shapes is the same mistake: the operator has written
--- something this run cannot start or send to, and what they need is the two
--- things they may write instead.
+-- Every failure of the scheme is one refusal, because everything that is not
+-- one of the shapes is the same mistake: the operator has written something
+-- this run cannot start or send to, and what they need is the things they may
+-- write instead. This parser serves @--route@, which can name only an @acp:@
+-- or a @deck:@ backend, so its refusal names those two shapes, and a
+-- @decisions:@ value with an unknown dialect takes that same refusal.
+-- 'parseConfiguredBackend' is the same grammar for a routing file, whose
+-- refusal also names the @decisions:@ shape, and where an unknown dialect
+-- takes its own refusal, which names the dialects.
 --
 -- __Surrounding whitespace is not part of either half__, and stripping it is a
 -- refusal and not a convenience. No adapter is named @\" \"@ and no session is
@@ -173,7 +190,36 @@ schemeWord = \case
 -- it is not a usage error. Trimmed, it is exactly the refusal @acp:@ gets,
 -- arriving where every other malformed shape does.
 parseBackend :: Text -> Either Text Backend
-parseBackend spec = case T.breakOn ":" spec of
+parseBackend = parseBackendWith routeShapes (const . routeShapes)
+  where
+    routeShapes spec =
+      "unknown backend '"
+        <> spec
+        <> "' in --route: a backend is acp:<adapter> (start an adapter of this run's own) or deck:<id> (send to a live agent-deck session)"
+
+-- | 'parseBackend' for a backend that a routing file names. The grammar is the
+-- same, and the refusal of an unknown scheme names the three shapes that a
+-- routing file may write.
+parseConfiguredBackend :: Text -> Either Text Backend
+parseConfiguredBackend = parseBackendWith fileShapes unknownDialect
+  where
+    fileShapes spec =
+      "unknown backend '"
+        <> spec
+        <> "' in routing configuration: a backend is acp:<adapter> (start an adapter of this run's own), deck:<id> (send to a live agent-deck session) or decisions:<dialect> (send to a decisions endpoint that version-2 routing configuration defines)"
+    unknownDialect spec value =
+      "unknown decisions dialect '"
+        <> value
+        <> "' in '"
+        <> spec
+        <> "': a decisions backend is "
+        <> T.intercalate " or " ["decisions:" <> dialectWord dialect | dialect <- [minBound .. maxBound]]
+
+-- | The grammar of 'parseBackend' and 'parseConfiguredBackend'. The refusal of
+-- an unknown scheme, and the refusal of an unknown decisions dialect, which
+-- takes the whole value and the dialect word, are parameters.
+parseBackendWith :: (Text -> Text) -> (Text -> Text -> Text) -> Text -> Either Text Backend
+parseBackendWith unknownShape unknownDialect spec = case T.breakOn ":" spec of
   (scheme, rest)
     | Just raw <- T.stripPrefix ":" rest,
       let value = T.strip raw,
@@ -181,14 +227,11 @@ parseBackend spec = case T.breakOn ":" spec of
         case T.strip scheme of
           "acp" -> Right (BackendAcp value)
           "deck" -> Right (BackendDeck value)
+          "decisions" -> maybe (Left (unknownDialect spec value)) (Right . BackendDecisions) (dialectOfWord value)
           _ -> unknown
   _ -> unknown
   where
-    unknown =
-      Left $
-        "unknown backend '"
-          <> spec
-          <> "' in --route: a backend is acp:<adapter> (start an adapter of this run's own) or deck:<id> (send to a live agent-deck session)"
+    unknown = Left (unknownShape spec)
 
 -- | A backend as the operator would have written it: the printed inverse of
 -- 'parseBackend'.
@@ -207,6 +250,17 @@ backendSpelling :: Backend -> Text
 backendSpelling = \case
   BackendAcp w -> "acp:" <> w
   BackendDeck s -> "deck:" <> s
+  BackendDecisions d -> "decisions:" <> dialectWord d
+
+-- | The refusal for a route table whose default is a decisions backend.
+--
+-- A decisions backend answers a question with the model that the question's
+-- model axis names, and an unclaimed question has no model axis, so the
+-- default route is the one place a decisions backend can never serve.
+decisionsDefaultRefusal :: Routes Backend -> Either Text ()
+decisionsDefaultRefusal table = case routeDefault table of
+  Just (BackendDecisions _) -> Left "a decisions backend serves only named models"
+  _ -> Right ()
 
 -- | @NAME=BACKEND@, split on the first @=@.
 --

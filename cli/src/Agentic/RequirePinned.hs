@@ -137,6 +137,7 @@ firstAsk match prog = firstOf (map matchingFn (progFns prog) ++ [matchingMain])
     matchingRhs (RhsPanel members _) = firstOf (map match members)
     matchingRhs (RhsPanelText members _) = firstOf (map (match . tmAsk) members)
     matchingRhs RhsDecide {} = Nothing
+    matchingRhs RhsWeigh {} = Nothing
     matchingRhs RhsCall {} = Nothing
 
     matchingBody = firstOf . map matchingStatement

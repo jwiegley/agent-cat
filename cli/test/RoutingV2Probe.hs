@@ -3,7 +3,8 @@
 module Main (main) where
 
 import Agentic.Acp (AcpConfig (..), childEnvironmentNames, defaultAcpConfig, withAcp)
-import Agentic.Route (Backend (..), Routes (..), routes)
+import Agentic.Decisions (Dialect (..), Limits (..), defaultLimits)
+import Agentic.Route (Backend (..), Routes (..), decisionsDefaultRefusal, routes, routesCovered)
 import Agentic.RoutingConfig
 import Control.Exception (finally)
 import qualified Data.ByteString.Char8 as BS
@@ -188,6 +189,68 @@ publicCatalogueYaml host =
       "        chain: [{model: public-model, thinking: high, max-output: 4096}]"
     ]
 
+-- | Two decisions engines of one dialect, a decisions engine of the other
+-- dialect on loopback, and an ACP engine, in one persona.
+decisionsYaml :: BS.ByteString
+decisionsYaml =
+  BS.unlines
+    [ "version: 2",
+      "default-persona: test",
+      "secrets:",
+      "  hosted: {env: DECISIONS_TEST_KEY}",
+      "engines:",
+      "  alpha:",
+      "    backend: decisions:system-one",
+      "    provider: hosted-one",
+      "    endpoint:",
+      "      url: https://decisions.example.test/v1/decide",
+      "      auth: {header: authorization, scheme: bearer, secret: hosted}",
+      "      headers: {x-client: probe}",
+      "      timeout-ms: 30000",
+      "      max-bytes: 1048576",
+      "  beta:",
+      "    backend: decisions:system-one",
+      "    provider: local-one",
+      "    endpoint:",
+      "      url: http://127.0.0.1:8000/v1/systemone",
+      "      timeout-ms: 60000",
+      "      max-bytes: 1048576",
+      "      limits: {options: 24, levels: 5}",
+      "  gamma:",
+      "    backend: decisions:openai",
+      "    provider: hosted-two",
+      "    endpoint: {url: \"https://decisions.example.test/v1/decisions\", timeout-ms: 30000, max-bytes: 1048576}",
+      "  general:",
+      "    backend: acp:codex",
+      "    provider: openai",
+      "models:",
+      "  alpha-model: {engine: alpha, select: [{exact: alpha-1}]}",
+      "  beta-model: {engine: beta, select: [{exact: beta-1}]}",
+      "  gamma-model: {engine: gamma, select: [{exact: gamma-1}]}",
+      "  general-model: {engine: general, select: [{exact: general-1}]}",
+      "personas:",
+      "  test:",
+      "    engines: [alpha, beta, gamma, general]",
+      "    models: [alpha-model, beta-model, gamma-model, general-model]",
+      "    profiles:",
+      "      primary:",
+      "        chain: [{model: alpha-model, options: {temperature: 0}}]",
+      "      spare:",
+      "        chain: [{model: beta-model}]",
+      "      other:",
+      "        chain: [{model: gamma-model}]",
+      "      thinker:",
+      "        chain: [{model: general-model, thinking: high, max-output: 4096}]"
+    ]
+
+-- | The decisions fixture with one exact fragment replaced.
+decisionsWith :: Text -> Text -> BS.ByteString
+decisionsWith needle replacement =
+  let text = T.pack (BS.unpack decisionsYaml)
+   in if needle `T.isInfixOf` text
+        then BS.pack (T.unpack (T.replace needle replacement text))
+        else error ("decisions fixture has no fragment " <> show needle)
+
 check :: IORef Int -> Text -> Bool -> IO ()
 check failures label holds =
   if holds
@@ -196,6 +259,150 @@ check failures label holds =
 
 isLeftContaining :: Text -> Either Text a -> Bool
 isLeftContaining needle = either (T.isInfixOf needle) (const False)
+
+decisionsProbes :: IORef Int -> IO ()
+decisionsProbes failures = do
+  let decoded = decodeRoutingUserV2 decisionsYaml
+  check failures "decisions engines decode with endpoints, default limits and configured limits" $
+    case decoded of
+      Right config ->
+        let endpointOf name = Map.lookup name (routingV2Engines config) >>= engineEndpoint
+         in fmap engineBackend (Map.lookup "alpha" (routingV2Engines config)) == Just (BackendDecisions SystemOne)
+              && fmap engineBackend (Map.lookup "gamma" (routingV2Engines config)) == Just (BackendDecisions OpenAIDecisions)
+              && fmap endpointLimits (endpointOf "alpha") == Just defaultLimits
+              && fmap endpointLimits (endpointOf "beta") == Just (Limits 24 5)
+              && fmap endpointHeaders (endpointOf "alpha") == Just (Map.singleton "x-client" "probe")
+              && fmap (fmap catalogueAuthSecret . endpointAuth) (endpointOf "alpha") == Just (Just "hosted")
+              && fmap engineEndpoint (Map.lookup "general" (routingV2Engines config)) == Just Nothing
+      Left _ -> False
+  check failures "a decisions engine requires an endpoint" $
+    isLeftContaining
+      "decisions engine 'gamma' needs an endpoint"
+      (decodeRoutingUserV2 (decisionsWith "    endpoint: {url: \"https://decisions.example.test/v1/decisions\", timeout-ms: 30000, max-bytes: 1048576}\n" ""))
+  check failures "an engine of another backend cannot declare an endpoint" $
+    isLeftContaining
+      "engine 'general' is not a decisions engine and cannot declare an endpoint"
+      (decodeRoutingUserV2 (decisionsWith "    backend: acp:codex\n" "    backend: acp:codex\n    endpoint: {url: \"https://decisions.example.test/v1\", timeout-ms: 1000, max-bytes: 1000}\n"))
+  check failures "a decisions engine refuses environment bindings and a catalogue" $
+    isLeftContaining
+      "decisions engine 'beta' starts no process and cannot declare environment bindings"
+      (decodeRoutingUserV2 (decisionsWith "    provider: local-one\n" "    provider: local-one\n    environment: {MODE: {value: fast}}\n"))
+      && isLeftContaining
+        "decisions engine 'beta' cannot declare a catalogue"
+        ( decodeRoutingUserV2
+            ( decisionsWith
+                "    provider: local-one\n"
+                "    provider: local-one\n    catalogue: {dialect: openai, url: \"http://127.0.0.1:8000/v1/models\", timeout-ms: 1000, max-bytes: 1000, cache: {fresh-for: 1h, stale-if-error: 1d}}\n"
+            )
+        )
+  check failures "a decisions model selects by exact id and refuses a prefix" $
+    isLeftContaining
+      "must select by exact id: a prefix selector needs a catalogue"
+      (decodeRoutingUserV2 (decisionsWith "select: [{exact: beta-1}]" "select: [{prefix: beta-}]"))
+  check failures "a decisions realization refuses reserved option keys of its dialect" $
+    isLeftContaining
+      "option 'state' names a request field that the engine writes itself"
+      (decodeRoutingUserV2 (decisionsWith "options: {temperature: 0}" "options: {state: x}"))
+      && isLeftContaining
+        "option 'input' names a request field that the engine writes itself"
+        (decodeRoutingUserV2 (decisionsWith "{model: gamma-model}" "{model: gamma-model, options: {input: x}}"))
+      && isLeftContaining
+        "option 'model' names a request field"
+        (decodeRoutingUserV2 (decisionsWith "options: {temperature: 0}" "options: {model: x}"))
+  check failures "a decisions realization refuses a thinking level and max-output" $
+    isLeftContaining
+      "decisions model 'beta-model' takes no thinking level and no output limit"
+      (decodeRoutingUserV2 (decisionsWith "{model: beta-model}" "{model: beta-model, thinking: high}"))
+      && isLeftContaining
+        "decisions model 'beta-model' takes no max-output"
+        (decodeRoutingUserV2 (decisionsWith "{model: beta-model}" "{model: beta-model, max-output: unconstrained}"))
+      && either (const False) (const True) (decodeRoutingUserV2 (decisionsWith "{model: beta-model}" "{model: beta-model, thinking: \"off\"}"))
+  check failures "every other realization still needs thinking and max-output" $
+    isLeftContaining
+      "realization of model 'general-model' needs both thinking and max-output"
+      (decodeRoutingUserV2 (decisionsWith "{model: general-model, thinking: high, max-output: 4096}" "{model: general-model, thinking: high}"))
+      && isLeftContaining
+        "realization of model 'general-model' needs both thinking and max-output"
+        (decodeRoutingUserV2 (decisionsWith "{model: general-model, thinking: high, max-output: 4096}" "{model: general-model, max-output: 4096}"))
+  check failures "decisions endpoints keep the catalogue URL rule, with no plain HTTP for authentication even on loopback" $
+    isLeftContaining
+      "authenticated endpoint URL uses plain HTTP"
+      (decodeRoutingUserV2 (decisionsWith "https://decisions.example.test/v1/decide" "http://127.0.0.1:8009/v1/decide"))
+      && isLeftContaining
+        "unauthenticated HTTP endpoint is not a literal loopback address"
+        (decodeRoutingUserV2 (decisionsWith "http://127.0.0.1:8000/v1/systemone" "http://decisions.example.test/v1/systemone"))
+      && isLeftContaining
+        "endpoint URL contains a credential-shaped query key"
+        (decodeRoutingUserV2 (decisionsWith "https://decisions.example.test/v1/decide" "https://decisions.example.test/v1/decide?api_key=x"))
+      && isLeftContaining
+        "endpoint header 'x-api-key' must use auth.secret"
+        (decodeRoutingUserV2 (decisionsWith "headers: {x-client: probe}" "headers: {x-api-key: literal}"))
+      && isLeftContaining
+        "endpoint timeout-ms is outside"
+        (decodeRoutingUserV2 (decisionsWith "timeout-ms: 60000" "timeout-ms: 600001"))
+  check failures "a routing file that names an unknown backend is refused with the three shapes" $
+    decodeRoutingUserV2 (decisionsWith "    backend: acp:codex\n" "    backend: grpc:x\n")
+      == Left "Error in $.engines.general: unknown backend 'grpc:x' in routing configuration: a backend is acp:<adapter> (start an adapter of this run's own), deck:<id> (send to a live agent-deck session) or decisions:<dialect> (send to a decisions endpoint that version-2 routing configuration defines)"
+      && isLeftContaining
+        "unknown backend 'grpc:x' in routing configuration: a backend is acp:<adapter> (start an adapter of this run's own), deck:<id> (send to a live agent-deck session) or decisions:<dialect> (send to a decisions endpoint that version-2 routing configuration defines)"
+        (decodeRoutingConfig "version: 1\nrouters:\n  - name: d\n    backend: grpc:x\n    provider: p\nprofiles: []\n")
+  check failures "version-1 routing refuses a decisions backend" $
+    isLeftContaining
+      "a decisions engine needs routing configuration version 2"
+      (decodeRoutingConfig "version: 1\nrouters:\n  - name: d\n    backend: decisions:system-one\n    provider: p\nprofiles: []\n")
+  check failures "a decisions backend is refused as the default route" $
+    decisionsDefaultRefusal (routes (BackendDecisions SystemOne) []) == Left "a decisions backend serves only named models"
+      && decisionsDefaultRefusal (routesCovered [("primary", BackendDecisions SystemOne)]) == Right ()
+      && decisionsDefaultRefusal (routes (BackendAcp "stub") [("primary", BackendDecisions OpenAIDecisions)]) == Right ()
+  case decoded >>= (\config -> selectRoutingPersona config Nothing Nothing Nothing) of
+    Left problem -> check failures ("decisions persona resolves: " <> problem) False
+    Right selected -> do
+      let authored = Map.fromList [("primary", []), ("spare", [])]
+          resolved = resolveRoutingConfigV2 selected Map.empty Map.empty (routesCovered []) authored
+          sentinel = "decisions-secret-sentinel-41c9"
+          ambient = Map.singleton "DECISIONS_TEST_KEY" sentinel
+      check failures "two system-one engines keep distinct aliases and the exact model id" $
+        case resolved of
+          Right routing ->
+            case (Map.lookup "primary" (resolvedRealizations routing), Map.lookup "spare" (resolvedRealizations routing)) of
+              (Just primary, Just spare) ->
+                resolvedBackend primary == BackendDecisions SystemOne
+                  && resolvedBackend spare == BackendDecisions SystemOne
+                  && routerName (resolvedRouter primary) == "alpha"
+                  && routerName (resolvedRouter spare) == "beta"
+                  && realizationModel (resolvedSpec primary) == "alpha-1"
+                  && realizationModel (resolvedSpec spare) == "beta-1"
+                  && routeNamed (resolvedRoutes routing) == [("primary", BackendDecisions SystemOne), ("spare", BackendDecisions SystemOne)]
+              _ -> False
+          Left _ -> False
+      check failures "two system-one engines resolve distinct execution fingerprints" $
+        case resolveEngineContexts selected ["alpha", "beta"] ambient of
+          Right contexts ->
+            case (Map.lookup "alpha" contexts, Map.lookup "beta" contexts) of
+              (Just alpha, Just beta) ->
+                resolvedEngineExecutionFingerprint alpha /= resolvedEngineExecutionFingerprint beta
+                  && not (T.pack sentinel `T.isInfixOf` resolvedEngineExecutionFingerprint alpha)
+              _ -> False
+          Left _ -> False
+      check failures "a decisions endpoint secret resolves like a catalogue credential and refuses launch when unset" $
+        case (resolveEngineContexts selected ["alpha"] ambient, resolveEngineContexts selected ["alpha"] Map.empty) of
+          (Right present, Right absent) ->
+            maybe False resolvedEngineCredentialReady (Map.lookup "alpha" present)
+              && maybe False (not . resolvedEngineCredentialReady) (Map.lookup "alpha" absent)
+              && case requireEngineCredentials absent ["alpha"] of
+                Left problem -> "DECISIONS_TEST_KEY" `T.isInfixOf` problem && not (T.pack sentinel `T.isInfixOf` problem)
+                Right _ -> False
+          _ -> False
+      check failures "--realize cannot carry a thinking level onto a decisions model" $
+        isLeftContaining
+          "takes no thinking level and no output limit"
+          (resolveRoutingConfigV2 selected Map.empty (Map.singleton "thinker" "alpha-model") (routesCovered []) (Map.singleton "thinker" []))
+      check failures "--realize cannot move a rung with unwritten settings onto a model of another engine" $
+        either
+          (== "routing axis 'primary': realization of model 'general-model' needs both thinking and max-output, and the rung of decisions model 'alpha-model' writes no max-output")
+          (const False)
+          (resolveRoutingConfigV2 selected Map.empty (Map.singleton "primary" "general-model") (routesCovered []) (Map.singleton "primary" []))
+          && either (const False) (const True) (resolveRoutingConfigV2 selected Map.empty (Map.singleton "primary" "beta-model") (routesCovered []) (Map.singleton "primary" []))
 
 main :: IO ()
 main = do
@@ -223,6 +430,10 @@ main = do
         (isLeftContaining "literal loopback" . decodeRoutingUserV2 . publicCatalogueYaml)
         ["127.999.999.999", "127.....", "127.0.0", "127.0.0.256"]
 
+  check failures "a rung of an unselected persona that omits thinking is refused at decode" $
+    decodeRoutingUserV2 (BS.pack (T.unpack (T.replace "            thinking: xhigh\n" "" (T.pack (BS.unpack userYaml)))))
+      == Left "persona 'work' profile 'deep-thinker': realization of model 'sol' needs both thinking and max-output"
+
   case decodeRoutingUserV2 userYaml of
     Left problem -> check failures ("valid v2 user document decodes: " <> problem) False
     Right user -> do
@@ -249,6 +460,19 @@ main = do
               && fmap selectedPersonaName env == Right "work"
               && fmap selectedPersonaName projectSelected == Right "personal"
               && fmap selectedPersonaName fallback == Right "personal"
+          check failures "a project rung that omits thinking is refused whichever persona is selected" $
+            case decodeRoutingProjectV2 (BS.pack (T.unpack (T.replace "        thinking: high\n" "" (T.pack (BS.unpack projectYaml))))) of
+              Right lacking ->
+                all
+                  ( either
+                      (== "persona 'personal' profile 'deep-thinker': realization of model 'opus' needs both thinking and max-output")
+                      (const False)
+                  )
+                  [ selectRoutingPersona user (Just "work") Nothing (Just lacking),
+                    selectRoutingPersona user Nothing (Just "work") (Just lacking),
+                    selectRoutingPersona user Nothing Nothing (Just lacking)
+                  ]
+              Left _ -> False
           check failures "project profile replacement stays within persona model allowlist" $
             case projectSelected of
               Right selected ->
@@ -475,10 +699,34 @@ main = do
   check failures "persona model allowlist is independent of engine eligibility" $
     isLeftContaining "outside persona" (decodeRoutingUserV2 unauthorizedModel)
 
+  decisionsProbes failures
+
   check failures "legacy v1 decoder is unchanged" $
     case decodeRoutingConfig "version: 1\nrouters: []\nprofiles: []\n" of
       Right config -> Map.null (routingRouters config) && Map.null (routingProfiles config)
       Left _ -> False
+
+  routingDocument <- TIO.readFile "doc/model-routing-v2.md"
+  let decisionsExample =
+        case T.breakOn "```yml\n" routingDocument of
+          (_, rest)
+            | not (T.null rest) -> Just (fst (T.breakOn "```" (T.drop (T.length "```yml\n") rest)))
+          _ -> Nothing
+  check failures "the documented decisions example decodes and keeps its engines distinct" $
+    case decisionsExample of
+      Nothing -> False
+      Just example -> case decodeRoutingUserV2 (BS.pack (T.unpack example)) >>= (\config -> selectRoutingPersona config Nothing Nothing Nothing) of
+        Left _ -> False
+        Right selected ->
+          case resolveRoutingConfigV2 selected Map.empty Map.empty (routesCovered []) (Map.singleton "triage" []) of
+            Right routing ->
+              [ (routerName (resolvedRouter realization), resolvedBackend realization, realizationModel (resolvedSpec realization))
+                | realization <- Map.elems (resolvedRealizations routing)
+              ]
+                == [ ("openrouter-decisions", BackendDecisions SystemOne, "typesafe/jev-1.14"),
+                     ("drex-local", BackendDecisions SystemOne, "drex-max-v1")
+                   ]
+            Left _ -> False
 
   documentedExample <- BS.readFile "cli/model-definitions.example.yaml"
   check failures "documented v2 example decodes and covers every bundled symbolic profile" $
@@ -510,6 +758,13 @@ main = do
           && fmap projectRoutingPersona (loadedRoutingV2Project loaded) == Just "personal"
           && loadedRoutingSources loaded == [userPath, projectPath]
       Left _ -> False
+  BS.writeFile projectPath (BS.pack (T.unpack (T.replace "        thinking: high\n" "" (T.pack (BS.unpack projectYaml)))))
+  lackingProject <- loadRoutingLayers [(UserRoutingLayer, userPath), (ProjectRoutingLayer, projectPath)]
+  check failures "a project file whose rung omits thinking is refused with the file named" $
+    either
+      (== T.pack projectPath <> ": persona 'personal' profile 'deep-thinker': realization of model 'opus' needs both thinking and max-output")
+      (const False)
+      lackingProject
   BS.writeFile userPath "version: 1\nrouters: []\nprofiles: []\n"
   mixed <- loadRoutingFiles [userPath, projectPath]
   check failures "v1 and v2 routing layers cannot be mixed" $

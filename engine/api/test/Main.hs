@@ -3,14 +3,18 @@
 module Main (main) where
 
 import Agentic.Engine
+import Agentic.Engine.Decision
 import Control.Exception (throwIO)
 import Control.Monad (unless)
 import Data.Aeson (Value (..))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KeyMap
+import qualified Data.ByteString.Lazy.Char8 as BL
 import Data.Either (isLeft)
 import Data.IORef (modifyIORef', newIORef, readIORef)
+import Data.List (zip4)
+import Data.List.NonEmpty (NonEmpty ((:|)))
 import Data.Text (Text)
 import qualified Data.Text as T
 
@@ -47,7 +51,8 @@ progressSeparation = do
             engineIntent = Consult,
             engineAnswerKind = TextAnswer,
             enginePrompt = "question",
-            engineRequiresCompletedTurn = True
+            engineRequiresCompletedTurn = True,
+            engineDecision = Nothing
           }
       context = EngineContext {runEngineAttempt = \_ _ action -> action (\update -> modifyIORef' seen (<> [update]))}
       quiet = concurrentEngine (\received extra -> pure (EngineResult (enginePrompt received <> extra) "" Completed))
@@ -73,10 +78,14 @@ progressSeparation = do
     else throwIO (userError "engine API did not preserve answer/progress separation or quiet-engine omission")
 
 -- | Round trips through the JSON bytes, and refusals of values that each
--- version-1 codec does not define.
+-- codec does not define. A request without a decision is version 1, byte for
+-- byte as before the decision field existed, and a request with a decision is
+-- version 2. Every other codec stays at version 1.
 codecChecks :: IO ()
 codecChecks = do
-  let request = encodeEngineRequest (EngineRequest "model reviewer" (Just "deep") Nothing 0 Consult TextAnswer "question" True)
+  let request = encodeEngineRequest (EngineRequest "model reviewer" (Just "deep") Nothing 0 Consult TextAnswer "question" True Nothing)
+      decided = encodeEngineRequest (EngineRequest "model triage" Nothing Nothing 0 Consult StructuredAnswer "question" True (Just choice))
+      decision = encodeEngineDecision choice
       result = encodeEngineResult (EngineResult "answer" "" Completed)
       steering = encodeEngineSteering NextBoundary "focus"
       permission = encodeEnginePermissionReport (EnginePermissionReport "question" "tool" EnginePermissionRefused)
@@ -102,7 +111,42 @@ codecChecks = do
             refused "steering with an unknown timing" decodeEngineSteering (withField "steering" (String "later") steering),
             refused "a refusal that names an option" decodeEnginePermissionReport (withField "answer" (object' [("outcome", String "refused"), ("option", String "allow")]) permission),
             refused "a grant without an option" decodeEnginePermissionReport (withField "answer" (object' [("outcome", String "granted")]) permission),
-            refused "an array" decodeEngineResult (Array mempty)
+            refused "an array" decodeEngineResult (Array mempty),
+            [ "request without a decision is not the version 1 bytes: " <> BL.unpack (Aeson.encode request)
+              | Aeson.encode request /= BL.pack version1Request
+            ],
+            [ "request with a decision is not version 2: " <> BL.unpack (Aeson.encode decided)
+              | versionField decided /= Just (Number 2)
+            ],
+            roundTrips "decision request" encodeEngineRequest decodeEngineRequest decisionRequests,
+            roundTrips "decision" encodeEngineDecision decodeEngineDecision decisions,
+            [ "decision request control value did not decode" | isLeft (decodeEngineRequest decided)],
+            refused "version 2 request with a null decision" decodeEngineRequest (withField "decision" Null decided),
+            refused "version 2 request without a decision" decodeEngineRequest (withoutField "decision" decided),
+            refused "version 2 request with an unknown field" decodeEngineRequest (withField "extra" Null decided),
+            refused "version 1 request with a decision" decodeEngineRequest (withField "version" (Number 1) decided),
+            refused "request at version 3 with a decision" decodeEngineRequest (withField "version" (Number 3) decided),
+            refused "version 2 request with an invalid decision" decodeEngineRequest (withField "decision" (String "choice") decided),
+            refused "result at version 2 with a decision" decodeEngineResult (withField "decision" decision (withField "version" (Number 2) result)),
+            refused "steering at version 2 with a decision" decodeEngineSteering (withField "decision" decision (withField "version" (Number 2) steering)),
+            refused "permission at version 2 with a decision" decodeEnginePermissionReport (withField "decision" decision (withField "version" (Number 2) permission)),
+            [ "decision control value did not decode" | isLeft (decodeEngineDecision decision)],
+            refused "decision with an unknown field" decodeEngineDecision (withField "extra" Null decision),
+            refused "decision without evidence" decodeEngineDecision (withoutField "evidence" decision),
+            refused "decision with an unknown form" decodeEngineDecision (withField "form" (String "yesNo") decision),
+            refused "decision with no options" decodeEngineDecision (withOptions [] decision),
+            refused "decision with two options of one name" decodeEngineDecision (withOptions [optionValue "Billing" Null, optionValue "Billing" Null] decision),
+            refused "decision with an empty option name" decodeEngineDecision (withOptions [optionValue "" Null, optionValue "Billing" Null] decision),
+            refused "decision option with an unknown field" decodeEngineDecision (withOptions [withField "rank" Null (optionValue "Billing" Null), optionValue "Other" Null] decision),
+            refused "decision option with a numeric description" decodeEngineDecision (withOptions [optionValue "Billing" (Number 1), optionValue "Other" Null] decision),
+            refused "decision option without a description" decodeEngineDecision (withOptions [withoutField "description" (optionValue "Billing" Null), optionValue "Other" Null] decision),
+            concat
+              [ refused ("yes-no decision with options " <> show names) decodeEngineDecision (withField "form" (String "yes-no") (withOptions [optionValue name Null | name <- names] decision))
+                | names <- [["True", "False"], ["False"], ["False", "True", "True"], ["False", "True", "Unsure"], ["No", "Yes"], ["false", "true"]]
+              ],
+            [ "yes-no control value did not decode"
+              | isLeft (decodeEngineDecision (withField "form" (String "yes-no") (withOptions [optionValue name Null | name <- ["False", "True"]] decision)))
+            ]
           ]
   unless (null failures) $
     throwIO (userError ("engine API codec checks failed:\n" <> unlines failures))
@@ -116,12 +160,15 @@ roundTrips name encode decode values =
   ]
     <> [name <> " round trips covered no value" | null values]
 
--- | The three negative controls that every codec must refuse.
+-- | The negative controls that every codec must refuse, and the control value
+-- that it must accept. The version checks change only the field @version@ of a
+-- version-1 value, so a refusal there is a refusal of the version itself.
 refusals :: Show a => String -> (Value -> Either Text a) -> Value -> Key.Key -> [String]
 refusals name decode encoded required =
   refused (name <> " with an unknown field") decode (withField "extra" Null encoded)
     <> refused (name <> " without field " <> show required) decode (withoutField required encoded)
     <> refused (name <> " at version 2") decode (withField "version" (Number 2) encoded)
+    <> refused (name <> " at version 3") decode (withField "version" (Number 3) encoded)
     <> refused (name <> " without a version") decode (withoutField "version" encoded)
     <> [name <> " control value did not decode" | isLeft (decode encoded)]
 
@@ -133,6 +180,22 @@ refused name decode value = case decode value of
 withField :: Key.Key -> Value -> Value -> Value
 withField key new (Object fields) = Object (KeyMap.insert key new fields)
 withField _ _ value = value
+
+withOptions :: [Value] -> Value -> Value
+withOptions = withField "options" . Array . foldMap pure
+
+optionValue :: Text -> Value -> Value
+optionValue name description = object' [("name", String name), ("description", description)]
+
+versionField :: Value -> Maybe Value
+versionField (Object fields) = KeyMap.lookup "version" fields
+versionField _ = Nothing
+
+-- | The bytes that the request codec wrote for this request before
+-- 'engineDecision' existed.
+version1Request :: String
+version1Request =
+  "{\"answerKind\":\"text\",\"draw\":\"0\",\"intent\":\"consult\",\"modeAxis\":null,\"modelAxis\":\"deep\",\"prompt\":\"question\",\"requiresCompletedTurn\":true,\"target\":\"model reviewer\",\"version\":1}"
 
 withoutField :: Key.Key -> Value -> Value
 withoutField key (Object fields) = Object (KeyMap.delete key fields)
@@ -154,7 +217,8 @@ requests =
         engineIntent = intent,
         engineAnswerKind = kind,
         enginePrompt = prompt,
-        engineRequiresCompletedTurn = completed
+        engineRequiresCompletedTurn = completed,
+        engineDecision = Nothing
       }
     | (index, intent, kind) <- zip3 [0 :: Int ..] (cycle [minBound .. maxBound]) [minBound .. maxBound],
       let target = if even index then "model reviewer" else "",
@@ -164,9 +228,30 @@ requests =
       let prompt = if index == 3 then "" else unicode,
       let completed = even index
   ]
-    <> [ EngineRequest "tool say" Nothing Nothing 1 intent TextAnswer unicode False
+    <> [ EngineRequest "tool say" Nothing Nothing 1 intent TextAnswer unicode False Nothing
          | intent <- [minBound .. maxBound]
        ]
+
+decisionRequests :: [EngineRequest]
+decisionRequests =
+  [ EngineRequest "model triage" model Nothing draw Consult StructuredAnswer unicode completed (Just decision)
+    | (decision, model, draw, completed) <- zip4 decisions [Nothing, Just unicode, Just ""] [0, 2 ^ (64 :: Int) + 1, -3] [True, False, True]
+  ]
+
+choice :: EngineDecision
+choice =
+  EngineDecision
+    EngineChoice
+    "Which team owns this ticket?"
+    (EngineOption "Billing" (Just "Charges, refunds and invoices.") :| [EngineOption "Shipping" Nothing, EngineOption "Other" (Just "")])
+    "The parcel arrived broken."
+
+decisions :: [EngineDecision]
+decisions =
+  [ choice,
+    EngineDecision EngineYesNo unicode (EngineOption "False" Nothing :| [EngineOption "True" (Just unicode)]) "",
+    EngineDecision EngineScale "" (EngineOption "Low" (Just "Can wait.") :| [EngineOption "Medium" Nothing, EngineOption unicode (Just "Now.")]) unicode
+  ]
 
 results :: [EngineResult]
 results =

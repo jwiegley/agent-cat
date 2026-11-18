@@ -156,10 +156,12 @@ import Agentic.Plan
     verdictApprove,
   )
 import Agentic.DSL (Addressee (AddrModel, AddrPerson, AddrTool, AddrToolExec))
+import Agentic.Decisions (Dialect (OpenAIDecisions, SystemOne))
 import Agentic.Route
-  ( Backend (BackendAcp, BackendDeck),
+  ( Backend (BackendAcp, BackendDecisions, BackendDeck),
     backendSpelling,
     parseBackend,
+    parseConfiguredBackend,
     parseRoute,
   )
 import Data.Aeson (Value, encode, object, toJSON, (.=))
@@ -2283,7 +2285,7 @@ main = do
     [ ("droid", adapterCommand droidAdapter == ["droid", "exec", "--output-format", "acp"]),
       ("appended argv", adapterCommand droidAdapter <> ["--probe"] == ["droid", "exec", "--output-format", "acp", "--probe"])
     ]
-  pureProbe failures "parseBackend reads both schemes, splitting on the first colon"
+  pureProbe failures "parseBackend reads the three schemes, splitting on the first colon"
     [ ("acp:stub", parseBackend "acp:stub" == Right (BackendAcp "stub")),
       ("acp:claude", parseBackend "acp:claude" == Right (BackendAcp "claude")),
       ("acp:codex", parseBackend "acp:codex" == Right (BackendAcp "codex")),
@@ -2293,10 +2295,21 @@ main = do
       -- The first colon and no other: a deck session's title may contain one,
       -- and a value split anywhere else would make it unnameable.
       ("deck:a:b", parseBackend "deck:notes: monday" == Right (BackendDeck "notes: monday")),
+      ("decisions:system-one", parseBackend "decisions:system-one" == Right (BackendDecisions SystemOne)),
+      ("decisions:openai", parseBackend "decisions:openai" == Right (BackendDecisions OpenAIDecisions)),
       ( "unknown scheme names both shapes",
         parseBackend "grpc:x"
           == Left
             [wft|unknown backend 'grpc:x' in --route: a backend is acp:<adapter> (start an adapter of this run's own) or deck:<id> (send to a live agent-deck session)|]
+      ),
+      ( "an unknown decisions dialect in --route names both shapes",
+        parseBackend "decisions:anthropic"
+          == Left
+            [wft|unknown backend 'decisions:anthropic' in --route: a backend is acp:<adapter> (start an adapter of this run's own) or deck:<id> (send to a live agent-deck session)|]
+      ),
+      ( "an unknown decisions dialect in a routing file names the dialects",
+        parseConfiguredBackend "decisions:anthropic"
+          == Left "unknown decisions dialect 'anthropic' in 'decisions:anthropic': a decisions backend is decisions:system-one or decisions:openai"
       ),
       ("no colon at all", either ("unknown backend 'codex'" `T.isInfixOf`) (const False) (parseBackend "codex")),
       ("a scheme with no value", either ("unknown backend 'acp:'" `T.isInfixOf`) (const False) (parseBackend "acp:"))
@@ -2341,7 +2354,9 @@ main = do
             BackendAcp "./adapters/local.sh",
             BackendDeck "gemini-pane",
             BackendDeck "notes: monday",
-            BackendDeck "3"
+            BackendDeck "3",
+            BackendDecisions SystemOne,
+            BackendDecisions OpenAIDecisions
           ]
     ]
   -- `run.engine`'s two halves are built from `sessionPolicy`

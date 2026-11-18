@@ -60,6 +60,60 @@ deriving instance FromJson, ToJson for Decider
 deriving instance FromJson, ToJson for RawAsk
 deriving instance FromJson, ToJson for TextMember
 deriving instance FromJson, ToJson for RawArg
+
+/-- The keys of a JSON object are exactly `keys`, each once. -/
+private def keysExactly (json : Json) (keys : List String) : Bool :=
+  match json.getObj?.toOption with
+  | none => false
+  | some fields =>
+    fields.foldl (init := 0) (fun count _ _ => count + 1) == keys.length &&
+      fields.all (fun name _ => keys.contains name)
+
+/-- A rational in the spelling of `Conformance.Schema` at `.number`:
+`{"numerator": i, "denominator": d}`. -/
+private def ratJson (q : Rat) : Json :=
+  Schema.Conformance.encodeShape .number q
+
+/-- …and read back by the same decoder, which refuses any other key, a zero
+denominator, and a non-integral part. A half-space is program text, so its
+rationals are also refused unless they are in lowest terms with a positive
+denominator: `ratJson` is then a section of this decoder, and one region has one
+spelling on the wire. -/
+private def ratOfJson? (json : Json) : Except String Rat :=
+  match Schema.Conformance.decodeShape .number json with
+  | some q =>
+    let numerator := (json.getObjVal? "numerator").toOption.bind (·.getInt?.toOption)
+    let denominator := (json.getObjVal? "denominator").toOption.bind (·.getNat?.toOption)
+    if numerator == some q.num && denominator == some q.den then .ok q
+    else .error "a rational of a half-space is in lowest terms"
+  | none => .error "a rational is {\"numerator\": i, \"denominator\": d}"
+
+/-- A half-space travels as
+`{"weights": [{"option": n, "weight": R}, …], "atLeast": R}`, each rational `R`
+in the `.number` spelling of `Conformance.Schema`. Hand-written so that the
+pairs of `weights` are named on the wire and no second spelling of a rational
+is introduced, and so that the derived `RawRhs` codec covers `weigh`. -/
+instance : ToJson Region.Halfspace where
+  toJson h :=
+    Json.mkObj
+      [ ("weights", Json.arr (h.weights.map fun w =>
+          Json.mkObj [("option", Json.str w.1), ("weight", ratJson w.2)]).toArray)
+      , ("atLeast", ratJson h.atLeast) ]
+
+instance : FromJson Region.Halfspace where
+  fromJson? json := do
+    unless keysExactly json ["weights", "atLeast"] do
+      throw "a half-space has exactly the keys \"weights\" and \"atLeast\""
+    let entries ← (← json.getObjVal? "weights").getArr?
+    let weights ← entries.toList.mapM fun entry => do
+      unless keysExactly entry ["option", "weight"] do
+        throw "a weight has exactly the keys \"option\" and \"weight\""
+      let option ← (← entry.getObjVal? "option").getStr?
+      let weight ← ratOfJson? (← entry.getObjVal? "weight")
+      return (option, weight)
+    let atLeast ← ratOfJson? (← json.getObjVal? "atLeast")
+    return { weights, atLeast }
+
 deriving instance FromJson, ToJson for RawRhs
 deriving instance FromJson, ToJson for RawSource
 deriving instance FromJson, ToJson for RawBlock

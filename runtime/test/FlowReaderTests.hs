@@ -114,7 +114,7 @@ completeLog directory = do
     _ <- event fixture 0 (RunStartedV2 "review" "scripted" PersonAnswerLocalControl)
     _ <- event fixture 1 (OccurrenceStarted (OccurrenceId 0) "text" "consult" "model writer" "hello")
     asked <- ask fixture FlowQuestion 0 (questionBody P.SText question)
-    started <- ask fixture FlowEngineStart 0 (engineStartBody (E.EngineRequest "acp:claude" (Just "opus") Nothing 0 E.Consult E.TextAnswer "hello" False))
+    started <- ask fixture FlowEngineStart 0 (engineStartBody (E.EngineRequest "acp:claude" (Just "opus") Nothing 0 E.Consult E.TextAnswer "hello" False Nothing))
     _ <- reply fixture FlowDone started 0 doneBody
     turn <- ask fixture FlowTurn 0 (turnBody big)
     _ <- reply fixture FlowEngineResult turn 0 (engineResultBody (E.EngineResult "hi" "" E.Completed))
@@ -248,7 +248,7 @@ populate stopping fixture = do
   answered <- ask fixture FlowQuestion 3 (questionBody P.SText question)
   _ <- reply fixture FlowAnswer answered 3 (answerBody P.SText "person")
   open <- ask fixture FlowQuestion 4 (questionBody P.SText question)
-  started <- ask fixture FlowEngineStart 4 (engineStartBody (E.EngineRequest "acp:claude" Nothing Nothing 0 E.Consult E.TextAnswer "hello" False))
+  started <- ask fixture FlowEngineStart 4 (engineStartBody (E.EngineRequest "acp:claude" Nothing Nothing 0 E.Consult E.TextAnswer "hello" False Nothing))
   _ <- reply fixture FlowDone started 4 doneBody
   let effect occurrence phase = appendEffectRecord (fixtureStore fixture) (EffectRecord (String ("effect " <> T.pack (show occurrence))) (if phase == EffectCompleted then Just Null else Nothing) (OccurrenceId occurrence) phase)
   effect (5 :: Word64) EffectStarted

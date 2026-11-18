@@ -78,7 +78,7 @@ flagRequest :: Request 'CodeFlag
 flagRequest = consultRequest (Q (AddrModel "probe") scopeUnit "orig question" 0)
 
 engineRequestOf :: E.EngineRequest
-engineRequestOf = E.EngineRequest "model probe" Nothing Nothing 0 E.Consult E.FlagAnswer "orig prompt" True
+engineRequestOf = E.EngineRequest "model probe" Nothing Nothing 0 E.Consult E.FlagAnswer "orig prompt" True Nothing
 
 report :: E.EnginePermissionReport
 report = E.EnginePermissionReport "orig permission question" "orig tool" (E.EnginePermissionGranted "orig option")

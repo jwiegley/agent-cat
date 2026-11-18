@@ -74,7 +74,7 @@ context, not an operating-system credential sandbox. Agent Deck receives no
 synthetic environment behavior. `model-definitions.example.yaml` is a minimal
 user file that works when it is copied to the user path. It defines one engine
 for each built-in adapter (`stub`, `claude`, `codex`, and `droid`) with no
-environment, catalogue, or secret, and it maps the five symbolic profiles of
+environment, catalogue, or secret, and it maps the six symbolic profiles of
 the bundled workflows in each persona. A commented section shows secrets and a
 loopback catalogue. No routing file is read automatically from the source tree.
 

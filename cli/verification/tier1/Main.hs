@@ -1,12 +1,12 @@
 -- | Tier 1: the rebuilt-case runner.
 --
 -- Where tier0 replays the frozen corpus through the codec, the guards and the
--- string layer, tier1 rebuilds twenty-six of its /checked/ entries — twenty-three
+-- string layer, tier1 rebuilds thirty-four of its /checked/ entries — thirty-one
 -- in the production surface ("Agentic.Builder", see "Cases") and three in the
 -- /authoring/ surface ("Agentic.Workflow": the two walked examples of
 -- "Example.Harden" and the yield vector of "LoopVectors") — and three of the
--- twenty-three a second time in the authoring surface too ("CallVectors"),
--- twenty-nine cases in all, and holds each rebuilt program against the oracle
+-- thirty-one a second time in the authoring surface too ("CallVectors"),
+-- thirty-seven cases in all, and holds each rebuilt program against the oracle
 -- on two fronts:
 --
 -- 1. the __printed Raw__ — @toJSON@ of the builder's 'RawProgram' against the
@@ -16,7 +16,7 @@
 --    decoded back and re-encoded, so a print that no reader accepts fails here
 --    rather than silently.
 --
---    Six of the twenty-nine cases compare this one field __up to alpha__:
+--    Six of the thirty-seven cases compare this one field __up to alpha__:
 --    the two walked examples of "Example.Harden" and the yield vector of
 --    "LoopVectors" (named by @Cases.alphaNamed@), and the three call vectors
 --    of "CallVectors" (all of @Cases.callVectorsW@). They are written in
@@ -27,7 +27,7 @@
 --    is pinned is that the two programs agree on everything a name is not —
 --    including which binding every hole, scrutinee and subject reads, and
 --    including every function and parameter name, which are a different
---    namespace and are never renamed. The other twenty-three are written in
+--    namespace and are never renamed. The other thirty-one are written in
 --    "Agentic.Builder" with explicit names and are compared exactly.
 --
 -- 2. the __whole reply__ — @level@, @size@, @askNodes@, @codes@ and
@@ -420,6 +420,9 @@ canonRhs env = \case
   -- A decider names its subject, and the labels of a text panel are not
   -- bindings at all: they are the document's keys, and are never renamed.
   RhsDecide d x ws pos -> RhsDecide d (useName env x) ws pos
+  -- A weighing names its subject too. Its path and its region name the fields
+  -- and the options of a schema, which are not bindings and are never renamed.
+  RhsWeigh x path region pos -> RhsWeigh (useName env x) path region pos
   RhsCall f as pos -> RhsCall f (map (canonArg env) as) pos
 
 -- | A question: only its prompt can name anything.

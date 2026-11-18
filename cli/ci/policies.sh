@@ -107,6 +107,17 @@
 # effects; plan-ordered stateful transport turns; and prompt failure propagation
 # that cancels and cleans up a blocked sibling.
 #
+# And the decision laws (`decision-probe`): the schema isomorphism of a
+# decision record, the projective reading of a record as a distribution, the
+# convex-space, functor and expectation laws of that distribution, the
+# commuting equations of the readings on every record, zero and negative ones
+# included, also on a type whose hand-written Enum breaks the naming law, the
+# round trip and canonicity of the decision prompt codec, and law L13: every
+# answer that the decisions wire accepts, from the fixtures in
+# `engine/decisions/test/fixtures` and generated in both dialects, decodes at
+# the decision's schema. The probe reads those fixtures relative to the
+# repository root, which is this gate's working directory.
+#
 # No Lean or corpus is required. The shared compiler-parsed source-boundary gate
 # runs before the runtime policy and compatibility probes. Every mutation audit
 # then applies its source patches to a fresh copy without building it, so that a
@@ -131,7 +142,7 @@ bash manager/ci/approval.sh
 bash manager/ci/ingestion.sh
 bash manager/ci/controls.sh
 bash manager/ci/artifacts.sh
-bash test/cabal.sh build policy-probe agentic-run routing-fixed-point-probe runtime-contract-test schema-probe >/dev/null
+bash test/cabal.sh build policy-probe agentic-run routing-fixed-point-probe runtime-contract-test schema-probe decision-probe >/dev/null
 policy_runner=$(bash test/cabal.sh list-bin policy-probe)
 "$policy_runner" +RTS -N8 -RTS
 agentic_run=$(bash test/cabal.sh list-bin agentic-run)
@@ -139,6 +150,7 @@ control_runner=$(bash test/cabal.sh list-bin routing-fixed-point-probe)
 codec_runner=$(bash test/cabal.sh list-bin runtime-contract-test)
 schema_runner=$(bash test/cabal.sh list-bin schema-probe)
 "$schema_runner"
+"$(bash test/cabal.sh list-bin decision-probe)"
 python3 test/answer_schema_evidence.py
 schema_vectors=$(mktemp "${CABAL_BUILDDIR:?}/answer-schema.XXXXXX.json")
 "$schema_runner" --answer-schema-vectors > "$schema_vectors"

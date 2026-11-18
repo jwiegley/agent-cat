@@ -17,6 +17,7 @@ EXPECTED_NAMES = {
     "structured",
     "structured-result",
     "capital",
+    "triage",
     "plan-feature",
     "review-lite",
     "ship-feature-lite",

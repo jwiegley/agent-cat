@@ -51,6 +51,7 @@ extra-source-files:
   engine/acp/test/retry_adapter.py
   engine/acp/test/steer_adapter.py
   engine/acp/test/PermissionReport.hs
+  engine/decisions/test/fixtures/*.json
   test/frontend_contract_probe.py
   test/answer_schema_probe.py
   test/answer_schema_evidence.py
@@ -171,6 +172,7 @@ library
     engine/acp/codex/src
     engine/acp/droid/src
     engine/agent-deck/src
+    engine/decisions/src
     cli/src
   exposed-modules:
     Agentic.Acp
@@ -181,12 +183,17 @@ library
     Agentic.Builder
     Agentic.Cli
     Agentic.Cost
+    Agentic.Decision
+    Agentic.Decisions
+    Agentic.Decisions.Wire
     Agentic.DSL
     Agentic.DSL.Plan
     Agentic.Engine
+    Agentic.Engine.Decision
     Agentic.Manager
     Agentic.Manager.Client
     Agentic.Plan
+    Agentic.Plan.Decision
     Agentic.Planning
     Agentic.Route
     Agentic.RoutingConfig
@@ -219,6 +226,7 @@ library
     Agentic.Manager.Client.Failure
     Agentic.Manager.Client.Refresh
     Agentic.Cli.Frontend
+    Agentic.DSL.Decision
     Agentic.DSL.Json
     Agentic.Exec
     Agentic.InProcess
@@ -306,10 +314,12 @@ library examples
     Hello
     Structured
     Isaac
+    Triage
     Example.CapitalInfo
     Example.IsaacInfo
     Example.Registry
     Example.StructuredInfo
+    Example.TriageInfo
   build-depends:   agentic
 
 library bisim-support
@@ -415,6 +425,12 @@ executable schema-probe
     , agentic:examples
     , agentic:verification
 
+executable decision-probe
+  import:          settings
+  hs-source-dirs:  cli/test
+  main-is:         DecisionProbe.hs
+  build-depends:   agentic
+
 executable manager-client-check
   import:          settings
   hs-source-dirs:  manager/test
@@ -461,7 +477,25 @@ test-suite engine-api-test
     , aeson
     , agentic
     , base
+    , bytestring
     , text
+
+test-suite engine-decisions-test
+  import:           settings
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   engine/decisions/test
+  main-is:          Main.hs
+  other-modules:
+    EngineTests
+    WireTests
+  ghc-options:      -threaded
+  build-depends:
+    , aeson
+    , agentic
+    , base
+    , http-types
+    , wai
+    , warp
 
 test-suite runtime-contract-test
   import:           settings
@@ -473,6 +507,7 @@ test-suite runtime-contract-test
     BucketEvidence
     CaptureTests
     CarriageTests
+    DecisionRequestTests
     FlowCodecTests
     FlowReaderTests
     FlowTests
