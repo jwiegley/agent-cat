@@ -318,6 +318,20 @@ theorem rhsPlan_level_le {Γ : Ctx} {fns : Fns} (hf : FnLevel fns)
               exact le_trans (le_of_eq (level_ret _)) bot_le
             · exact absurd h (by simp)
         · exact absurd h (by simp)
+  | weigh x path R pos =>
+    -- A weighing is a `.ret` too: every success is the one leaf below.
+    simp only [rhsPlan] at h
+    split at h
+    · split at h
+      · exact absurd h (by simp)
+      · split at h
+        · exact absurd h (by simp)
+        · split at h
+          · exact absurd h (by simp)
+          · cases h
+            exact le_trans (le_of_eq (level_ret _)) bot_le
+      · exact absurd h (by simp)
+    · exact absurd h (by simp)
   | call f args pos =>
     simp only [rhsPlan] at h
     split at h
@@ -370,6 +384,15 @@ theorem bindForm_level_le {A : Type} {Γ : Ctx} {fns : Fns} (hf : FnLevel fns)
       cases h
       refine le_trans (level_graft_le (ℓ₀ := ℓ) _ _ fun _ σ e => ?_)
         (max_le (le_trans (rhsPlan_level_le hf c S (.decide d x ws pos) _ v hv) hp) le_rfl)
+      exact le_trans (le_of_eq (level_sub _ _)) hk
+  | weigh x path R pos =>
+    simp only [bindForm] at h
+    split at h
+    · exact absurd h (by simp)
+    · rename_i v hv
+      cases h
+      refine le_trans (level_graft_le (ℓ₀ := ℓ) _ _ fun _ σ e => ?_)
+        (max_le (le_trans (rhsPlan_level_le hf c S (.weigh x path R pos) _ v hv) hp) le_rfl)
       exact le_trans (le_of_eq (level_sub _ _)) hk
   | call f args pos =>
     simp only [bindForm] at h

@@ -1,4 +1,5 @@
 import Agentic.Core.Plan
+import Agentic.Core.Region
 
 /-!
 # The raw syntax: the unchecked term of a workflow
@@ -318,9 +319,9 @@ def Decider.run : Decider → List String → String → Bool
     (Exec.headerPaths s).any (fun p => gs.any (fun g => Exec.matchGlob g p))
 
 /-- `[[RawRhs]]` = a clause-position source: one question, a panel of them, a
-text panel, a decision about text already in hand, or a call of a function. The
-loop is not here — a bounded revision's result is not a value a clause can
-hold. -/
+text panel, a decision about text already in hand, a test of a decision record
+already in hand, or a call of a function. The loop is not here — a bounded
+revision's result is not a value a clause can hold. -/
 inductive RawRhs where
   /-- A single question. -/
   | ask (a : RawAsk)
@@ -339,6 +340,13 @@ inductive RawRhs where
   text** — never a `Prompt` — because a needle a model could author is a test a
   model chooses, which is not a decider. -/
   | decide (decider : Decider) (subject : String) (needles : List String) (pos : Pos)
+  /-- `weigh x path R`: a pure test of the decision record at the field path
+  `path` inside the structured answer bound to `x`, answering `flag`. It denotes
+  `Region.holds ns R v`, where `ns` are the record's options and `v` its
+  numbers: the record is a distribution up to scale, and its point of the
+  simplex lies in every half-space of `R`. Like a decider it asks nothing, and
+  its region is **literal program text**. -/
+  | weigh (subject : String) (path : List String) (region : List Region.Halfspace) (pos : Pos)
   /-- `f a₁ … aₙ`: a function applied, by juxtaposition, to exactly its arity
   in single-token arguments. The function is a named open plan; the call is
   substitution, so nothing here is a new node. -/
@@ -482,6 +490,7 @@ def RawRhs.pos : RawRhs → Pos
   | .panel _ p => p
   | .panelText _ p => p
   | .decide _ _ _ p => p
+  | .weigh _ _ _ p => p
   | .call _ _ p => p
 
 /-- Where a source begins, for diagnoses. -/
