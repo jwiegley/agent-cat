@@ -27,7 +27,7 @@
 -- position, because positions are oracle-only, like @message@ and @excerpt@.
 --
 -- The enclosing observation record — @level@, @size@, @askNodes@, @codes@,
--- @costSummary@, @blockAsks@, @fnAsks@, @worlds@ (@Conformance.lean:252@
+-- @costSummary@, @blockAsks@, @fnAsks@, @worlds@ (@Conformance.lean:438@
 -- @observe@) — belongs to tier1, which assembles it from "Agentic.Plan"'s
 -- folds, "Agentic.Guards"' ask counts and 'worldObservation'. That is why this
 -- module depends on neither @Agentic.Guards@ nor @Agentic.Raw@'s program type.
@@ -131,10 +131,10 @@ import qualified Data.Text as T
 import qualified Data.Vector as V
 
 -- ---------------------------------------------------------------------------
--- The world, specified as data (Conformance.lean:76-:116)
+-- The world, specified as data (Conformance.lean:130-:170)
 -- ---------------------------------------------------------------------------
 
--- | @Conformance.lean:76@ — a verdict, as a literal.
+-- | @Conformance.lean:130@ — a verdict, as a literal.
 --
 -- > inductive VLit where
 -- >   | approve
@@ -155,7 +155,7 @@ vLitToVerdict = \case
   VLitDeclined -> Declined
   VLitObject os -> verdictObject os
 
--- | @Conformance.lean:88@ — how the world answers @text@ questions.
+-- | @Conformance.lean:142@ — how the world answers @text@ questions.
 --
 -- 'TWrap' carries @pre@ then @post@, in Lean's argument order.
 data TextSpec
@@ -170,13 +170,13 @@ data TextSpec
     TByPrefix [(Text, Text)] !Text
   deriving (Eq, Show)
 
--- | @Conformance.lean:102@ — how the world answers @verdict@ questions.
+-- | @Conformance.lean:156@ — how the world answers @verdict@ questions.
 data VerdictSpec
   = VConst !VLit
   | VByPrefix [(Text, VLit)] !VLit
   deriving (Eq, Show)
 
--- | @Conformance.lean:108@ — how the world answers @flag@ questions.
+-- | @Conformance.lean:162@ — how the world answers @flag@ questions.
 data FlagSpec
   = FConst !Bool
   | -- | @q.prompt == s@, exact and unnormalized
@@ -306,7 +306,7 @@ newtype World = World
   { worldAnswer :: forall (c :: Code). SCode c -> Q c -> El c
   }
 
--- | @WorldSpec.toWorld@ (@Conformance.lean:121@), clause for clause.
+-- | @WorldSpec.toWorld@ (@Conformance.lean:209@), clause for clause.
 --
 -- Three details the corpus does not exercise but the Lean does fix:
 -- 'TByPrefix'\/'VByPrefix'\/'FByPrefix' are __first match wins__ over the table
@@ -510,10 +510,10 @@ billMemoLegacy :: Trace -> Integer
 billMemoLegacy = fromIntegral . length . nub . map eventKey
 
 -- ---------------------------------------------------------------------------
--- The oracle's JSON (Conformance.lean:155-:238)
+-- The oracle's JSON (Conformance.lean:235-:305)
 -- ---------------------------------------------------------------------------
 
--- | @Conformance.lean:155@ — a verdict as data: its tag, and the objections
+-- | @Conformance.lean:235@ — a verdict as data: its tag, and the objections
 -- where the tag carries any.
 --
 -- @{"tag":"approve"}@ and @{"tag":"declined"}@ have __no__ @objections@ key;
@@ -529,7 +529,7 @@ verdictJson v = case verdictTag v of
     objectionsOf (Object os) = os
     objectionsOf _ = []
 
--- | @Conformance.lean:166@ — an answer, at its code. A receipt is an explicit
+-- | @Conformance.lean:246@ — an answer, at its code. A receipt is an explicit
 -- JSON @null@, never an omitted key.
 answerJson :: SCode c -> El c -> Value
 answerJson SText s = A.String s
@@ -715,7 +715,7 @@ scopeFromJson = \case
       Just _ -> Left ("request scope " <> name <> ": expected text or null")
       Nothing -> Left ("request scope: missing key " <> name)
 
--- | @Conformance.lean:172@ — the two scope axes, __both keys always present__,
+-- | @Conformance.lean:253@ — the two scope axes, __both keys always present__,
 -- @null@ where the axis is silent. The second key is @mode@; nothing in this
 -- language ever sets it, and it exists because the scope monoid has two axes.
 scopeJson :: QScope -> Value
@@ -725,7 +725,7 @@ scopeJson s =
       "mode" .= maybe A.Null A.String (scopeModeAxis s)
     ]
 
--- | @Conformance.lean:177@ — one event of the reply's @"trace"@ array.
+-- | @Conformance.lean:296@ — one event of the reply's @"trace"@ array.
 --
 -- Built-ins retain the old strings (`receipt`, never `ack`); a schema-indexed
 -- code is an object carrying the schema that is part of question identity. The

@@ -137,6 +137,7 @@ import Agentic.Builder
     lit,
     noParams,
     one,
+    oneAt,
     panel,
     panelText,
     param,
@@ -144,6 +145,7 @@ import Agentic.Builder
     revisingCaseI,
     revisingOnCaseI,
     stop,
+    weighI,
   )
 import Agentic.Guards (askCounts)
 import Agentic.Plan
@@ -165,7 +167,7 @@ import Agentic.DSL
     RawBodyStmt (BodyAct, BodyBind, BodyCallS),
     RawFn (..),
     RawProgram (..),
-    RawRhs (RhsAsk, RhsCall, RhsDecide, RhsPanel, RhsPanelText),
+    RawRhs (RhsAsk, RhsCall, RhsDecide, RhsPanel, RhsPanelText, RhsWeigh),
     Served (Served),
     TextMember (TextMember),
     servedBy1,
@@ -173,8 +175,10 @@ import Agentic.DSL
     RawSource (SrcRevising, SrcRevisingOn, SrcRhs),
     RawTarget (RawTarget),
   )
+import Agentic.Plan.Decision (Halfspace (Halfspace), numberFieldsAt)
 import Agentic.Planning
   ( FlagSpec (FByPrefix, FConst, FPromptEq),
+    SomeAnswer (SomeAnswer),
     TextSpec (TByDraw, TByPrefix, TConst, TEcho, TWrap),
     VLit (VLitApprove, VLitDeclined, VLitObject),
     VerdictSpec (VByPrefix, VConst),
@@ -182,18 +186,27 @@ import Agentic.Planning
     toWorld,
     trace,
   )
+import Agentic.Schema
+  ( KnownSchema (schemaWitness),
+    Schema (SchemaNumber, SchemaObject, SchemaProperty, SchemaString),
+    SchemaRep (RepProperty),
+    SchemaWitness,
+    demoteSchema,
+  )
 import Control.Exception (evaluate)
 import Control.Monad (replicateM)
 import Data.Aeson (encode, toJSON)
 import qualified Data.ByteString.Lazy as LBS
 import Data.List (nub)
+import Data.Maybe (fromMaybe, isJust)
+import Data.Ratio ((%))
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Type.Equality ((:~:) (Refl))
 import System.Timeout (timeout)
-import Test.QuickCheck (Gen, choose, elements, frequency, generate, vectorOf)
+import Test.QuickCheck (Gen, choose, elements, frequency, generate, sublistOf, vectorOf)
 
 -- ---------------------------------------------------------------------------
 -- Codes, at the value level
@@ -228,7 +241,7 @@ eqCode _ _ = Nothing
 
 -- | The three kinds a generated binding may take. @receipt@ is deliberately
 -- absent: a receipt has no text of its own, nothing branches on one, and a
--- @-> receipt@ function's answer "has nowhere to go" (@Check.lean:780@), so a
+-- @-> receipt@ function's answer "has nowhere to go" (@Check.lean:887@), so a
 -- binding at @ack@ is a shape the language admits and no honest program writes.
 bindableCodes :: [Code]
 bindableCodes = [CodeText, CodeVerdict, CodeFlag]
@@ -451,6 +464,90 @@ genAsk ns = do
   pure (if d == (0 :: Integer) then a else draw d a)
 
 -- ---------------------------------------------------------------------------
+-- Decisions
+-- ---------------------------------------------------------------------------
+
+-- | The record ℚ^T of a decision over the options @low@, @mid@ and @high@: one
+-- @number@ field per option, in option order.
+type DecisionRecord =
+  'SchemaProperty
+    "low"
+    'SchemaNumber
+    ('SchemaProperty "mid" 'SchemaNumber ('SchemaProperty "high" 'SchemaNumber 'SchemaObject))
+
+-- | A structured answer of the product @Text × ℚ^T@, whose decision record
+-- lies at the field path @["decision"]@ beside a field that is not a number.
+type DecisionNested =
+  'SchemaProperty "note" 'SchemaString ('SchemaProperty "decision" DecisionRecord 'SchemaObject)
+
+-- | The field paths inside a structured answer at which a weighing finds a
+-- number record: the answer itself and each of its top-level fields, kept
+-- exactly where 'numberFieldsAt' names a record, which is where Lean's
+-- @numberFieldsAt?@ does.
+decisionPaths :: SchemaWitness sch -> [[Text]]
+decisionPaths w = [p | p <- [] : map pure (fieldNames rep), isJust (numberFieldsAt rep p)]
+  where
+    rep = demoteSchema w
+    fieldNames (RepProperty n _ rest) = n : fieldNames rest
+    fieldNames _ = []
+
+-- | A region over the options @ns@: zero, one or two half-spaces, each naming a
+-- sublist of the options once, with small rational weights and thresholds.
+-- The weights include @-1@, so the shapes that the readings lower to (a
+-- chance, an expected level, a most likely option) are all reachable, and the
+-- thresholds include the values at which ⟨w,v⟩ = θ·Σv holds on the records
+-- that 'genDecisionRecord' draws, so the boundary of a half-space is met.
+genRegion :: [Text] -> Gen [Halfspace]
+genRegion ns = do
+  k <- frequency [(1, pure 0), (4, pure 1), (2, pure 2)]
+  vectorOf k genHalfspace
+  where
+    genHalfspace = do
+      names <- sublistOf ns
+      ws <- mapM (\n -> (,) n <$> elements [1, 1, -1, 2, 1 % 2]) names
+      Halfspace ws <$> elements [0, 1 % 3, 1 % 2, 2 % 3, 1, -1 % 2]
+
+-- | One entry of a decision record: mostly a small non-negative count, and
+-- sometimes a fraction or a negative number, which reads as nothing.
+genDecisionEntry :: Gen Rational
+genDecisionEntry =
+  frequency
+    [ (4, elements [1, 2, 3]),
+      (2, pure 0),
+      (1, elements [1 % 2, 1 % 3]),
+      (1, pure (-1))
+    ]
+
+-- | A record of 'DecisionRecord'. One draw in eight is the zero record, which
+-- reads as nothing on every region.
+genDecisionRecord :: Gen (Rational, (Rational, (Rational, ())))
+genDecisionRecord =
+  frequency
+    [ (1, pure (0, (0, (0, ())))),
+      ( 7,
+        do
+          low <- genDecisionEntry
+          mid <- genDecisionEntry
+          high <- genDecisionEntry
+          pure (low, (mid, (high, ())))
+      )
+    ]
+
+-- | The schema answers of a world: one answer for each of the two decision
+-- schemas. Both are always present, because an observation of a world that
+-- has no answer for a queried structured schema is an error on both sides of
+-- the bisimulation (@Conformance.lean@ @observeAt@) and compares nothing.
+genDecisionAnswers :: Gen [SomeAnswer]
+genDecisionAnswers = do
+  flat <- genDecisionRecord
+  note <- elements ["", "ticket 7"]
+  nested <- genDecisionRecord
+  pure
+    [ SomeAnswer (schemaWitness @DecisionRecord) flat,
+      SomeAnswer (schemaWitness @DecisionNested) (note, (nested, ()))
+    ]
+
+-- ---------------------------------------------------------------------------
 -- Clause-position sources
 -- ---------------------------------------------------------------------------
 
@@ -458,7 +555,7 @@ genAsk ns = do
 -- arguments can be filled from this scope.
 --
 -- A @-> receipt@ function is excluded: binding its answer is refused by name
--- (@Check.lean:780@), and it reaches a program only through
+-- (@Check.lean:887@), and it reaches a program only through
 -- 'Agentic.Builder.callStmt' and 'Agentic.Builder.callSB'.
 callAlt :: forall c s. Live s -> SCode c -> GFn -> Maybe (Gen (Rhs s c))
 callAlt ns c (GFn _ pl r f) = case r of
@@ -628,7 +725,8 @@ genBlk fns fuel rd br ns
             : panelTextBindAlt
             : bindThenActAlt
             : knownHereAlt
-            : (branchAlts ++ callAlts ++ decideAlts)
+            : decisionBindAlt
+            : (branchAlts ++ callAlts ++ decideAlts ++ weighAlts)
         )
   where
     -- Everything that puts a `case` node in the term. Held back on one draw in
@@ -706,6 +804,44 @@ genBlk fns fuel rd br ns
             ]
           _ -> []
 
+    -- A decision: a question answered at one of the two decision schemas.
+    -- Annotated, because a weighing grounds no kind and a structured kind is
+    -- never inferred.
+    decisionBindAlt =
+      ( 2,
+        do
+          a <- genAsk ns
+          frequency
+            [ (1, decisionBind (schemaWitness @DecisionRecord) a),
+              (1, decisionBind (schemaWitness @DecisionNested) a)
+            ]
+      )
+
+    decisionBind :: forall sch. KnownSchema sch => SchemaWitness sch -> Ask s -> Gen (Blk s 'CodeAck)
+    decisionBind w a = do
+      let x = freshFor "x" ns
+      rst <- genBlk fns (fuel - 1) rd br (pushLive x (SStructured w) ns)
+      pure (bindAsI (SStructured w) x (oneAt (SStructured w) a) rst)
+
+    -- A weighing over a live structured binding at a path that names a number
+    -- record: no question, no node, and a flag the rest of the block may branch
+    -- on. One per live structured name.
+    weighAlts = concatMap alt ns
+      where
+        alt (Bound x c v) = case c of
+          SStructured w
+            | paths@(_ : _) <- decisionPaths w ->
+                [ ( 8,
+                    do
+                      path <- elements paths
+                      region <- genRegion (fromMaybe [] (numberFieldsAt (demoteSchema w) path))
+                      let f = freshFor "f" ns
+                      rst <- genBlk fns (fuel - 1) rd br (pushLive f SFlag ns)
+                      pure (bindI f (weighI w x v path region) rst)
+                  )
+                ]
+          _ -> []
+
     -- Unannotated, grounded by the very next statement: a hole reads as `text`.
     bindThenActAlt =
       ( 3,
@@ -781,6 +917,8 @@ genBlk fns fuel rd br ns
       where
         alt (Bound sx sc sv) = case sc of
           SAck -> []
+          -- A decision is read by weighings and is not revised.
+          SStructured _ -> []
           _ ->
             [ ( 4,
                 do
@@ -957,6 +1095,14 @@ data GenCase = GenCase
 --   alternative, weight 3, once per live @text@ binding — it asks nothing, so
 --   what it exercises is the fold that must /not/ move.
 --
+-- * __Decisions__: an annotated binding at one of two decision schemas,
+--   weight 2, the flat record @low, mid, high@ and a record nested at
+--   @["decision"]@ beside a text field. A weighing is a per-live-name
+--   alternative, weight 8, once per live structured binding, over zero to two
+--   half-spaces of 'genRegion'. Measured over a thousand draws, a decision is
+--   bound in about one program in four and weighed in about one in nine. A
+--   decision is never the subject of a bounded revision.
+--
 -- * __Questions__: model 6, model @served by@ 2, model @served by … or …@ 1
 --   (D6), tool 4, tool @running@ 2 (D5), person 2; draw 0 six times in ten,
 --   then 1, 2, 3.
@@ -970,7 +1116,8 @@ data GenCase = GenCase
 --   because its exit is replicated @2n+1@ times.
 --
 -- * __Worlds__: one to three, drawn by 'genWorldSpecFor' from the fragments the
---   program actually writes.
+--   program actually writes, each answering both decision schemas, with the
+--   zero record one draw in eight.
 --
 -- Two coverage facts worth having on record, both measured: every draw of four
 -- hundred passes 'Agentic.Guards.guardCheck' with 'Nothing' — a generated
@@ -1052,8 +1199,10 @@ programFragments prog =
       RhsAsk (RawAsk _ _ p _) -> [p]
       RhsPanel ms _ -> [p | RawAsk _ _ p _ <- ms]
       RhsPanelText ms _ -> [p | TextMember _ (RawAsk _ _ p _) <- ms]
-      -- A decider puts no question, so it writes no prompt.
+      -- A decider puts no question, so it writes no prompt, and neither does
+      -- a weighing.
       RhsDecide {} -> []
+      RhsWeigh {} -> []
       RhsCall _ as _ -> concatMap argPrompts as
 
     blockPrompts = \case
@@ -1082,10 +1231,11 @@ genWorldSpec = genWorldSpecFor litPool
 
 -- | A world spec whose @byPrefix@ keys are drawn from the given fragments,
 -- three in four, and from junk otherwise. All five 'TextSpec' constructors, both
--- 'VerdictSpec' ones and all three 'FlagSpec' ones are reachable.
+-- 'VerdictSpec' ones and all three 'FlagSpec' ones are reachable, and the
+-- schema answers are 'genDecisionAnswers'.
 genWorldSpecFor :: [Text] -> Gen WorldSpec
 genWorldSpecFor frags =
-  WorldSpec <$> genTextSpec <*> genVerdictSpec <*> genFlagSpec <*> pure []
+  WorldSpec <$> genTextSpec <*> genVerdictSpec <*> genFlagSpec <*> genDecisionAnswers
   where
     key
       | null frags = elements junkKeys

@@ -1,0 +1,81 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": {"const": {"s": "unused by schema answers"}},
+    "schema":
+    [{"value":
+      {"note": "a note", "billing": {"numerator": 1, "denominator": 1}},
+      "schema":
+      {"property":
+       {"schema": "number",
+        "rest":
+        {"property": {"schema": "string", "rest": "object", "name": "note"}},
+        "name": "billing"}}}],
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "t",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"model": {"id": "triage"}}},
+          "prompt": [{"lit": {"s": "classify the ticket"}}],
+          "pos": {"line": 0, "col": 0},
+          "model": null}}}}},
+     "rest":
+     {"bind":
+      {"x": "b",
+       "src":
+       {"rhs":
+        {"r":
+         {"weigh":
+          {"subject": "t",
+           "region": [],
+           "pos": {"line": 0, "col": 0},
+           "path": []}}}},
+       "rest":
+       {"ifFlag":
+        {"yes":
+         {"act":
+          {"rest": {"empty": {"pos": {"line": 0, "col": 0}}},
+           "pos": {"line": 0, "col": 0},
+           "a":
+           {"target": {"draw": 0, "addressee": {"tool": {"id": "log"}}},
+            "prompt": [{"lit": {"s": "yes"}}],
+            "pos": {"line": 0, "col": 0},
+            "model": null}}},
+         "x": "b",
+         "pos": {"line": 0, "col": 0},
+         "no":
+         {"act":
+          {"rest": {"empty": {"pos": {"line": 0, "col": 0}}},
+           "pos": {"line": 0, "col": 0},
+           "a":
+           {"target": {"draw": 0, "addressee": {"tool": {"id": "log"}}},
+            "prompt": [{"lit": {"s": "no"}}],
+            "pos": {"line": 0, "col": 0},
+            "model": null}}}}},
+       "pos": {"line": 0, "col": 0},
+       "ann": null}},
+     "pos": {"line": 0, "col": 0},
+     "ann":
+     {"json":
+      {"schema":
+       {"property":
+        {"schema": "number",
+         "rest":
+         {"property": {"schema": "string", "rest": "object", "name": "note"}},
+         "name": "billing"}}}}}},
+   "fns": []}},
+ "reply":
+ {"refused":
+  {"pos": {"line": 0, "col": 0},
+   "n": null,
+   "message": "a weighing's path names no number record in `t`",
+   "guard": "other",
+   "excerpt": "t"}},
+ "oracleVersion": 2,
+ "name": "decision-011-weigh-non-number-field"}

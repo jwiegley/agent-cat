@@ -104,6 +104,7 @@ servedChains prog =
       RhsPanel ms _ -> concatMap askServes ms
       RhsPanelText ms _ -> concatMap (askServes . tmAsk) ms
       RhsDecide {} -> []
+      RhsWeigh {} -> []
       RhsCall {} -> []
 
     srcServes = \case

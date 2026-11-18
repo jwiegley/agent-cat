@@ -1,0 +1,286 @@
+{"request":
+ {"worlds":
+  [{"verdict": {"const": {"v": "approve"}},
+    "text": {"const": {"s": "unused by schema answers"}},
+    "schema":
+    [{"value":
+      {"triage":
+       {"outage": {"numerator": 2, "denominator": 1},
+        "other": {"numerator": 1, "denominator": 1},
+        "billing": {"numerator": 0, "denominator": 1}},
+       "summary": "the router is down"},
+      "schema":
+      {"property":
+       {"schema": "string",
+        "rest":
+        {"property":
+         {"schema":
+          {"property":
+           {"schema": "number",
+            "rest":
+            {"property":
+             {"schema": "number",
+              "rest":
+              {"property":
+               {"schema": "number", "rest": "object", "name": "other"}},
+              "name": "outage"}},
+            "name": "billing"}},
+          "rest": "object",
+          "name": "triage"}},
+        "name": "summary"}}}],
+    "flag": {"const": {"b": true}}},
+   {"verdict": {"const": {"v": "approve"}},
+    "text": {"const": {"s": "unused by schema answers"}},
+    "schema":
+    [{"value":
+      {"triage":
+       {"outage": {"numerator": 1, "denominator": 1},
+        "other": {"numerator": 1, "denominator": 1},
+        "billing": {"numerator": 1, "denominator": 1}},
+       "summary": "a question"},
+      "schema":
+      {"property":
+       {"schema": "string",
+        "rest":
+        {"property":
+         {"schema":
+          {"property":
+           {"schema": "number",
+            "rest":
+            {"property":
+             {"schema": "number",
+              "rest":
+              {"property":
+               {"schema": "number", "rest": "object", "name": "other"}},
+              "name": "outage"}},
+            "name": "billing"}},
+          "rest": "object",
+          "name": "triage"}},
+        "name": "summary"}}}],
+    "flag": {"const": {"b": true}}}],
+  "program":
+  {"main":
+   {"bind":
+    {"x": "r",
+     "src":
+     {"rhs":
+      {"r":
+       {"ask":
+        {"a":
+         {"target": {"draw": 0, "addressee": {"model": {"id": "triage"}}},
+          "prompt": [{"lit": {"s": "summarize and classify the ticket"}}],
+          "pos": {"line": 0, "col": 0},
+          "model": null}}}}},
+     "rest":
+     {"bind":
+      {"x": "o",
+       "src":
+       {"rhs":
+        {"r":
+         {"weigh":
+          {"subject": "r",
+           "region":
+           [{"weights":
+             [{"weight": {"numerator": 1, "denominator": 1},
+               "option": "outage"}],
+             "atLeast": {"numerator": 2, "denominator": 3}}],
+           "pos": {"line": 0, "col": 0},
+           "path": ["triage"]}}}},
+       "rest":
+       {"ifFlag":
+        {"yes":
+         {"act":
+          {"rest": {"empty": {"pos": {"line": 0, "col": 0}}},
+           "pos": {"line": 0, "col": 0},
+           "a":
+           {"target": {"draw": 0, "addressee": {"tool": {"id": "page"}}},
+            "prompt": [{"lit": {"s": "outage"}}],
+            "pos": {"line": 0, "col": 0},
+            "model": null}}},
+         "x": "o",
+         "pos": {"line": 0, "col": 0},
+         "no":
+         {"act":
+          {"rest": {"empty": {"pos": {"line": 0, "col": 0}}},
+           "pos": {"line": 0, "col": 0},
+           "a":
+           {"target": {"draw": 0, "addressee": {"tool": {"id": "log"}}},
+            "prompt": [{"lit": {"s": "no outage"}}],
+            "pos": {"line": 0, "col": 0},
+            "model": null}}}}},
+       "pos": {"line": 0, "col": 0},
+       "ann": null}},
+     "pos": {"line": 0, "col": 0},
+     "ann":
+     {"json":
+      {"schema":
+       {"property":
+        {"schema": "string",
+         "rest":
+         {"property":
+          {"schema":
+           {"property":
+            {"schema": "number",
+             "rest":
+             {"property":
+              {"schema": "number",
+               "rest":
+               {"property":
+                {"schema": "number", "rest": "object", "name": "other"}},
+               "name": "outage"}},
+             "name": "billing"}},
+           "rest": "object",
+           "name": "triage"}},
+         "name": "summary"}}}}}},
+   "fns": []}},
+ "reply":
+ {"worlds":
+  [{"world":
+    {"verdict": {"const": {"v": "approve"}},
+     "text": {"const": {"s": "unused by schema answers"}},
+     "schema":
+     [{"value":
+       {"triage":
+        {"outage": {"numerator": 2, "denominator": 1},
+         "other": {"numerator": 1, "denominator": 1},
+         "billing": {"numerator": 0, "denominator": 1}},
+        "summary": "the router is down"},
+       "schema":
+       {"property":
+        {"schema": "string",
+         "rest":
+         {"property":
+          {"schema":
+           {"property":
+            {"schema": "number",
+             "rest":
+             {"property":
+              {"schema": "number",
+               "rest":
+               {"property":
+                {"schema": "number", "rest": "object", "name": "other"}},
+               "name": "outage"}},
+             "name": "billing"}},
+           "rest": "object",
+           "name": "triage"}},
+         "name": "summary"}}}],
+     "flag": {"const": {"b": true}}},
+    "trace":
+    [{"scope": {"model": null, "mode": null},
+      "prompt": "summarize and classify the ticket",
+      "draw": 0,
+      "code":
+      {"json":
+       {"schema":
+        {"property":
+         {"schema": "string",
+          "rest":
+          {"property":
+           {"schema":
+            {"property":
+             {"schema": "number",
+              "rest":
+              {"property":
+               {"schema": "number",
+                "rest":
+                {"property":
+                 {"schema": "number", "rest": "object", "name": "other"}},
+                "name": "outage"}},
+              "name": "billing"}},
+            "rest": "object",
+            "name": "triage"}},
+          "name": "summary"}}}},
+      "answer":
+      {"triage":
+       {"outage": {"numerator": 2, "denominator": 1},
+        "other": {"numerator": 1, "denominator": 1},
+        "billing": {"numerator": 0, "denominator": 1}},
+       "summary": "the router is down"},
+      "addressee": {"model": {"id": "triage"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "outage",
+      "draw": 0,
+      "code": "receipt",
+      "answer": null,
+      "addressee": {"tool": {"id": "page"}}}],
+    "billMemo": 2,
+    "billFresh": 2},
+   {"world":
+    {"verdict": {"const": {"v": "approve"}},
+     "text": {"const": {"s": "unused by schema answers"}},
+     "schema":
+     [{"value":
+       {"triage":
+        {"outage": {"numerator": 1, "denominator": 1},
+         "other": {"numerator": 1, "denominator": 1},
+         "billing": {"numerator": 1, "denominator": 1}},
+        "summary": "a question"},
+       "schema":
+       {"property":
+        {"schema": "string",
+         "rest":
+         {"property":
+          {"schema":
+           {"property":
+            {"schema": "number",
+             "rest":
+             {"property":
+              {"schema": "number",
+               "rest":
+               {"property":
+                {"schema": "number", "rest": "object", "name": "other"}},
+               "name": "outage"}},
+             "name": "billing"}},
+           "rest": "object",
+           "name": "triage"}},
+         "name": "summary"}}}],
+     "flag": {"const": {"b": true}}},
+    "trace":
+    [{"scope": {"model": null, "mode": null},
+      "prompt": "summarize and classify the ticket",
+      "draw": 0,
+      "code":
+      {"json":
+       {"schema":
+        {"property":
+         {"schema": "string",
+          "rest":
+          {"property":
+           {"schema":
+            {"property":
+             {"schema": "number",
+              "rest":
+              {"property":
+               {"schema": "number",
+                "rest":
+                {"property":
+                 {"schema": "number", "rest": "object", "name": "other"}},
+                "name": "outage"}},
+              "name": "billing"}},
+            "rest": "object",
+            "name": "triage"}},
+          "name": "summary"}}}},
+      "answer":
+      {"triage":
+       {"outage": {"numerator": 1, "denominator": 1},
+        "other": {"numerator": 1, "denominator": 1},
+        "billing": {"numerator": 1, "denominator": 1}},
+       "summary": "a question"},
+      "addressee": {"model": {"id": "triage"}}},
+     {"scope": {"model": null, "mode": null},
+      "prompt": "no outage",
+      "draw": 0,
+      "code": "receipt",
+      "answer": null,
+      "addressee": {"tool": {"id": "log"}}}],
+    "billMemo": 2,
+    "billFresh": 2}],
+  "size": 6,
+  "level": "branch",
+  "fnAsks": [],
+  "costSummary": {"paths": 2, "minFold": 2, "maxFold": 2},
+  "codes": null,
+  "blockAsks": 3,
+  "askNodes": 3},
+ "oracleVersion": 2,
+ "name": "decision-005-weigh-at-path"}

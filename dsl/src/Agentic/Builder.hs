@@ -107,6 +107,8 @@ module Agentic.Builder
     Decider (..),
     decide,
     decideI,
+    weigh,
+    weighI,
     callV,
 
     -- * Arguments and functions
@@ -171,6 +173,7 @@ module Agentic.Builder
   )
 where
 
+import Agentic.DSL.Decision (Halfspace, holdsRegion, numberRecordAt)
 import Agentic.DSL.Plan hiding (panel, panelText)
 import qualified Agentic.DSL.Plan as P
 import Agentic.Raw
@@ -194,6 +197,7 @@ import Agentic.Raw
     TextMember (..),
     servedBy1,
   )
+import Agentic.Schema (SchemaWitness)
 import Agentic.Text (runDecider)
 import Data.Kind (Constraint, Type)
 import Data.List.NonEmpty (NonEmpty)
@@ -368,6 +372,7 @@ zeroRhs = \case
   RhsPanelText ms _ ->
     RhsPanelText (map (\m -> m {tmAsk = zeroAsk (tmAsk m)}) ms) pos0
   RhsDecide d x ws _ -> RhsDecide d x ws pos0
+  RhsWeigh x path region _ -> RhsWeigh x path region pos0
   RhsCall f as _ -> RhsCall f (map zeroArg as) pos0
 
 zeroSource :: RawSource -> RawSource
@@ -475,7 +480,7 @@ wordsExpr ps = T.concat <$> traverse pieceExpr ps
 
 -- | The words where the prompt mentions no name, and 'Nothing' where it does.
 --
--- Lean: @Prompt.closed@ (@Syntax.lean:137@). __The decision is made on the
+-- Lean: @Prompt.closed@ (@Syntax.lean:138@). __The decision is made on the
 -- chunks, never on the 'Expr'__: closed-versus-open is exactly what separates
 -- 'PAskC' from 'PAsk', hence @batch@ from @pipeline@ in the @level@ fold. The
 -- empty prompt is closed, at @""@.
@@ -509,7 +514,7 @@ askModel :: Text -> Words s -> Ask s
 askModel i w = Ask (AddrModel i) 0 Nothing w
 
 -- | @ask model "m" served by "s" …@ — __the only__ constructor that takes a
--- serving model, which is how @askGuard@'s refusal (@Check.lean:340@:
+-- serving model, which is how @askGuard@'s refusal (@Check.lean:377@:
 -- "@served by@ names the model that serves a model addressee; a tool or a
 -- person is not served by one") becomes unrepresentable rather than checked.
 --
@@ -570,7 +575,7 @@ askRaw a =
     (wordsRaw (askWords a))
     pos0
 
--- | The shape a target writes. Lean: @askShape@ (@Check.lean:172@) — the
+-- | The shape a target writes. Lean: @askShape@ (@Check.lean:192@) — the
 -- addressee and the draw as given, the scope at the unit of the scope monoid,
 -- and @served by@ applied to /that/ by @atModel@, which sets the model axis
 -- and leaves the mode axis silent. @served by@ never touches the words.
@@ -606,14 +611,14 @@ askNodeEffect :: Ask s -> Plan ('CodeAck ': Codes s) a -> Plan (Codes s) a
 askNodeEffect = askNodeWithIntent Effect SAck
 
 -- | A question in binding position: __one__ node, because 'PAsk' /is/
--- ask-and-bind. Lean: @bindForm@ (@Check.lean:542@), its @.ask@ branch at @:551@.
+-- ask-and-bind. Lean: @bindForm@ (@Check.lean:636@), its @.ask@ branch at @:639@.
 askNode :: forall c s a. KnownCode c => Ask s -> Plan (c ': Codes s) a -> Plan (Codes s) a
 askNode = askNodeWith (sCode @c)
 
 askNodeWith :: SCode c -> Ask s -> Plan (c ': Codes s) a -> Plan (Codes s) a
 askNodeWith c a = askNodeWithIntent (valueIntentH c a) c a
 
--- | A question as a value. Lean: @askPlan@ (@Check.lean:350@), i.e. @askC1@
+-- | A question as a value. Lean: @askPlan@ (@Check.lean:398@), i.e. @askC1@
 -- where the words are in the term and @ask1@ where they are computed.
 askAt :: forall c s. KnownCode c => Ask s -> Plan (Codes s) (El c)
 askAt = askAtWith (sCode @c)
@@ -635,9 +640,9 @@ askAtWith c a =
 -- @bindForm@ (the binding form) precomputed at that kind.
 data Rhs (s :: Scope) (c :: Code) = Rhs
   { rhsRaw :: RawRhs,
-    -- | Lean: @rhsPlan@ (@Check.lean:478@).
+    -- | Lean: @rhsPlan@ (@Check.lean:546@).
     rhsPlan :: Plan (Codes s) (El c),
-    -- | Lean: @bindForm@ (@Check.lean:542@).
+    -- | Lean: @bindForm@ (@Check.lean:636@).
     rhsForm :: forall a. Plan (c ': Codes s) a -> Plan (Codes s) a
   }
 
@@ -666,15 +671,15 @@ oneAt c a =
 
 -- | @panel, all must approve […]@.
 --
--- Lean: @checkMembers@ (@Check.lean:365@) elaborates every member at
+-- Lean: @checkMembers@ (@Check.lean:406@) elaborates every member at
 -- @.verdict@ — positionally, never by inference — and @Plan.panel@
 -- (@Plan.lean:975@) folds them right, from the unit, in member order:
 -- @v₁ * (v₂ * (… * (vₙ * 1)))@ in the verdict monoid, where @declined@
 -- annihilates, @approve@ is the unit and objection lists concatenate. The
 -- monoid is noncommutative on purpose, so the fold's direction is normative.
 --
--- A panel answers @verdict@ and nothing else (@Check.lean:492@), and it needs
--- at least one member (@Check.lean:484@) — hence 'NonEmpty', which is why the
+-- A panel answers @verdict@ and nothing else (@Check.lean:560@), and it needs
+-- at least one member (@Check.lean:552@) — hence 'NonEmpty', which is why the
 -- @vector-004@ guard vector is not rebuildable here. That is the point:
 -- @tier0@ owns the refusals.
 panel :: NonEmpty (Ask s) -> Rhs s 'CodeVerdict
@@ -690,7 +695,7 @@ panel ms =
 
 -- | @panel as text [ name: ask, … ]@ — 'panel'\'s twin at @text@ (D2).
 --
--- Lean: @checkMembersText@ (@Check.lean:384@) elaborates every member at
+-- Lean: @checkMembersText@ (@Check.lean:425@) elaborates every member at
 -- @.text@ — positionally, never by inference — with the label carried through,
 -- and @Plan.panelText@ (@Plan.lean:1008@) folds them right from the empty
 -- document, wrapping each answer in 'Agentic.Text.block' as it goes:
@@ -753,7 +758,60 @@ decideI d x v ws =
     needles = NE.toList ws
     value = PRet (fmap (runDecider d needles) (exprVar v))
 
--- | A value call. Lean: @callPlan@ (@Check.lean:464@) — @Plan.sub@ of the
+-- | @b <- weigh x path R@ — a pure test of the decision record at the field
+-- path @path@ inside the structured answer bound to a handle, answering
+-- @flag@. Lean: the @.weigh@ arm of @rhsPlan@ (@Check.lean:601@), which
+-- elaborates to
+--
+-- > ret (fun γ => match recordAt path (x γ) with
+-- >               | some (ns, v) => Region.holds ns R v
+-- >               | none => false)
+--
+-- and here, with 'numberRecordAt' for @recordAt@ and 'holdsRegion' for
+-- @Region.holds@:
+--
+-- > rhsPlan (weigh w x path R) = PRet (maybe False (holdsRegion R) . numberRecordAt w path <$> x)
+--
+-- The witness @w@ is the schema of the handle's answer, which the record is
+-- read through. Taking a @'V' h ('CodeStructured' sch)@ makes \"a weighing
+-- reads a decision\" a __type__ error at the authoring surface. The path and
+-- region refusals (no number record at the path, a weight on a name that is
+-- not an option, an option named twice in one half-space) are not checked
+-- here: @tier0@ owns them, as it owns a panel's.
+--
+-- __It costs nothing in every fold, including @size@__, for the reason
+-- 'decide' gives: its value is a 'Agentic.DSL.Plan.PRet', so the binding
+-- elaborates to the continuation with the value substituted in and no node.
+weigh ::
+  forall h s sch.
+  (KnownIx h s) =>
+  SchemaWitness sch ->
+  V h ('CodeStructured sch) ->
+  [Text] ->
+  [Halfspace] ->
+  Rhs s 'CodeFlag
+weigh w v = weighI @s w (vName v) (readV @h @s v)
+
+-- | 'weigh' at an index rather than at a handle: the subject's name as it is
+-- /printed/, and the de Bruijn index that /reads/ it.
+weighI ::
+  forall s sch.
+  SchemaWitness sch ->
+  Text ->
+  Var (Codes s) ('CodeStructured sch) ->
+  [Text] ->
+  [Halfspace] ->
+  Rhs s 'CodeFlag
+weighI w x v path region =
+  Rhs
+    { rhsRaw = RhsWeigh x path region pos0,
+      rhsPlan = value,
+      rhsForm = \k -> graftForm value k
+    }
+  where
+    value = PRet (fmap (maybe False (holdsRegion region) . numberRecordAt w path) (exprVar v))
+
+-- | A value call. Lean: @callPlan@ (@Check.lean:505@) — @Plan.sub@ of the
 -- callee's plan along the argument list, so the callee's questions appear
 -- inlined at the call site, in body order, with caller-evaluated arguments in
 -- their prompts. No node is added.
@@ -772,7 +830,7 @@ callV f as =
 -- ---------------------------------------------------------------------------
 
 -- | One argument at a call site, elaborated at the parameter's kind. Lean:
--- @argExpr@ (@Check.lean:406@).
+-- @argExpr@ (@Check.lean:447@).
 data Arg (s :: Scope) (c :: Code) = Arg
   { argRaw :: RawArg,
     argExpr :: Expr (Codes s) (El c)
@@ -810,7 +868,7 @@ argsRaw = \case
   ANil -> []
   ACons a as -> argRaw a : argsRaw as
 
--- | The calling convention, verbatim: Lean's @checkArgs@ (@Check.lean:433@)
+-- | The calling convention, verbatim: Lean's @checkArgs@ (@Check.lean:474@)
 -- folds the arguments left to right into the substitution the call runs along,
 -- each consed onto the environment being built, starting from @Env.nil@.
 -- Combined with 'ParamCtx''s reversal this puts each argument exactly where
@@ -831,7 +889,7 @@ argSub (ACons (a :: Arg s c) as) sigma =
 -- Functions
 -- ---------------------------------------------------------------------------
 
--- | Lean's @paramCtx@ (@Check.lean:308@) is a /left/ fold, so a parameter list
+-- | Lean's @paramCtx@ (@Check.lean:341@) is a /left/ fold, so a parameter list
 -- is reversed into the context: for @(p₁ : c₁, p₂ : c₂)@ the context is
 -- @c₂ ': c₁ ': '[]@ and @p₂@ is de Bruijn @0@.
 type family ParamCtxGo (ps :: [Code]) (acc :: Ctx) :: Ctx where
@@ -846,7 +904,7 @@ type ParamCtx (ps :: [Code]) = ParamCtxGo ps '[]
 -- handles the body reads them through, nested in source order and ending in
 -- @()@.
 --
--- Lean: @paramBindings@ (@Check.lean:981@), which pushes the parameters in
+-- Lean: @paramBindings@ (@Check.lean:1088@), which pushes the parameters in
 -- source order so that the last one is de Bruijn @0@. A parameter is a binding
 -- like any other, so it hands the body a 'V' like any other; @hs@ is that
 -- tuple of handles, computed by the very fold that computes the scope.
@@ -894,7 +952,7 @@ paramHandles = \case
   PCons p _ rest -> (V (T.pack (symbolVal p)) VHere, paramHandles rest)
 
 -- | A checked function: what it prints, and its plan over exactly its
--- parameters. Lean: @FnEntry@ (@Check.lean:312@).
+-- parameters. Lean: @FnEntry@ (@Check.lean:345@).
 --
 -- The table's stratification — a duplicate name refused, a call naming only an
 -- earlier entry, hence no recursion — is Haskell's @let@: a 'Fn' value must
@@ -904,7 +962,7 @@ data Fn (ps :: [Code]) (r :: Code) = Fn
     fnPlan :: Plan (ParamCtx ps) (El r)
   }
 
--- | One function. Lean: @checkFn@ (@Check.lean:1072@) — a body is checked
+-- | One function. Lean: @checkFn@ (@Check.lean:1180@) — a body is checked
 -- __once__, over exactly its parameters, and "a body cannot see the caller" is
 -- the type and not a rule.
 --
@@ -959,7 +1017,7 @@ callPlanOf f as = subP (fnPlan f) (argSub as (subNil :: Sub '[] (Codes s)))
 -- ---------------------------------------------------------------------------
 
 -- | A function body: the statements it prints, the @answer@ it names, and the
--- plan it elaborates to. Lean: @checkBody@ (@Check.lean:1014@).
+-- plan it elaborates to. Lean: @checkBody@ (@Check.lean:1121@).
 --
 -- A body has no branching and no loop — @RawBodyStmt@ has no such
 -- constructors, and neither has this type. A function is a reusable sequence
@@ -1086,7 +1144,7 @@ answerBlk v = Blk (RawAnswer (vName v) pos0) (PRet (exprVar (readV @h @s v)))
 
 -- | @x <- …@; prints @ann = null@.
 --
--- Lean (@Check.lean:782@): __one__ node at the imposed kind, whose
+-- Lean (@Check.lean:889@): __one__ node at the imposed kind, whose
 -- continuation is the rest of the block checked with @x@ pushed at index @0@.
 -- Nothing else. Where Lean infers the kind from the first ground use
 -- (@bindKind@ / @useKindB@), the author supplies it at the type level; the
@@ -1134,7 +1192,7 @@ bindAsI c x rhs rest =
 
 -- | The act: a statement-position ask.
 --
--- Lean (@Check.lean:757@): an ask at @Code.ack@ whose answer occupies a
+-- Lean (@Check.lean:864@): an ask at @Code.ack@ whose answer occupies a
 -- context slot that the continuation immediately weakens past — the rest of
 -- the block is checked in @Γ@ and then read into @ack :: Γ@ by @Sub.wk@. So
 -- the act binds nothing /and/ still adds one binder to the de Bruijn spine.
@@ -1151,7 +1209,7 @@ act a rest =
     (askNodeEffect a (weakenP (blkPlan rest)))
 
 -- | A statement call: @Plan.graft p (fun _ σ _ => Plan.sub k σ)@
--- (@Check.lean:778@). The answer is discarded and __no__ context slot is
+-- (@Check.lean:874@). The answer is discarded and __no__ context slot is
 -- added — the contrast with 'act' is deliberate and is what @battery-144@
 -- pins. Only a @-> receipt@ function may stand here, which is the type.
 callStmt :: Fn ps 'CodeAck -> Args s ps -> Blk s r -> Blk s r
@@ -1162,7 +1220,7 @@ callStmt f as rest =
 
 -- | @if x { … } else { … }@.
 --
--- Lean (@Check.lean:830@): one @case@ at 'Bool' via @caseB@, both arms in the
+-- Lean (@Check.lean:939@): one @case@ at 'Bool' via @caseB@, both arms in the
 -- term, each arm the rest of the workflow in the __same__ context with the
 -- __same__ names. No binder is added — the flag is read through the existing
 -- variable.
@@ -1184,7 +1242,7 @@ ifFlagI x v yes no =
 
 -- | @case x { approved … objected … no answer … }@.
 --
--- Lean (@Check.lean:846@): one @case@ at @VTag@ via @caseV@, whose scrutinee
+-- Lean (@Check.lean:955@): one @case@ at @VTag@ via @caseV@, whose scrutinee
 -- is @Verdict.tag@ of the name. The verdict itself stays readable in every arm
 -- — the tag decides the shape, the objections ride in the environment.
 caseVerdict ::
@@ -1225,7 +1283,7 @@ caseVerdictI x v approved objected noAnswer =
 
 -- | @known here: …@ — an assertion, and __no node at all__.
 --
--- Lean (@Check.lean:749@): a checked @known here@ elaborates to the rest of
+-- Lean (@Check.lean:856@): a checked @known here@ elaborates to the rest of
 -- the block, unchanged, in the same context; it contributes no binder, no
 -- event, and does not appear in @size@. The names it prints are computed from
 -- the type-level scope, innermost first, so a rebuilt case cannot print a
@@ -1246,19 +1304,19 @@ knownHereI names rest =
 -- ---------------------------------------------------------------------------
 
 -- | The review clause's continuation: the candidate under review is de Bruijn
--- @0@. Lean: @checkCont@ (@Check.lean:591@).
+-- @0@. Lean: @checkCont@ (@Check.lean:681@).
 checkCont :: Plan (c ': g) Verdict -> Cont g (El c) Verdict
 checkCont chk = Cont (\sigma a -> subP chk (subCons a sigma))
 
 -- | The amend clause's continuation: the review's verdict is de Bruijn @0@ and
--- the candidate is @1@. Lean: @reviseCont@ (@Check.lean:598@).
+-- the candidate is @1@. Lean: @reviseCont@ (@Check.lean:688@).
 reviseCont :: Plan ('CodeVerdict ': c ': g) (El c) -> Cont g (El c, Verdict) (El c)
 reviseCont rev =
   Cont (\sigma av -> subP rev (subCons (fmap snd av) (subCons (fmap fst av) sigma)))
 
 -- | The outcomes of a bounded revision, generalised over the exit tag: a @case@
 -- on the ending the loop reports, with __the candidate reaching every arm__ as
--- de Bruijn @0@. Lean: @exitCont@ (@Check.lean:618@).
+-- de Bruijn @0@. Lean: @exitCont@ (@Check.lean:708@).
 --
 -- Written once and instantiated twice — at 'TBool' for @revising@'s two endings
 -- (D3) and at 'TEnding' for @revising on@'s three (D4) — because the two want
@@ -1286,11 +1344,11 @@ exitCont t arms =
 -- combinator, because the intermediate has type @Plan Γ (El c, Bool)@ and
 -- @Ctx@ has no code for a candidate-and-ending pair. Lean carries it as a
 -- @Pend Γ@
--- (@Check.lean:639@) that the very next statement must consume, and refuses
+-- (@Check.lean:728@) that the very next statement must consume, and refuses
 -- every other statement by name while it is pending; here the pairing is the
 -- combinator's shape.
 --
--- Elaboration (@Check.lean:814@ and @702@, @Plan.lean:1056@):
+-- Elaboration (@Check.lean:923@ and @:768@, @Plan.lean:1056@):
 --
 -- * the candidate's kind is the __subject's__ kind, so it is the subject
 --   handle's and not a choice;
