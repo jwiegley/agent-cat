@@ -49,13 +49,15 @@ clock and several gigabytes of memory.
 
 After a change, run the gates that own the changed layer. The deterministic
 gates are `bisim/ci/tier0.sh`, `cli/ci/policies.sh`, `cli/ci/examples.sh`,
-`cli/ci/routing-config.sh`, `engine/acp/ci/acp.sh`, and
-`engine/agent-deck/ci/deck.sh`. The script `bisim/ci/tier1.sh` requires a
-prebuilt oracle and refuses to build one. The script
-`engine/acp/ci/route-live.sh` contacts paid backends, and an operator runs it
-only by explicit choice. The documentation gates are `make -C doc check` and
-`make -C doc check-haskell`. A change to the frozen corpus under `bisim/corpus/`
-is a change to the specification, and it is reviewed as one.
+`cli/ci/routing-config.sh`, `engine/acp/ci/acp.sh`,
+`engine/agent-deck/ci/deck.sh`, `engine/decisions/ci/decisions.sh`, and
+`engine/decisions/ci/triage.sh`. The script `bisim/ci/tier1.sh` requires a
+prebuilt oracle and refuses to build one. The scripts
+`engine/acp/ci/route-live.sh` and `engine/decisions/ci/route-live.sh` contact
+paid backends, and an operator runs them only by explicit choice. The
+documentation gates are `make -C doc check` and `make -C doc check-haskell`. A
+change to the frozen corpus under `bisim/corpus/` is a change to the
+specification, and it is reviewed as one.
 
 ## Documentation
 

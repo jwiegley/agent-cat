@@ -1,0 +1,108 @@
+# The version 2 routing file of engine/decisions/ci/triage.sh.
+#
+# The gate replaces @PORT@ with the port of engine/decisions/test/stub_decisions.py
+# and selects one persona for each run. Each persona routes the profile
+# `triage`, which serves the three decisions of the Triage example, to a chain
+# of models, and routes the profile `balanced`, which serves its desks, to the
+# deterministic ACP stub adapter. The model id of a decisions model chooses
+# what the decisions stub does: `stub-good` answers, `stub-busy` answers HTTP
+# 529, and `stub-refusing` refuses the question.
+#
+# There are four personas for each dialect. DIALECT answers from the first
+# rung. DIALECT-failover fails over from a busy model to a model that answers.
+# DIALECT-abandon has a busy model and a refusing model and no rung after
+# them. DIALECT-mixed fails over from a busy model to the generative stub.
+version: 2
+default-persona: system-one
+secrets: {}
+engines:
+  system-one-stub:
+    backend: decisions:system-one
+    provider: fixture
+    endpoint:
+      url: http://127.0.0.1:@PORT@/system-one
+      timeout-ms: 10000
+      max-bytes: 65536
+  openai-stub:
+    backend: decisions:openai
+    provider: fixture
+    endpoint:
+      url: http://127.0.0.1:@PORT@/openai
+      timeout-ms: 10000
+      max-bytes: 65536
+  acp-stub:
+    backend: acp:stub
+    provider: fixture
+models:
+  system-one-good: { engine: system-one-stub, select: [ { exact: stub-good } ] }
+  system-one-busy: { engine: system-one-stub, select: [ { exact: stub-busy } ] }
+  system-one-refusing: { engine: system-one-stub, select: [ { exact: stub-refusing } ] }
+  openai-good: { engine: openai-stub, select: [ { exact: stub-good } ] }
+  openai-busy: { engine: openai-stub, select: [ { exact: stub-busy } ] }
+  openai-refusing: { engine: openai-stub, select: [ { exact: stub-refusing } ] }
+  desk: { engine: acp-stub, select: [ { exact: stub-default } ] }
+personas:
+  system-one:
+    engines: [system-one-stub, acp-stub]
+    models: [system-one-good, desk]
+    profiles:
+      triage:
+        chain: [ { model: system-one-good } ]
+      balanced:
+        chain: [ { model: desk, thinking: high, max-output: 65536 } ]
+  system-one-failover:
+    engines: [system-one-stub, acp-stub]
+    models: [system-one-busy, system-one-good, desk]
+    profiles:
+      triage:
+        chain: [ { model: system-one-busy }, { model: system-one-good } ]
+      balanced:
+        chain: [ { model: desk, thinking: high, max-output: 65536 } ]
+  system-one-abandon:
+    engines: [system-one-stub, acp-stub]
+    models: [system-one-busy, system-one-refusing, desk]
+    profiles:
+      triage:
+        chain: [ { model: system-one-busy }, { model: system-one-refusing } ]
+      balanced:
+        chain: [ { model: desk, thinking: high, max-output: 65536 } ]
+  system-one-mixed:
+    engines: [system-one-stub, acp-stub]
+    models: [system-one-busy, desk]
+    profiles:
+      triage:
+        chain: [ { model: system-one-busy }, { model: desk, thinking: high, max-output: 65536 } ]
+      balanced:
+        chain: [ { model: desk, thinking: high, max-output: 65536 } ]
+  openai:
+    engines: [openai-stub, acp-stub]
+    models: [openai-good, desk]
+    profiles:
+      triage:
+        chain: [ { model: openai-good } ]
+      balanced:
+        chain: [ { model: desk, thinking: high, max-output: 65536 } ]
+  openai-failover:
+    engines: [openai-stub, acp-stub]
+    models: [openai-busy, openai-good, desk]
+    profiles:
+      triage:
+        chain: [ { model: openai-busy }, { model: openai-good } ]
+      balanced:
+        chain: [ { model: desk, thinking: high, max-output: 65536 } ]
+  openai-abandon:
+    engines: [openai-stub, acp-stub]
+    models: [openai-busy, openai-refusing, desk]
+    profiles:
+      triage:
+        chain: [ { model: openai-busy }, { model: openai-refusing } ]
+      balanced:
+        chain: [ { model: desk, thinking: high, max-output: 65536 } ]
+  openai-mixed:
+    engines: [openai-stub, acp-stub]
+    models: [openai-busy, desk]
+    profiles:
+      triage:
+        chain: [ { model: openai-busy }, { model: desk, thinking: high, max-output: 65536 } ]
+      balanced:
+        chain: [ { model: desk, thinking: high, max-output: 65536 } ]

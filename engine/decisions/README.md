@@ -10,7 +10,9 @@ classification of failures, and the translation between the neutral
 ## Public modules
 
 `Agentic.Decisions` exposes `DecisionsEndpoint`, `DecisionsModel`, and
-`DecisionsEngine` with its constructor `newDecisionsEngine`. An endpoint holds
+`DecisionsEngine` with its constructor `newDecisionsEngine`, and it re-exports
+the wire vocabulary that a routing definition needs: `Dialect`, `Limits`,
+`defaultLimits`, and `reservedBodyKeys`. An endpoint holds
 its dialect, its URL, its headers with the resolved credential, the secret
 values that no public update may show, a timeout, a byte bound, and the
 option limits. A model selector maps the model axis of a request to the model
@@ -66,6 +68,7 @@ routing definition, and the runtime never imports this directory.
 ```sh
 direnv exec . test/cabal.sh build all
 direnv exec . bash engine/decisions/ci/decisions.sh
+direnv exec . bash engine/decisions/ci/triage.sh
 ```
 
 The gate checks that the engine imports only the engine API, that
@@ -75,3 +78,18 @@ bodies and every response fixture in `test/fixtures`, runs the engine against
 a `warp` stub on the loopback interface inside the test process, and checks
 law L13: every accepted answer decodes at the decision's schema and holds the
 vendor's probabilities. No test contacts an endpoint outside the process.
+
+The second gate, `ci/triage.sh`, runs the `triage` example through
+`agentic-run run --routing` once for each dialect. Its endpoint is
+`test/stub_decisions.py`, a stub that listens on the loopback interface and
+answers from a table keyed by the instructions of each question, and its
+routing file is `test/triage-routing.yaml`. It checks the run that the
+scripted table predicts, fail-over from a model that answers HTTP 529 to a
+second model, abandonment when no rung is left, and fail-over from a
+decisions model to the deterministic ACP stub adapter, whose fixed text is no
+number record. Neither gate contacts an endpoint beyond the loopback
+interface.
+
+`ci/route-live.sh` runs the same example against a hosted endpoint and spends
+money on a real account. An operator runs it only by explicit choice, and it
+refuses to run unless `AGENT_CAT_DECISIONS_LIVE` holds the word `spend`.
