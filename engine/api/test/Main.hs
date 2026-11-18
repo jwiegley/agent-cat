@@ -160,12 +160,15 @@ roundTrips name encode decode values =
   ]
     <> [name <> " round trips covered no value" | null values]
 
--- | The three negative controls that every codec must refuse.
+-- | The negative controls that every codec must refuse, and the control value
+-- that it must accept. The version checks change only the field @version@ of a
+-- version-1 value, so a refusal there is a refusal of the version itself.
 refusals :: Show a => String -> (Value -> Either Text a) -> Value -> Key.Key -> [String]
 refusals name decode encoded required =
   refused (name <> " with an unknown field") decode (withField "extra" Null encoded)
     <> refused (name <> " without field " <> show required) decode (withoutField required encoded)
     <> refused (name <> " at version 2") decode (withField "version" (Number 2) encoded)
+    <> refused (name <> " at version 3") decode (withField "version" (Number 3) encoded)
     <> refused (name <> " without a version") decode (withoutField "version" encoded)
     <> [name <> " control value did not decode" | isLeft (decode encoded)]
 

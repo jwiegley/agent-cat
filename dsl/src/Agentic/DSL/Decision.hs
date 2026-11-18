@@ -44,7 +44,7 @@ import Agentic.Schema
     withSchema,
   )
 import Control.Monad (unless, when)
-import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:), (.=))
+import Data.Aeson (FromJSON (..), ToJSON (..), Value (Number), object, withObject, withScientific, (.:), (.=))
 import qualified Data.Aeson.Key as K
 import qualified Data.Aeson.KeyMap as KM
 import Data.Aeson.Types (Parser)
@@ -54,6 +54,7 @@ import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.List.NonEmpty as NE
 import Data.Proxy (Proxy (..))
 import Data.Ratio (denominator, numerator, (%))
+import qualified Data.Scientific as Sci
 import Data.Text (Text)
 import qualified Data.Text as T
 import GHC.TypeLits (KnownSymbol, symbolVal)
@@ -261,7 +262,12 @@ instance ToJSON Halfspace where
 
 -- | The inverse of 'toJSON'. It requires exactly the keys 'toJSON' writes, and
 -- it refuses a rational whose denominator is not positive or that is not in
--- lowest terms.
+-- lowest terms. A numerator or a denominator is an integer spelling: reading
+-- the JSON number as c × 10^e with every written digit in the coefficient c,
+-- the exponent e is not negative. The spellings @10@, @100@ and @1e1@ are
+-- therefore integers, and @1.0@, @10e-1@ and @100e-2@ are refused. These are
+-- exactly the spellings that Lean's JSON parser reads with exponent zero, which
+-- @getInt?@ and @getNat?@ in the Lean decoder require.
 instance FromJSON Halfspace where
   parseJSON = withObject "Halfspace" $ \o -> do
     exactKeys "Halfspace" ["weights", "atLeast"] o
@@ -282,11 +288,20 @@ rationalJson r = object ["numerator" .= numerator r, "denominator" .= denominato
 rationalParse :: Value -> Parser Rational
 rationalParse = withObject "rational" $ \o -> do
   exactKeys "rational" ["numerator", "denominator"] o
-  i <- o .: "numerator" :: Parser Integer
-  d <- o .: "denominator" :: Parser Integer
+  i <- o .: "numerator" >>= integerParse "numerator"
+  d <- o .: "denominator" >>= integerParse "denominator"
   when (d <= 0) (fail "rational: the denominator is not positive")
   unless (gcd i d == 1) (fail "rational: not in lowest terms")
   pure (i % d)
+
+-- | An integer in the spelling that 'rationalParse' accepts: a JSON number
+-- whose base-10 exponent, with every written digit in the coefficient, is not
+-- negative. The conversion itself is aeson's, which bounds the exponent.
+integerParse :: String -> Value -> Parser Integer
+integerParse field = withScientific ("rational " <> field) $ \s -> do
+  when (Sci.base10Exponent s < 0) $
+    fail ("rational: the " <> field <> " is not written as an integer")
+  parseJSON (Number s)
 
 exactKeys :: String -> [Text] -> KM.KeyMap Value -> Parser ()
 exactKeys ty expected o =
