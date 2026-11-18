@@ -265,9 +265,13 @@ instance ToJSON Halfspace where
 -- lowest terms. A numerator or a denominator is an integer spelling: reading
 -- the JSON number as c × 10^e with every written digit in the coefficient c,
 -- the exponent e is not negative. The spellings @10@, @100@ and @1e1@ are
--- therefore integers, and @1.0@, @10e-1@ and @100e-2@ are refused. These are
--- exactly the spellings that Lean's JSON parser reads with exponent zero, which
--- @getInt?@ and @getNat?@ in the Lean decoder require.
+-- therefore integers, and @1.0@, @10e-1@ and @100e-2@ are refused. Lean's JSON
+-- parser reads these spellings with exponent zero, which @getInt?@ and
+-- @getNat?@ in the Lean decoder require. The two decoders differ at very large
+-- exponents only: the conversion to 'Integer' is aeson's, and it also refuses
+-- an exponent e greater than 1024, so @1e1025@ is refused here although Lean,
+-- which bounds no exponent, reads it as an integer. Every spelling that this
+-- decoder accepts is one that Lean reads with exponent zero.
 instance FromJSON Halfspace where
   parseJSON = withObject "Halfspace" $ \o -> do
     exactKeys "Halfspace" ["weights", "atLeast"] o

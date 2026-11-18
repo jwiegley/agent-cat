@@ -1897,10 +1897,10 @@ triageProgram =
 @end verbatim
 @c END SOURCE
 
-The first test routes a team answer that means nothing to a person.  A ticket
-that is most likely a billing ticket goes to the refund desk when the customer
-asks for money back with a chance of at least 0.9, and to the billing desk
-otherwise.  Any other ticket goes to the on-call person when its expected
+The first test routes a team answer that means nothing to the triage desk.  A
+ticket that is most likely a billing ticket goes to the refund desk when the
+customer asks for money back with a chance of at least 0.9, and to the billing
+desk otherwise.  Any other ticket goes to the on-call desk when its expected
 urgency is at least the rank of @code{Soon}, and to the support desk otherwise.
 @code{agentic-run plan triage} reports the level @code{branch} and eight ask
 nodes.  Each of the five paths asks the three decisions and one desk, so every
@@ -1953,7 +1953,9 @@ backend @code{decisions:system-one} or @code{decisions:openai} and an
 @code{endpoint}.  Section 5.4 of @file{doc/model-routing-v2.md} states its
 fields, its URL rule, and the local runners that it reaches.  Before a run
 starts, the runner refuses a question that reaches a decisions backend unless
-@code{decide} asks it.  @file{doc/research/decision-models.md} records the
+@code{decide} asks it.  A question behind a dynamic continuation is invisible to
+that check, and the decisions engine refuses it when it is asked.
+@file{doc/research/decision-models.md} records the
 vendor APIs and the details that no primary source confirms.
 
 @section Bounded revision
@@ -3410,7 +3412,10 @@ refusal of a constant test.
 @c COVER API Agentic.Workflow.levelAtLeast author
 @item levelAtLeast level decision
 Flag source for the test that the expected level is at least the rank of
-@code{level}.  The lowest level raises a value-level error.
+@code{level}, which is the position of its option name among the fields of the
+decision record.  It raises a value-level error when the option names of the
+type are not the field names of the record, and when @code{level} names the
+first field of the record, because every distribution reaches that level.
 
 @c COVER API Agentic.Workflow.mostLikely author
 @item mostLikely option decision

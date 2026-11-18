@@ -81,6 +81,7 @@ module Agentic.Route
 
     -- * What the command line said
     parseBackend,
+    parseConfiguredBackend,
     parseRoute,
     backendSpelling,
     decisionsDefaultRefusal,
@@ -169,11 +170,14 @@ schemeWord = \case
 -- (@acp:C:\\adapters\\x@ on a machine that spells paths that way). Splitting
 -- anywhere else would make a legal name unnameable.
 --
--- Every failure of the scheme is one refusal, naming the three shapes,
--- because everything that is not one of them is the same mistake: the
--- operator has written something this run cannot start or send to, and what
--- they need is the things they may write instead. A @decisions:@ value that
--- names no dialect takes its own refusal, which names the dialects.
+-- Every failure of the scheme is one refusal, because everything that is not
+-- one of the shapes is the same mistake: the operator has written something
+-- this run cannot start or send to, and what they need is the things they may
+-- write instead. This parser serves @--route@, which can name only an @acp:@
+-- or a @deck:@ backend, so its refusal names those two shapes. A @decisions:@
+-- value that names no dialect takes its own refusal, which names the dialects.
+-- 'parseConfiguredBackend' is the same grammar for a routing file, whose
+-- refusal also names the @decisions:@ shape.
 --
 -- __Surrounding whitespace is not part of either half__, and stripping it is a
 -- refusal and not a convenience. No adapter is named @\" \"@ and no session is
@@ -185,7 +189,28 @@ schemeWord = \case
 -- it is not a usage error. Trimmed, it is exactly the refusal @acp:@ gets,
 -- arriving where every other malformed shape does.
 parseBackend :: Text -> Either Text Backend
-parseBackend spec = case T.breakOn ":" spec of
+parseBackend = parseBackendWith routeShapes
+  where
+    routeShapes spec =
+      "unknown backend '"
+        <> spec
+        <> "' in --route: a backend is acp:<adapter> (start an adapter of this run's own) or deck:<id> (send to a live agent-deck session)"
+
+-- | 'parseBackend' for a backend that a routing file names. The grammar is the
+-- same, and the refusal of an unknown scheme names the three shapes that a
+-- routing file may write.
+parseConfiguredBackend :: Text -> Either Text Backend
+parseConfiguredBackend = parseBackendWith fileShapes
+  where
+    fileShapes spec =
+      "unknown backend '"
+        <> spec
+        <> "' in routing configuration: a backend is acp:<adapter> (start an adapter of this run's own), deck:<id> (send to a live agent-deck session) or decisions:<dialect> (send to a decisions endpoint that version-2 routing configuration defines)"
+
+-- | The grammar of 'parseBackend' and 'parseConfiguredBackend', with the
+-- refusal of an unknown scheme as a parameter.
+parseBackendWith :: (Text -> Text) -> Text -> Either Text Backend
+parseBackendWith unknownShape spec = case T.breakOn ":" spec of
   (scheme, rest)
     | Just raw <- T.stripPrefix ":" rest,
       let value = T.strip raw,
@@ -197,11 +222,7 @@ parseBackend spec = case T.breakOn ":" spec of
           _ -> unknown
   _ -> unknown
   where
-    unknown =
-      Left $
-        "unknown backend '"
-          <> spec
-          <> "' in --route: a backend is acp:<adapter> (start an adapter of this run's own), deck:<id> (send to a live agent-deck session) or decisions:<dialect> (send to a decisions endpoint that version-2 routing configuration defines)"
+    unknown = Left (unknownShape spec)
     unknownDialect value =
       Left $
         "unknown decisions dialect '"
