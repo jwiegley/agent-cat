@@ -121,6 +121,13 @@ import qualified Data.Vector as V
 -- @Decider.run@ from @Agentic/Core/Text.lean@'s primitives; here the type and
 -- its run travel together and the codec imports them, which is the same one
 -- table with the import arrow the only way round it can go.
+--
+-- A weighing's region is a list of 'Halfspace's from "Agentic.DSL.Decision",
+-- imported together with its codec. Lean declares @Region.Halfspace@ in
+-- @Agentic/Core/Region.lean@ and gives it a hand-written codec in
+-- @bisim/lean/Conformance.lean@, and "Agentic.DSL.Decision" writes the same
+-- bytes, so the 'RawRhs' codec here writes and reads a region through it.
+import Agentic.DSL.Decision (Halfspace)
 import Agentic.Schema (Code (..), SomeCode (..), codeName, codeOfName)
 import Agentic.Schema.Json (codeFromJson, codeToJson)
 import Agentic.Text (Decider (..), deciderName, deciderOfName)
@@ -313,7 +320,7 @@ instance FromJSON RawTarget where
 
 -- | The models that may answer a pinned question: the one the author named,
 -- and the ones the runner may fall back to, in the order they are tried (D6,
--- @Agentic\/Core\/Dsl\/Syntax.lean:189@).
+-- @Agentic\/Core\/Dsl\/Syntax.lean:190@).
 --
 -- A structure and not a @[Text]@, so that \"pinned but empty\" is
 -- unrepresentable and no new guard is owed; and a /payload/ of the existing
@@ -417,7 +424,8 @@ instance FromJSON TextMember where
     TextMember <$> o .:: "name" <*> o .:: "ask"
 
 -- | A clause-position source: one question, a panel of them, a text panel, a
--- decision about text already in hand, or a call of a function.
+-- decision about text already in hand, a test of a decision record already in
+-- hand, or a call of a function.
 data RawRhs
   = RhsAsk !RawAsk
   | RhsPanel ![RawAsk] !Pos
@@ -432,6 +440,12 @@ data RawRhs
     -- program text__ — never a 'Prompt' — because a needle a model could author
     -- is a test a model chooses, which is not a decider.
     RhsDecide !Decider !Text ![Text] !Pos
+  | -- | @weigh x path R@: a pure test of the decision record at the field
+    -- path @path@ inside the structured answer bound to @x@, answering
+    -- @flag@. It denotes membership of the record in R: the record is a
+    -- distribution up to scale, and every half-space of R holds on it. Like a
+    -- decider it asks nothing, and its region is literal program text.
+    RhsWeigh !Text ![Text] ![Halfspace] !Pos
   | RhsCall !Text ![RawArg] !Pos
   deriving (Eq, Show)
 
@@ -448,6 +462,14 @@ instance ToJSON RawRhs where
           "needles" .= ws,
           "pos" .= pos
         ]
+    RhsWeigh x path region pos ->
+      ctorObj
+        "weigh"
+        [ "subject" .= x,
+          "path" .= path,
+          "region" .= region,
+          "pos" .= pos
+        ]
     RhsCall f as pos -> ctorObj "call" ["fn" .= f, "args" .= as, "pos" .= pos]
 
 instance FromJSON RawRhs where
@@ -460,6 +482,12 @@ instance FromJSON RawRhs where
         <$> (deciderField =<< o .:: "decider")
         <*> o .:: "subject"
         <*> o .:: "needles"
+        <*> o .:: "pos"
+    "weigh" ->
+      RhsWeigh
+        <$> o .:: "subject"
+        <*> o .:: "path"
+        <*> o .:: "region"
         <*> o .:: "pos"
     "call" -> RhsCall <$> o .:: "fn" <*> o .:: "args" <*> o .:: "pos"
     _ -> unknownCtor "RawRhs" tag
@@ -481,6 +509,7 @@ rawRhsPos = \case
   RhsPanel _ p -> p
   RhsPanelText _ p -> p
   RhsDecide _ _ _ p -> p
+  RhsWeigh _ _ _ p -> p
   RhsCall _ _ p -> p
 
 -- ---------------------------------------------------------------------------

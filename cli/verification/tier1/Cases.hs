@@ -37,7 +37,7 @@
 --   * @vector-005@ (served by on a tool) has no constructor, and neither does
 --     @battery-218@ (served by on a tool that runs a command);
 --   * @battery-212@ and @battery-213@ (a decider with no needles, and with an
---     empty one) are refused by 'Agentic.Workflow.decide' at the value level
+--     empty one) are refused by 'Agentic.Workflow.matches' at the value level
 --     and are not reachable through 'Agentic.Builder.decide'\'s
 --     'Data.List.NonEmpty.NonEmpty' at all;
 --   * @battery-203@ and @battery-204@ (two members of one name, and a label
@@ -46,6 +46,11 @@
 --     bad one;
 --   * @battery-215@ (a decider whose subject is not text) is a type error,
 --     because 'Agentic.Builder.decide' takes a @V h \'CodeText@;
+--   * @decision-007@ (a weighing whose subject answers text) is a type error,
+--     because 'Agentic.Builder.weigh' takes a @V h (\'CodeStructured sch)@,
+--     and @decision-008@ to @decision-011@ (a weight on a name that is not an
+--     option, an option named twice in one half-space, and two paths that name
+--     no number record) are refusals, which no case here can rebuild;
 --   * every @unbound@ / @freshName@ / kind refusal is a type error.
 --
 -- tier0 already replays all of them through "Agentic.Guards".
@@ -103,13 +108,16 @@ import Agentic.Builder
     revisingCase,
     revisingOnCase,
     stop,
+    weigh,
   )
 import Agentic.DSL (Decider (LastNonEmptyLineIs))
+import Agentic.Plan.Decision (Halfspace (Halfspace))
 import Agentic.Schema
   ( SCode (SStructured),
-    Schema (SchemaInteger, SchemaObject, SchemaProperty, SchemaString),
+    Schema (SchemaInteger, SchemaNumber, SchemaObject, SchemaProperty, SchemaString),
     SchemaWitness,
     schemaInteger,
+    schemaNumber,
     schemaObject,
     schemaProperty,
     schemaString,
@@ -181,7 +189,17 @@ cases =
     -- the reading is worth a new entry rather than a rewritten arm.
     ( "semantic-008-an-exhausted-loop-yields-the-last-amendment-not-the-first-draft.json",
       semantic008W
-    )
+    ),
+    -- The checked decision vectors: a weighing of a decision record, read on
+    -- answers inside the cone, on its boundary and outside it. See the notes
+    -- at case 28.
+    ("decision-000-chance-at-least.json", decision000),
+    ("decision-001-most-likely-tie.json", decision001),
+    ("decision-002-expected-level.json", decision002),
+    ("decision-003-zero-record-reads-nothing.json", decision003),
+    ("decision-004-is-distribution.json", decision004),
+    ("decision-005-weigh-at-path.json", decision005),
+    ("decision-006-negative-entry-reads-nothing.json", decision006)
   ]
 
 type StructuredSchema =
@@ -220,10 +238,10 @@ schema000 =
 -- everything except the spelling of names, including which binding every hole,
 -- every scrutinee and every subject reads.
 --
--- __The other twenty-three keep their exact comparison.__ They are written in
+-- __The other thirty-one keep their exact comparison.__ They are written in
 -- "Agentic.Builder" with explicit names, and there is nothing about them to
 -- weaken. Every non-program comparand — the folds, the ask counts, the worlds,
--- the traces and the bills — stays exact for all twenty-nine; a trace never
+-- the traces and the bills — stays exact for all thirty-seven; a trace never
 -- carries a binder's name, which is why the yield vector's whole point — the
 -- prompt @\"yielded: fix draft: thin\"@ in its unsettled arm — is pinned
 -- exactly even though its binders are not.
@@ -1063,3 +1081,227 @@ battery219 =
 
 -- (The two programs themselves are in "Example.Harden"; the list at the head
 -- of this module names them directly.)
+
+-- ---------------------------------------------------------------------------
+-- 28 to 34. decision-000 to decision-006 — weighing a decision
+-- ---------------------------------------------------------------------------
+
+-- $decisions
+--
+-- A decision is an ordinary question at a structured code whose schema is a
+-- record of numbers, one per option, and a weighing is the pure test
+-- @weigh x path R@ of the record at @path@ against the region R. It reads
+-- true exactly when the record lies in the cone C(T), every entry non-negative
+-- and the total positive, and every half-space (w, θ) of R holds
+-- homogeneously, ⟨w,v⟩ ≥ θ·Σv. Like a decider it is a @ret@, so it asks
+-- nothing and leaves no node, and each program below asks one question and
+-- one act on every path.
+--
+-- The worlds are the cases. Each entry answers the decision schema with
+-- records chosen to put the test inside its half-space, outside it, on its
+-- boundary, at the zero record and at a negative entry, and the branch each
+-- world takes is pinned by its trace.
+
+-- | The record ℚ^T of a triage decision over the options @billing@, @outage@
+-- and @other@, in option order.
+type Triage =
+  'SchemaProperty
+    "billing"
+    'SchemaNumber
+    ('SchemaProperty "outage" 'SchemaNumber ('SchemaProperty "other" 'SchemaNumber 'SchemaObject))
+
+triage :: SchemaWitness Triage
+triage =
+  schemaProperty @"billing" schemaNumber $
+    schemaProperty @"outage" schemaNumber $
+      schemaProperty @"other" schemaNumber schemaObject
+
+-- | The record ℚ^T of a scale decision over the ordered levels @later@,
+-- @soon@ and @now@, of ranks 0, 1 and 2.
+type Urgency =
+  'SchemaProperty
+    "later"
+    'SchemaNumber
+    ('SchemaProperty "soon" 'SchemaNumber ('SchemaProperty "now" 'SchemaNumber 'SchemaObject))
+
+urgency :: SchemaWitness Urgency
+urgency =
+  schemaProperty @"later" schemaNumber $
+    schemaProperty @"soon" schemaNumber $
+      schemaProperty @"now" schemaNumber schemaObject
+
+-- | A structured answer of the product @Text × ℚ^T@, whose triage record lies
+-- at the field path @["triage"]@.
+type TriageReport =
+  'SchemaProperty "summary" 'SchemaString ('SchemaProperty "triage" Triage 'SchemaObject)
+
+triageReport :: SchemaWitness TriageReport
+triageReport =
+  schemaProperty @"summary" schemaString $
+    schemaProperty @"triage" triage schemaObject
+
+-- |
+-- > t : Triage <- ask model "triage" "classify the ticket"
+-- > b <- weigh t [] [chance [billing] >= 1/2]
+-- > if b { ask tool "route" "billing desk" } else { ask tool "route" "general queue" }
+--
+-- Three worlds: the record @(3, 1, 0)@ reads 3/4 and takes the billing desk,
+-- @(1, 1, 2)@ reads 1/4 and takes the general queue, and @(1, 1, 0)@ reads
+-- exactly 1/2, on the boundary, and takes the billing desk.
+decision000 :: Program
+decision000 =
+  program [] $
+    bindAs @"t" @('CodeStructured Triage)
+      (oneAt (SStructured triage) (askModel "triage" [lit "classify the ticket"]))
+      $ \t ->
+        bind @"b" @'CodeFlag (weigh triage t [] [Halfspace [("billing", 1)] (1 / 2)]) $ \b ->
+          ifFlag
+            b
+            (act (askTool "route" [lit "billing desk"]) stop)
+            (act (askTool "route" [lit "general queue"]) stop)
+
+-- |
+-- > t : Triage <- ask model "triage" "classify the ticket"
+-- > b <- weigh t [] (mostLikely billing)
+-- > o <- weigh t [] (mostLikely outage)
+-- > if b { if o { ask tool "log" "billing and outage" } else { ask tool "log" "billing" } }
+-- > else { if o { ask tool "log" "outage" } else { ask tool "log" "neither" } }
+--
+-- An option is most likely when its chance is at least every other option's,
+-- which is one half-space per other option. Two worlds: @(2, 2, 1)@ ties the
+-- two options and both tests hold, and @(2, 1, 1)@ holds for @billing@ alone.
+decision001 :: Program
+decision001 =
+  program [] $
+    bindAs @"t" @('CodeStructured Triage)
+      (oneAt (SStructured triage) (askModel "triage" [lit "classify the ticket"]))
+      $ \t ->
+        bind @"b" @'CodeFlag (weigh triage t [] (mostLikely "billing" ["outage", "other"])) $ \b ->
+          bind @"o" @'CodeFlag (weigh triage t [] (mostLikely "outage" ["billing", "other"])) $ \o ->
+            ifFlag
+              b
+              ( ifFlag
+                  o
+                  (act (askTool "log" [lit "billing and outage"]) stop)
+                  (act (askTool "log" [lit "billing"]) stop)
+              )
+              ( ifFlag
+                  o
+                  (act (askTool "log" [lit "outage"]) stop)
+                  (act (askTool "log" [lit "neither"]) stop)
+              )
+  where
+    mostLikely option others = [Halfspace [(option, 1), (other, -1)] 0 | other <- others]
+
+-- |
+-- > u : Urgency <- ask model "triage" "how urgent is the ticket"
+-- > s <- weigh u [] [expectedLevel >= 1]
+-- > if s { ask person "owner" "page the on-call" } else { ask tool "log" "queue it" }
+--
+-- The expected level is the expectation of the rank, so its weights are the
+-- ranks 0, 1 and 2. Two worlds: @(1, 0, 1)@ has mean level exactly 1 and
+-- pages the on-call, and @(2, 1, 0)@ has mean level 1/3 and queues the
+-- ticket.
+decision002 :: Program
+decision002 =
+  program [] $
+    bindAs @"u" @('CodeStructured Urgency)
+      (oneAt (SStructured urgency) (askModel "triage" [lit "how urgent is the ticket"]))
+      $ \u ->
+        bind @"s" @'CodeFlag (weigh urgency u [] [Halfspace [("later", 0), ("soon", 1), ("now", 2)] 1]) $ \s ->
+          ifFlag
+            s
+            (act (askPerson "owner" [lit "page the on-call"]) stop)
+            (act (askTool "log" [lit "queue it"]) stop)
+
+-- |
+-- > t : Triage <- ask model "triage" "classify the ticket"
+-- > d <- weigh t [] []
+-- > c <- weigh t [] [chance [billing, outage, other] >= 0]
+-- > if d { ask tool "log" "a distribution" }
+-- > else { if c { ask tool "log" "a chance" } else { ask tool "log" "nothing" } }
+--
+-- One world, which answers the zero record @(0, 0, 0)@. The zero record lies
+-- outside the cone, so both tests are false, including the second, whose
+-- half-space holds on every distribution.
+decision003 :: Program
+decision003 =
+  program [] $
+    bindAs @"t" @('CodeStructured Triage)
+      (oneAt (SStructured triage) (askModel "triage" [lit "classify the ticket"]))
+      $ \t ->
+        bind @"d" @'CodeFlag (weigh triage t [] []) $ \d ->
+          bind @"c" @'CodeFlag
+            (weigh triage t [] [Halfspace [("billing", 1), ("outage", 1), ("other", 1)] 0])
+            $ \c ->
+              ifFlag
+                d
+                (act (askTool "log" [lit "a distribution"]) stop)
+                ( ifFlag
+                    c
+                    (act (askTool "log" [lit "a chance"]) stop)
+                    (act (askTool "log" [lit "nothing"]) stop)
+                )
+
+-- |
+-- > t : Triage <- ask model "triage" "classify the ticket"
+-- > d <- weigh t [] []
+-- > if d { ask tool "route" "by the answer" } else { ask person "owner" "classify by hand" }
+--
+-- The empty region is the cone itself, so the test reads "the answer is a
+-- distribution". Two worlds: @(0, 0, 5)@ is one, and the explicit zero record
+-- @(0, 0, 0)@ is not and is routed to a person.
+decision004 :: Program
+decision004 =
+  program [] $
+    bindAs @"t" @('CodeStructured Triage)
+      (oneAt (SStructured triage) (askModel "triage" [lit "classify the ticket"]))
+      $ \t ->
+        bind @"d" @'CodeFlag (weigh triage t [] []) $ \d ->
+          ifFlag
+            d
+            (act (askTool "route" [lit "by the answer"]) stop)
+            (act (askPerson "owner" [lit "classify by hand"]) stop)
+
+-- |
+-- > r : TriageReport <- ask model "triage" "summarize and classify the ticket"
+-- > o <- weigh r ["triage"] [chance [outage] >= 2/3]
+-- > if o { ask tool "page" "outage" } else { ask tool "log" "no outage" }
+--
+-- The record lies at the field path @["triage"]@, beside a text field that the
+-- weighing does not read. Two worlds: @(0, 2, 1)@ reads exactly 2/3 and pages,
+-- and @(1, 1, 1)@ reads 1/3 and logs.
+decision005 :: Program
+decision005 =
+  program [] $
+    bindAs @"r" @('CodeStructured TriageReport)
+      ( oneAt
+          (SStructured triageReport)
+          (askModel "triage" [lit "summarize and classify the ticket"])
+      )
+      $ \r ->
+        bind @"o" @'CodeFlag (weigh triageReport r ["triage"] [Halfspace [("outage", 1)] (2 / 3)]) $ \o ->
+          ifFlag
+            o
+            (act (askTool "page" [lit "outage"]) stop)
+            (act (askTool "log" [lit "no outage"]) stop)
+
+-- |
+-- > t : Triage <- ask model "triage" "classify the ticket"
+-- > b <- weigh t [] [chance [billing] >= 0]
+-- > if b { ask tool "route" "billing desk" } else { ask tool "log" "no reading" }
+--
+-- One world, which answers @(2, -1, 1)@. Its total is positive and its
+-- half-space holds homogeneously, since 0·2 ≤ 2, but the negative entry puts
+-- it outside the cone, so it reads as nothing and the test is false.
+decision006 :: Program
+decision006 =
+  program [] $
+    bindAs @"t" @('CodeStructured Triage)
+      (oneAt (SStructured triage) (askModel "triage" [lit "classify the ticket"]))
+      $ \t ->
+        bind @"b" @'CodeFlag (weigh triage t [] [Halfspace [("billing", 1)] 0]) $ \b ->
+          ifFlag
+            b
+            (act (askTool "route" [lit "billing desk"]) stop)
+            (act (askTool "log" [lit "no reading"]) stop)

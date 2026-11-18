@@ -59,12 +59,12 @@ import Agentic.DSL
 
 -- * The constants
 
--- | @Check.lean:631@. The comparison is @maxRevisions < n@, so the bound is
+-- | @Check.lean:720@. The comparison is @maxRevisions < n@, so the bound is
 -- inclusive: @n = 64@ is accepted and @n = 65@ refused.
 maxRevisions :: Integer
 maxRevisions = 64
 
--- | @Check.lean:1110@. Likewise @maxQuestions < n@: @4096@ accepted, @4097@
+-- | @Check.lean:1218@. Likewise @maxQuestions < n@: @4096@ accepted, @4097@
 -- refused.
 maxQuestions :: Integer
 maxQuestions = 4096
@@ -135,6 +135,8 @@ rhsAsks _ (RhsPanelText ms _) = fromIntegral (length ms)
 -- A decider asks nothing: its value is a `.ret`, and `Plan.graft_ret` leaves no
 -- node at all.
 rhsAsks _ (RhsDecide _ _ _ _) = 0
+-- A weighing asks nothing for the same reason: its value is a `.ret` too.
+rhsAsks _ (RhsWeigh _ _ _ _) = 0
 rhsAsks fns (RhsCall f _ _) = callAsks fns f
 
 -- | @bodyAsks@, verbatim. @callS@ is priced as @rhsAsks fns (.call f [] ⟨0,0⟩)@
@@ -202,7 +204,7 @@ askCounts prog = (blockAsks table (progMain prog), table)
 
 -- * The two traversal guards
 
--- | @askGuard@ (@Check.lean:340@): a @served by@ override names the model that
+-- | @askGuard@ (@Check.lean:373@): a @served by@ override names the model that
 -- serves a /model/ addressee, so it fires exactly when the override is present
 -- and the addressee is a tool or a person.
 askGuard :: RawAsk -> Maybe Refusal
@@ -212,7 +214,7 @@ askGuard (RawAsk (Just _) (RawTarget adr _) _ _) =
     _ -> Just (ServedBy, Nothing)
 askGuard _ = Nothing
 
--- | @rhsPlan@ (@Check.lean:478@). The emptiness test precedes the kind test,
+-- | @rhsPlan@ (@Check.lean:546@). The emptiness test precedes the kind test,
 -- so an empty panel bound at @text@ still refuses 'PanelEmpty'; a /non-empty/
 -- panel bound at @text@ refuses @other@, which is not ours to report. Members
 -- are then checked left to right (@checkMembers@). A call raises neither
@@ -226,6 +228,12 @@ askGuard _ = Nothing
 -- empty panel does. A @panelText@'s /label/ refusals (an invalid character, two
 -- members answering to one name) are @CheckError@s and classify as @other@,
 -- which is not ours to report.
+--
+-- A weighing raises no guard. Each of its refusals (a subject that is not a
+-- decision, a path that names no number record, a weight on a name that is not
+-- an option, an option named twice in one half-space) needs the subject's
+-- schema, which belongs to the typing judgment, and the oracle's @classify@
+-- maps every one of them to @other@.
 rhsGuard :: RawRhs -> Maybe Refusal
 rhsGuard (RhsAsk a) = askGuard a
 rhsGuard (RhsPanel [] _) = Just (PanelEmpty, Nothing)
@@ -235,6 +243,7 @@ rhsGuard (RhsPanelText ms _) = firstOf (map (askGuard . tmAsk) ms)
 rhsGuard (RhsDecide _ _ ws _)
   | null ws || any T.null ws = Just (DeciderEmpty, Nothing)
   | otherwise = Nothing
+rhsGuard RhsWeigh {} = Nothing
 rhsGuard RhsCall {} = Nothing
 
 -- | @checkBody@: statement by statement, each statement's own guards before
@@ -316,7 +325,7 @@ overRevised (RawCaseEnding _ _ _ _ s u a _) =
 --    the program budget and @checkBlock@. It therefore beats 'PanelEmpty' and
 --    'ServedBy' in @main@ whatever their relative source positions.
 --    (@checkBlock@ carries a second, byte-identical @maxRevisions@ refusal at
---    @Check.lean:614@ for hand-built entry points; @overRevised@ pre-empts it
+--    @Check.lean:774@ for hand-built entry points; @overRevised@ pre-empts it
 --    on every path through @checkProgram@, so it is not ported.)
 --
 -- 3. /The program-level budget fires before the block traversal./ An

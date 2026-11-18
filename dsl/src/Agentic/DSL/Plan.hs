@@ -571,13 +571,13 @@ endingOfVTag = \case
 -- @Agentic/Core/Dsl/Check.lean@ end to end, there are four sites that build a
 -- @case@ node and three tag types between them:
 --
--- * @if x { … } else { … }@ — @Check.lean:830@, @Plan.caseB@ at 'Bool'.
--- * @case v { approved … objected … no answer … }@ — @Check.lean:846@,
+-- * @if x { … } else { … }@ — @Check.lean:939@, @Plan.caseB@ at 'Bool'.
+-- * @case v { approved … objected … no answer … }@ — @Check.lean:955@,
 --   @Plan.caseV@ at 'VTag'.
 -- * the @revising@ unroll and its @settled@/@unsettled@ exit —
---   @Plan.lean:1056@ and @Check.lean:618@, @Plan.caseB@ at 'Bool' again.
+--   @Plan.lean:1056@ and @Check.lean:708@, @Plan.caseB@ at 'Bool' again.
 -- * the @revising on@ unroll's @caseV@ and its three-way exit —
---   @Plan.lean:1099@ and @Check.lean:618@, at 'VTag' and at 'Ending'.
+--   @Plan.lean:1099@ and @Check.lean:708@, at 'VTag' and at 'Ending'.
 --
 -- Nothing else; and @Check.lean:57@ records that no clause emits @Plan.dyn@, so
 -- the DSL never reaches the dynamic rung.
@@ -668,7 +668,7 @@ subP p s = case p of
 -- | @subP p subWk@: read a plan under one more binding.
 --
 -- This is what an @act@ statement does with its continuation
--- (@Check.lean:763@: @form (Plan.sub k Sub.wk)@) — the receipt is bound and then
+-- (@Check.lean:870@: @form (Plan.sub k Sub.wk)@) — the receipt is bound and then
 -- ignored, which still shifts every de Bruijn index after it.
 weakenP :: Plan g a -> Plan (c ': g) a
 weakenP p = subP p subWk
@@ -787,11 +787,11 @@ caseE e arms = PCase TEnding e arms
 -- >   ps.foldr (zipWith (· * ·)) (.ret (fun _ => 1))
 --
 -- Lean states this at any code carrying a @Monoid (El c)@ and installs that
--- instance __only__ at @.verdict@ (@Plan.lean:952@); @Check.lean:485@ admits a
+-- instance __only__ at @.verdict@ (@Plan.lean:952@); @Check.lean:555@ admits a
 -- panel only at @Code.verdict@. So the port is monomorphic and needs no class.
 --
 -- @panel [] = PRet (const verdictApprove)@ — Lean's @1@. The checker refuses an
--- empty panel (@Check.lean:484@) before this is ever reached, but the clause is
+-- empty panel (@Check.lean:552@) before this is ever reached, but the clause is
 -- the unit of the fold and must be written.
 panel :: [Plan g Verdict] -> Plan g Verdict
 panel = foldr (zipWithP verdictMul) (PRet (exprConst verdictApprove))
@@ -846,7 +846,7 @@ panelText =
 -- @n + 1@ checks and at most @n@ amendments, and never pays for a revision it
 -- does not check — which is what \"revise up to twice\" means in English.
 -- @n <= 0@ is the base clause. The checker refuses @n > 64@
--- (@Check.lean:631 maxRevisions@) before elaborating, so no bound on @n@ is
+-- (@Check.lean:720 maxRevisions@) before elaborating, so no bound on @n@ is
 -- enforced here.
 --
 -- The objections are threaded: @rev@ receives the artefact /and/ the verdict, so
