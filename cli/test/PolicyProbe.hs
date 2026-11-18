@@ -2285,10 +2285,10 @@ main = do
       ("deck:a:b", parseBackend "deck:notes: monday" == Right (BackendDeck "notes: monday")),
       ("decisions:system-one", parseBackend "decisions:system-one" == Right (BackendDecisions SystemOne)),
       ("decisions:openai", parseBackend "decisions:openai" == Right (BackendDecisions OpenAIDecisions)),
-      ( "unknown scheme names the three shapes",
+      ( "unknown scheme names both shapes",
         parseBackend "grpc:x"
           == Left
-            [wft|unknown backend 'grpc:x' in --route: a backend is acp:<adapter> (start an adapter of this run's own), deck:<id> (send to a live agent-deck session) or decisions:<dialect> (send to a decisions endpoint that version-2 routing configuration defines)|]
+            [wft|unknown backend 'grpc:x' in --route: a backend is acp:<adapter> (start an adapter of this run's own) or deck:<id> (send to a live agent-deck session)|]
       ),
       ( "an unknown decisions dialect names the dialects",
         parseBackend "decisions:anthropic"

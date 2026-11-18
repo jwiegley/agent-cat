@@ -341,6 +341,12 @@ decisionsProbes failures = do
       && isLeftContaining
         "endpoint timeout-ms is outside"
         (decodeRoutingUserV2 (decisionsWith "timeout-ms: 60000" "timeout-ms: 600001"))
+  check failures "a routing file that names an unknown backend is refused with the three shapes" $
+    decodeRoutingUserV2 (decisionsWith "    backend: acp:codex\n" "    backend: grpc:x\n")
+      == Left "Error in $.engines.general: unknown backend 'grpc:x' in routing configuration: a backend is acp:<adapter> (start an adapter of this run's own), deck:<id> (send to a live agent-deck session) or decisions:<dialect> (send to a decisions endpoint that version-2 routing configuration defines)"
+      && isLeftContaining
+        "unknown backend 'grpc:x' in routing configuration: a backend is acp:<adapter> (start an adapter of this run's own), deck:<id> (send to a live agent-deck session) or decisions:<dialect> (send to a decisions endpoint that version-2 routing configuration defines)"
+        (decodeRoutingConfig "version: 1\nrouters:\n  - name: d\n    backend: grpc:x\n    provider: p\nprofiles: []\n")
   check failures "version-1 routing refuses a decisions backend" $
     isLeftContaining
       "a decisions engine needs routing configuration version 2"
@@ -392,6 +398,12 @@ decisionsProbes failures = do
         isLeftContaining
           "takes no thinking level and no output limit"
           (resolveRoutingConfigV2 selected Map.empty (Map.singleton "thinker" "alpha-model") (routesCovered []) (Map.singleton "thinker" []))
+      check failures "--realize cannot move a rung with unwritten settings onto a model of another engine" $
+        either
+          (== "routing axis 'primary': realization of model 'general-model' needs both thinking and max-output, and the rung of decisions model 'alpha-model' writes no max-output")
+          (const False)
+          (resolveRoutingConfigV2 selected Map.empty (Map.singleton "primary" "general-model") (routesCovered []) (Map.singleton "primary" []))
+          && either (const False) (const True) (resolveRoutingConfigV2 selected Map.empty (Map.singleton "primary" "beta-model") (routesCovered []) (Map.singleton "primary" []))
 
 main :: IO ()
 main = do
@@ -464,6 +476,10 @@ main = do
         (isLeftContaining "literal loopback" . decodeRoutingUserV2 . publicCatalogueYaml)
         ["127.999.999.999", "127.....", "127.0.0", "127.0.0.256"]
 
+  check failures "a rung of an unselected persona that omits thinking is refused at decode" $
+    decodeRoutingUserV2 (BS.pack (T.unpack (T.replace "            thinking: xhigh\n" "" (T.pack (BS.unpack userYaml)))))
+      == Left "persona 'work' profile 'deep-thinker': realization of model 'sol' needs both thinking and max-output"
+
   case decodeRoutingUserV2 userYaml of
     Left problem -> check failures ("valid v2 user document decodes: " <> problem) False
     Right user -> do
@@ -490,6 +506,19 @@ main = do
               && fmap selectedPersonaName env == Right "work"
               && fmap selectedPersonaName projectSelected == Right "personal"
               && fmap selectedPersonaName fallback == Right "personal"
+          check failures "a project rung that omits thinking is refused whichever persona is selected" $
+            case decodeRoutingProjectV2 (BS.pack (T.unpack (T.replace "        thinking: high\n" "" (T.pack (BS.unpack projectYaml))))) of
+              Right lacking ->
+                all
+                  ( either
+                      (== "persona 'personal' profile 'deep-thinker': realization of model 'opus' needs both thinking and max-output")
+                      (const False)
+                  )
+                  [ selectRoutingPersona user (Just "work") Nothing (Just lacking),
+                    selectRoutingPersona user Nothing (Just "work") (Just lacking),
+                    selectRoutingPersona user Nothing Nothing (Just lacking)
+                  ]
+              Left _ -> False
           check failures "project profile replacement stays within persona model allowlist" $
             case projectSelected of
               Right selected ->

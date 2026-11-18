@@ -31,6 +31,7 @@ module Agentic.RoutingConfig.V2
     sensitiveName,
     scalarV2Option,
     validateDecisionsRealization,
+    decisionsDialectOf,
     maxCatalogueBytes,
     maxCatalogueUrlBytes,
     maxCatalogueQueryBytes,
@@ -49,7 +50,7 @@ where
 
 import Agentic.Decisions (Dialect, Limits (..), defaultLimits, reservedBodyKeys)
 import Agentic.Engine (Thinking (ThinkOff))
-import Agentic.Route (Backend (..), parseBackend)
+import Agentic.Route (Backend (..), parseConfiguredBackend)
 import Control.Monad (forM_, unless, when)
 import Data.Aeson
   ( FromJSON (parseJSON),
@@ -212,6 +213,9 @@ data SelectedRoutingV2 = SelectedRoutingV2
   deriving (Eq, Show)
 
 maxCatalogueBytes, maxCatalogueUrlBytes, maxCatalogueQueryBytes, maxCatalogueQueryItems, maxCatalogueTimeoutMs, maxCatalogueHeaders, maxCatalogueHeaderValueBytes, maxCatalogueHeaderBytes, maxCataloguePages, maxCatalogueModels, maxModelIdBytes :: Int
+
+-- | The bounds on a decisions endpoint's @timeout-ms@ and @max-bytes@.
+maxEndpointTimeoutMs, maxEndpointBytes :: Int
 maxCatalogueBytes = 4 * 1024 * 1024
 maxCatalogueUrlBytes = 8192
 maxCatalogueQueryBytes = 4096
@@ -223,9 +227,6 @@ maxCatalogueHeaderBytes = 61440
 maxCataloguePages = 100
 maxCatalogueModels = 10000
 maxModelIdBytes = 512
-
--- | The bounds on a decisions endpoint's @timeout-ms@ and @max-bytes@.
-maxEndpointTimeoutMs, maxEndpointBytes :: Int
 maxEndpointTimeoutMs = 600000
 maxEndpointBytes = 4 * 1024 * 1024
 
@@ -311,7 +312,7 @@ instance FromJSON EngineDefinition where
   parseJSON = withObject "engine" $ \o -> do
     onlyKeys "engine" ["backend", "provider", "environment", "session-meta", "catalogue", "endpoint"] o
     backendText <- nonBlank "engine backend" =<< o .: "backend"
-    backend <- either (fail . T.unpack) pure (parseBackend backendText)
+    backend <- either (fail . T.unpack) pure (parseConfiguredBackend backendText)
     provider <- nonBlank "engine provider" =<< o .: "provider"
     environment <- fromMaybe Map.empty <$> o .:? "environment"
     sessionMetadata <- maybe (pure Map.empty) parseJSON (KeyMap.lookup "session-meta" o)
@@ -414,9 +415,13 @@ decodeRoutingProjectV2 bytes = do
 
 selectRoutingPersona :: RoutingConfigV2 -> Maybe Text -> Maybe Text -> Maybe ProjectRoutingV2 -> Either Text SelectedRoutingV2
 selectRoutingPersona config commandLine environment project = do
-  forM_ project $ \layer ->
-    unless (projectRoutingPersona layer `Map.member` routingV2Personas config) $
-      Left ("project selects unknown persona '" <> projectRoutingPersona layer <> "'")
+  -- The project layer is checked against the persona that it names whichever
+  -- persona is selected, so a file that one selection accepts no other
+  -- selection refuses.
+  forM_ project $ \layer -> do
+    let named = projectRoutingPersona layer
+    persona <- maybe (Left ("project selects unknown persona '" <> named <> "'")) Right (Map.lookup named (routingV2Personas config))
+    applyProjectProfiles config named persona (projectRoutingProfiles layer)
   let (name, source) = case commandLine of
         Just value -> (value, PersonaFromCommandLine)
         Nothing -> case environment of

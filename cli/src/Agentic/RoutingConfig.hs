@@ -85,7 +85,7 @@ import Agentic.RoutingSecrets
 import Agentic.Route
   ( Backend (BackendDecisions),
     Routes,
-    parseBackend,
+    parseConfiguredBackend,
     routeDefault,
     routeNamed,
     routes,
@@ -225,7 +225,7 @@ instance FromJSON Router where
     onlyKeys "router" ["name", "backend", "provider"] o
     name <- nonBlank "router name" =<< o .: "name"
     backendText <- nonBlank "router backend" =<< o .: "backend"
-    backend <- either (fail . T.unpack) pure (parseBackend backendText)
+    backend <- either (fail . T.unpack) pure (parseConfiguredBackend backendText)
     case backend of
       BackendDecisions _ -> fail "a decisions engine needs routing configuration version 2"
       _ -> pure ()
@@ -459,7 +459,8 @@ expandRoutingConfigV2 selected overrides commandRoutes authored = do
     persona = selectedPersona selected
 
     applyAlias axis target = do
-      let alias = Map.findWithDefault (realizationModel (resolvedSpec target)) axis overrides
+      let original = realizationModel (resolvedSpec target)
+          alias = Map.findWithDefault original axis overrides
       (model, engine) <- modelAndEngine config persona (selectedPersonaName selected) alias
       case engineBackend engine of
         BackendDecisions dialect ->
@@ -474,7 +475,19 @@ expandRoutingConfigV2 selected overrides commandRoutes authored = do
                     (realizationMaxOutput spec0)
                     (realizationOptions spec0)
                 )
-        _ -> pure ()
+        -- Validation refuses a written max-output on a rung of a decisions
+        -- model, so such a rung carries settings that nobody wrote, and a
+        -- model of another engine cannot take it.
+        _ -> forM_ (decisionsDialectOf config original) $ \_ ->
+          Left
+            ( "routing axis '"
+                <> axis
+                <> "': realization of model '"
+                <> alias
+                <> "' needs both thinking and max-output, and the rung of decisions model '"
+                <> original
+                <> "' writes no max-output"
+            )
       let router =
             Router
               { routerName = concreteModelEngine model,
