@@ -506,7 +506,8 @@ engineRequest code request =
         SAck -> Engine.ReceiptAnswer
         SStructured _ -> Engine.StructuredAnswer,
       enginePrompt = renderRequest code request,
-      engineRequiresCompletedTurn = requiresCompletedTurn request
+      engineRequiresCompletedTurn = requiresCompletedTurn request,
+      engineDecision = Nothing
     }
   where
     question = reqQuestion request

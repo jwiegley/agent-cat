@@ -191,7 +191,7 @@ bodyRoundTrips = do
   exchange "structured" ledgerCode structured [(123456789012345678901234567890123 % 1000, (unicode, ((), ())))]
   check "flag false is JSON false in its record" (answerBody P.SFlag False == Bool False)
 
-  let request = E.EngineRequest "acp:claude" (Just "opus") Nothing (-12345678901234567890) E.Effect E.StructuredAnswer unicode True
+  let request = E.EngineRequest "acp:claude" (Just "opus") Nothing (-12345678901234567890) E.Effect E.StructuredAnswer unicode True Nothing
   body "engine-start" FlowEngineStart engineStartBody engineStartFromBody request
   body "engine-start without axes" FlowEngineStart engineStartBody engineStartFromBody request {E.engineModelAxis = Nothing, E.engineRequiresCompletedTurn = False}
   body "turn" FlowTurn turnBody turnFromBody unicode

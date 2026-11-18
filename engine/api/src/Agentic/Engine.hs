@@ -48,6 +48,7 @@ module Agentic.Engine
 where
 
 import Control.Concurrent.STM (TMVar, TVar, newTMVarIO, newTVarIO)
+import Agentic.Engine.Decision (EngineDecision, decodeEngineDecision, encodeEngineDecision)
 import Control.Exception (Exception (displayException))
 import Data.Aeson (FromJSON (parseJSON), Key, Value (..), object, withText, (.=))
 import qualified Data.Aeson.Key as Key
@@ -128,7 +129,10 @@ steeringName NextBoundary = "next-boundary"
 type EngineSteerer = EngineSteering -> Text -> IO (Either Text ())
 
 -- | Runtime-independent request data. The runtime alone translates a typed plan
--- request into this representation.
+-- request into this representation. 'engineDecision' describes the question
+-- that 'enginePrompt' asks in words when the request is a decision question.
+-- It demands no capability: an engine without native support answers
+-- 'enginePrompt'.
 data EngineRequest = EngineRequest
   { engineTarget :: !Text,
     engineModelAxis :: !(Maybe Text),
@@ -137,7 +141,8 @@ data EngineRequest = EngineRequest
     engineIntent :: !EngineIntent,
     engineAnswerKind :: !EngineAnswerKind,
     enginePrompt :: !Text,
-    engineRequiresCompletedTurn :: !Bool
+    engineRequiresCompletedTurn :: !Bool,
+    engineDecision :: !(Maybe EngineDecision)
   }
   deriving (Eq, Show)
 
@@ -258,34 +263,58 @@ concurrentEngine = ConcurrentEngine
 -- Versioned value codecs
 -- ---------------------------------------------------------------------------
 
--- | The version that every value codec below writes and the only version that
--- it reads. Each encoded value is a JSON object whose field @version@ holds it.
+-- | The version that every value codec below writes and reads. Each encoded
+-- value is a JSON object whose field @version@ holds it. The request codec
+-- alone also writes and reads 'engineDecisionRequestVersion', for a request
+-- that carries a decision.
 --
 -- Each decoder refuses a value that is not an object, a missing field, a field
 -- that the version does not define, a field of the wrong type and any other
--- version, so @decode (encode x) = Right x@ for every value. An 'Integer' is a
--- JSON string of canonical decimal digits, which keeps it exact at any size.
--- 'Text' is carried unchanged. Duplicate keys are the concern of the line
--- decoder that produced the 'Value'.
+-- version, so @decode (encode x) = Right x@ for every value whose decision, if
+-- any, is valid. An 'Integer' is a JSON string of canonical decimal digits,
+-- which keeps it exact at any size. 'Text' is carried unchanged. Duplicate keys
+-- are the concern of the line decoder that produced the 'Value'.
 engineCodecVersion :: Integer
 engineCodecVersion = 1
 
+-- | The request version that adds the field @decision@. A request without a
+-- decision is written at 'engineCodecVersion', byte for byte as before.
+engineDecisionRequestVersion :: Integer
+engineDecisionRequestVersion = 2
+
+-- | Writes version 1 with eight fields when 'engineDecision' is 'Nothing', and
+-- version 2 with the ninth field @decision@ when it holds a decision.
 encodeEngineRequest :: EngineRequest -> Value
 encodeEngineRequest request =
-  versioned
-    [ "target" .= engineTarget request,
-      "modelAxis" .= engineModelAxis request,
-      "modeAxis" .= engineModeAxis request,
-      "draw" .= integerText (engineDraw request),
-      "intent" .= intentName (engineIntent request),
-      "answerKind" .= answerKindName (engineAnswerKind request),
-      "prompt" .= enginePrompt request,
-      "requiresCompletedTurn" .= engineRequiresCompletedTurn request
-    ]
+  case engineDecision request of
+    Nothing -> versioned common
+    Just decision -> versionedAt engineDecisionRequestVersion (common <> ["decision" .= encodeEngineDecision decision])
+  where
+    common =
+      [ "target" .= engineTarget request,
+        "modelAxis" .= engineModelAxis request,
+        "modeAxis" .= engineModeAxis request,
+        "draw" .= integerText (engineDraw request),
+        "intent" .= intentName (engineIntent request),
+        "answerKind" .= answerKindName (engineAnswerKind request),
+        "prompt" .= enginePrompt request,
+        "requiresCompletedTurn" .= engineRequiresCompletedTurn request
+      ]
 
+-- | Accepts version 1 with exactly the eight common fields, which reads as no
+-- decision, and version 2 with exactly those fields and a @decision@ that
+-- 'decodeEngineDecision' accepts. A null decision is refused.
 decodeEngineRequest :: Value -> Either Text EngineRequest
 decodeEngineRequest value = do
-  fields <- versionedFields "engine request" ["target", "modelAxis", "modeAxis", "draw", "intent", "answerKind", "prompt", "requiresCompletedTurn"] value
+  (fields, decision) <-
+    if versionOf value == Just engineDecisionRequestVersion
+      then do
+        fields <- versionedFieldsAt engineDecisionRequestVersion "engine request" (common <> ["decision"]) value
+        decision <- field fields "decision" >>= decodeEngineDecision
+        pure (fields, Just decision)
+      else do
+        fields <- versionedFields "engine request" common value
+        pure (fields, Nothing)
   EngineRequest
     <$> textField fields "target"
     <*> optionalTextField fields "modelAxis"
@@ -295,6 +324,13 @@ decodeEngineRequest value = do
     <*> (textField fields "answerKind" >>= named "answer kind" answerKindName)
     <*> textField fields "prompt"
     <*> boolField fields "requiresCompletedTurn"
+    <*> pure decision
+  where
+    common = ["target", "modelAxis", "modeAxis", "draw", "intent", "answerKind", "prompt", "requiresCompletedTurn"]
+    versionOf (Object fields) = case KeyMap.lookup "version" fields of
+      Just (Number version) | version == fromInteger engineDecisionRequestVersion -> Just engineDecisionRequestVersion
+      _ -> Nothing
+    versionOf _ = Nothing
 
 encodeEngineResult :: EngineResult -> Value
 encodeEngineResult result =
@@ -364,15 +400,23 @@ decodeEnginePermissionReport value = do
 type Fields = KeyMap.KeyMap Value
 
 versioned :: [(Key, Value)] -> Value
-versioned fields = object (("version" .= engineCodecVersion) : fields)
+versioned = versionedAt engineCodecVersion
+
+versionedAt :: Integer -> [(Key, Value)] -> Value
+versionedAt version fields = object (("version" .= version) : fields)
 
 versionedFields :: Text -> [Key] -> Value -> Either Text Fields
-versionedFields what keys (Object fields) = do
+versionedFields = versionedFieldsAt engineCodecVersion
+
+-- | The fields of an object that holds exactly @version@ and the given keys,
+-- with @version@ equal to the given version.
+versionedFieldsAt :: Integer -> Text -> [Key] -> Value -> Either Text Fields
+versionedFieldsAt expected what keys (Object fields) = do
   _ <- exactFields what ("version" : keys) fields
   case KeyMap.lookup "version" fields of
-    Just (Number version) | version == fromInteger engineCodecVersion -> pure fields
-    _ -> Left (what <> " is not version " <> integerText engineCodecVersion)
-versionedFields what _ _ = Left (what <> " is not an object")
+    Just (Number version) | version == fromInteger expected -> pure fields
+    _ -> Left (what <> " is not version " <> integerText expected)
+versionedFieldsAt _ what _ _ = Left (what <> " is not an object")
 
 exactFields :: Text -> [Key] -> Fields -> Either Text Fields
 exactFields what keys fields =
