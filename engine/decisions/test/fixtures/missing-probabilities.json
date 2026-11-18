@@ -1,0 +1,1 @@
+{"id":"gen-dec-1763400000-noprobs","provider":"Together","model":"togethercomputer/tev1-4b-experimental","answers":{"decision":{"type":"choice","choice":"Billing","confidence":0.9}},"usage":{"input_tokens":70,"output_tokens":0,"cost":0.000001}}

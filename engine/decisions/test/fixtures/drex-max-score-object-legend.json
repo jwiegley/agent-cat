@@ -1,0 +1,1 @@
+{"model":"drex-max-v1","answers":{"decision":{"type":"score","score":1.5,"legend":{"0":"Routine","1":"Soon","2":"Urgent"},"probabilities":{"0":0.1,"1":0.3,"2":0.6},"confidence":0.4}},"usage":{"input_tokens":90,"output_tokens":120}}

@@ -1,0 +1,1 @@
+{"id":"gen-dec-1763400000-Jev1choice","provider":"TypeSafe","model":"typesafe/jev-1.14-20261014","answers":{"decision":{"type":"choice","choice":"Billing","confidence":0.82,"probabilities":{"Technical":0.11,"Billing":0.88,"Other":0.01}}},"usage":{"input_tokens":87,"output_tokens":0,"cost":0.0000036}}

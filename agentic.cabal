@@ -51,6 +51,7 @@ extra-source-files:
   engine/acp/test/retry_adapter.py
   engine/acp/test/steer_adapter.py
   engine/acp/test/PermissionReport.hs
+  engine/decisions/test/fixtures/*.json
   test/frontend_contract_probe.py
   test/answer_schema_probe.py
   test/answer_schema_evidence.py
@@ -171,6 +172,7 @@ library
     engine/acp/codex/src
     engine/acp/droid/src
     engine/agent-deck/src
+    engine/decisions/src
     cli/src
   exposed-modules:
     Agentic.Acp
@@ -182,6 +184,8 @@ library
     Agentic.Cli
     Agentic.Cost
     Agentic.Decision
+    Agentic.Decisions
+    Agentic.Decisions.Wire
     Agentic.DSL
     Agentic.DSL.Plan
     Agentic.Engine
@@ -474,6 +478,25 @@ test-suite engine-api-test
     , base
     , bytestring
     , text
+
+test-suite engine-decisions-test
+  import:           settings
+  type:             exitcode-stdio-1.0
+  hs-source-dirs:   engine/decisions/test
+  main-is:          Main.hs
+  other-modules:
+    EngineTests
+    WireTests
+  ghc-options:      -threaded
+  build-depends:
+    , aeson
+    , agentic
+    , base
+    , http-client
+    , http-types
+    , scientific
+    , wai
+    , warp
 
 test-suite runtime-contract-test
   import:           settings
