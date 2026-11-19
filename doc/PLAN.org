@@ -29147,14 +29147,14 @@ Add explicit runner workflow-to-persona selection while preserving unconfigured 
 #+begin_src json
 [
   {
-    "id": 816,
+    "id": 828,
     "issue_id": "acat-zz72",
     "author": "johnw",
     "text": "Hera implementation is complete in the Products clone: workflowPersonas selects native held preparation and preserves unconfigured Deck launches. Type check, 248 unit tests, all 22 native integration cases, then all 13 strengthened native routing cases (including actual cancel event and native-parent resume) passed. Original CLI: 7 non-live tests passed; helper: 36 passed; authoritative assets match. Documentation, 10 examples, routing-config, 23 ACP and 10 Deck scenarios passed. Complete policy first refused the caller because CABAL_BUILDDIR was absent; no test assertion was changed. A configured-root policy-only retry is active. Issue remains in progress until that gate and final fess closure. No publication/deployment or paid translation yet.",
     "created_at": "2026-10-26T18:48:55Z"
   },
   {
-    "id": 817,
+    "id": 829,
     "issue_id": "acat-zz72",
     "author": "johnw",
     "text": "Final direct fess and abstraction review found no unresolved routing implementation defect. Type check, 248 unit tests, 22 native integrations, remote transport, and 13 strengthened native routing cases passed. Docs, 10 examples, routing configuration, 23 ACP and 10 Deck scenarios passed. Complete policy coverage is assembled from source-identical component runs: all 684 captured files match; every one of 13 control modes passed at N1/N8; the unchanged remaining policy suffix exits 0, including artifact/history, schema, lineage, controls, frontend IO/session/export/codecs and refusal probes. Original invocation and cold-build timeout failures remain recorded. A standard per-run Cabal -j8 compiler configuration resolved cold compilation limits without changing -Werror, optimization, source capture, or test/build deadlines. Separate audit descendant-cleanup limitation recorded as discovered work. No paid translation or deployment claimed.",
