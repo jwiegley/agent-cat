@@ -8847,15 +8847,17 @@ Owner question (2026-08-16): the round-17/18 surface converges on Haskell. What 
 
 Found by the connection-research attack pass (acat-lean-haskell-connection-lhi): heardMatchesReplay is decide (r.trace = rep.transcript) where r.trace = r.heard.map (.event) — deliver appends one Heard per SURFACED question and Dlg.resume walks past questions the table already answers, so arrivals are memo-deduped — while rep.transcript = Plan.trace (worldOf table) p Env.nil replays EVERY event including repeats. On a run with any repeated question (billMemo < billFresh), the check is an assertion of falsehood. Repair options: compare heard against the dedup of the replay (respecting Lean dedup keeping the LAST occurrence), or record the intended invariant differently. Add an McpSmoke case with a repeated question to pin whichever is chosen.
 
-* TODO [#C] decide: an unpinned decision cannot reach a decisions engine, and routing-file runs refuse person desks
+* DONE [#C] decide: an unpinned decision cannot reach a decisions engine, and routing-file runs refuse person desks
 :PROPERTIES:
 :OBR_SCHEMA_VERSION: 17
 :ID:       acat-hqnd
 :LABELS:   []
 :ISSUE_TYPE: task
 :CREATED:  [2026-11-17 Tue 21:23]
-:MODIFIED: [2026-11-17 Tue 21:23]
+:MODIFIED: [2026-11-18 Wed 19:05]
 :CREATED_BY: johnw
+:FINISHED: [2026-11-18 Wed 19:05]
+:CLOSE_REASON: John chose the profile form: Agentic.Workflow.profile builds a model party served by a named profile, and workflow/example/Triage.hs uses it (3273d17). The person-desk half is tracked in acat-sxk9.
 :SOURCE_REPO: agent-cat
 :SOURCE_REPO_PATH: /Users/johnw/src/agent-cat
 :ORIGINAL_SIZE: 0
@@ -17734,6 +17736,35 @@ Discovered while verifying acat-3vv. `nix develop -c ./ci/deck.sh` completed sce
 :SOURCE_REPO: .
 :ORIGINAL_SIZE: 0
 :END:
+
+* TODO [#D] Routing-file runs refuse person questions (cli/src/Agentic/RequirePinned.hs), so Triage uses model desks where the design had persons
+:PROPERTIES:
+:OBR_SCHEMA_VERSION: 17
+:ID:       acat-sxk9
+:LABELS:   []
+:ISSUE_TYPE: task
+:CREATED:  [2026-11-18 Wed 19:05]
+:MODIFIED: [2026-11-18 Wed 19:05]
+:CREATED_BY: johnw
+:SOURCE_REPO: .
+:ORIGINAL_SIZE: 0
+:END:
+
+** Dependencies
+
+#+begin_src json
+[
+  {
+    "issue_id": "acat-sxk9",
+    "depends_on_id": "acat-hqnd",
+    "type": "discovered-from",
+    "created_at": "2026-11-19T03:05:11.497155Z",
+    "created_by": "johnw",
+    "metadata": "{}",
+    "thread_id": ""
+  }
+]
+#+end_src
 
 * TODO [#E] Handoff: state that the broker amendment was decided after the proposal    :documentation:
 :PROPERTIES:
