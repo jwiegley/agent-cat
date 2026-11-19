@@ -317,6 +317,7 @@ module Agentic.Workflow
     tool,
     person,
     servedBy,
+    profile,
     fallingBackTo,
     running,
     drawing,
@@ -647,6 +648,15 @@ person i = Party (AddrPerson i) Nothing 0
 -- check.
 servedBy :: Party 'IsModel -> Text -> Party 'IsModel
 servedBy p m = p {partyServe = Just (servedBy1 m)}
+
+-- | @profile "triage"@ — the model that the routing profile @triage@ serves,
+-- named after that profile. It is the party a question takes when the profile
+-- alone says who answers, as a decision does: a question reaches a decisions
+-- engine only through the model that serves it.
+--
+-- > profile p = model p `servedBy` p
+profile :: Text -> Party 'IsModel
+profile p = model p `servedBy` p
 
 -- | @model "r" \`servedBy\` "deep" \`fallingBackTo\` "broad"@ — the models
 -- that may answer in the pinned one's place, appended in the order the runner

@@ -227,6 +227,7 @@
 @hsindex Agentic.Workflow.panel
 @hsindex Agentic.Workflow.panelText
 @hsindex Agentic.Workflow.person
+@hsindex Agentic.Workflow.profile
 @hsindex Agentic.Workflow.resultName
 @hsindex Agentic.Workflow.revising
 @hsindex Agentic.Workflow.revisingOn

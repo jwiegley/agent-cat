@@ -89,6 +89,7 @@ AUTHOR_WORKFLOW = {
     "schemaProperty",
     "schemaString",
     "servedBy",
+    "profile",
     "stop",
     "structured",
     "takes",

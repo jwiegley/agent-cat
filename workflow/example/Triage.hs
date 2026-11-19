@@ -46,10 +46,6 @@ urgency =
 refund :: Question Bool
 refund = yesNo "The customer explicitly asks for money back."
 
--- | The model that answers the three decisions.
-triager :: Party 'IsModel
-triager = model "triage" `servedBy` "triage"
-
 -- | The model that answers a ticket at one desk.
 desk :: Text -> Party 'IsModel
 desk name = model name `servedBy` "balanced"
@@ -57,9 +53,9 @@ desk name = model name `servedBy` "balanced"
 triageProgram :: Parameterized
 triageProgram =
   taking (stdinInputAs "ticket" :> noInputs) \ticket -> workflow W.do
-    routed <- decide triager team [wf|{ticket}|]
-    asked <- decide triager refund [wf|{ticket}|]
-    pressing <- decide triager urgency [wf|{ticket}|]
+    routed <- decide (profile "triage") team [wf|{ticket}|]
+    asked <- decide (profile "triage") refund [wf|{ticket}|]
+    pressing <- decide (profile "triage") urgency [wf|{ticket}|]
     readable <- isDistribution routed
     if readable
       then W.do
